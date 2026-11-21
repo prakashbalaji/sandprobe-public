@@ -1,0 +1,10 @@
+internal/probes/bin/sandprobe-probe-*
+internal/probes/bin/sandprobe-canary-*
+/bin/
+cmd/sandprobe/pocbin/
+/deploy/cloudflare/node_modules/
+/deploy/cloudflare/.wrangler/
+/deploy/cloudflare/__pycache__/
+/deploy/__pycache__/
+/demo-reports/
+__pycache__/

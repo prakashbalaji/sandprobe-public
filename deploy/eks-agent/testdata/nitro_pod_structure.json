@@ -1,0 +1,89 @@
+{
+  "container_security_context": {
+    "allowPrivilegeEscalation": false,
+    "capabilities": {
+      "drop": [
+        "ALL"
+      ]
+    },
+    "privileged": false,
+    "readOnlyRootFilesystem": true
+  },
+  "mounts": [
+    {
+      "mountPath": "/workspace",
+      "name": "workspace"
+    },
+    {
+      "mountPath": "/tmp",
+      "name": "scratch"
+    },
+    {
+      "mountPath": "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",
+      "name": "eks-pod-identity-token",
+      "readOnly": true
+    }
+  ],
+  "node_selector": {
+    "eks.amazonaws.com/nitro-sandbox": "true",
+    "karpenter.sh/nodepool": "sandprobe-agent-aaaaaaaaaaaaaaaa"
+  },
+  "pod_security_context": {
+    "fsGroup": 10001,
+    "runAsGroup": 10001,
+    "runAsNonRoot": true,
+    "runAsUser": 10001,
+    "seccompProfile": {
+      "type": "RuntimeDefault"
+    }
+  },
+  "tolerations": [
+    {
+      "effect": "NoSchedule",
+      "key": "sandprobe.run",
+      "operator": "Equal",
+      "value": "aaaaaaaaaaaaaaaa"
+    },
+    {
+      "effect": "NoExecute",
+      "key": "node.kubernetes.io/not-ready",
+      "operator": "Exists",
+      "tolerationSeconds": 300
+    },
+    {
+      "effect": "NoExecute",
+      "key": "node.kubernetes.io/unreachable",
+      "operator": "Exists",
+      "tolerationSeconds": 300
+    }
+  ],
+  "volumes": [
+    {
+      "name": "eks-pod-identity-token",
+      "projected": {
+        "defaultMode": 420,
+        "sources": [
+          {
+            "serviceAccountToken": {
+              "audience": "pods.eks.amazonaws.com",
+              "expirationSeconds": 86360,
+              "path": "eks-pod-identity-token"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "emptyDir": {
+        "sizeLimit": "64Mi"
+      },
+      "name": "workspace"
+    },
+    {
+      "emptyDir": {
+        "sizeLimit": "64Mi"
+      },
+      "name": "scratch"
+    }
+  ]
+}

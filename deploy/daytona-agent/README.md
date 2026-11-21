@@ -1,0 +1,102 @@
+# Managed Daytona coding workload
+
+EVD-5 retains a pre-model `configuration-evidence.json` artifact using the same
+wire format as Nitro. Snapshot metadata and private API visibility do not verify
+runtime image content or process isolation; unavailable readbacks remain unknown.
+See [configuration evidence](../../docs/CONFIGURATION-EVIDENCE.md).
+
+RUN-10 runs the same CSV coding task and nine functional cases as Nitro, with up to
+two requests to the existing regional Bedrock Ministral3B model. Model inference
+runs on the trusted host; generated code executes only inside the original owned
+Daytona sandbox. No operator, model or Daytona management credentials enter the guest.
+The host model client uses the exact hash-locked Nitro boto3/botocore environment;
+its version, request shape and experiment-account identity are checked before provisioning.
+This deployment pattern differs from Nitro's in-guest model inference.
+
+Trusted management first records its actual guest UID and utility availability.
+When needed it uses the image's configured noninteractive administrator, separately
+from the benchmark agent, and verifies UID0 before setup. It prepares root-owned read-only synthetic fixtures and
+launches both workload and probe through the same UID/GID10001 wrapper, with all
+capability sets dropped, no supplementary groups, no-new-privileges and a clean
+environment. It does not attempt privilege acquisition from the workload. The
+snapshot's seccomp and filesystem settings are observed as supplied. Networking
+permits the resolved IPv4 addresses of the fixed regional model endpoint; the
+workload checks its TLS certificate separately. The network configuration is
+unchanged for collection.
+
+The primary outputs are `workload-report.json/html` and `evaluation.json`, using
+our workload-aware grading. Legacy generic reports and raw observations remain
+separate so another scoring approach can be compared later without silently
+rewriting the measurement.
+
+EVD-1 also exports `evidence-coverage.json` and includes an evidence section in
+the primary HTML. It uses the scorecard's six published category names (SCR-1) while
+retaining workload-context results; it is not the scorecard's numeric score. Related unknowns
+are grouped by missing measurement, with evidence source and next action. Missing
+collector output is distinguished from missing configuration evidence, without
+claiming a provider cannot support the feature. No required check is waived.
+The existing image/process/receiver gaps below remain unknown until measured.
+
+EVD-2 retains fixed TCP exchange-stage diagnostics when the owned-canary exchange
+runs. A connected socket may still fail at TLS handshake, marker send or reply
+receive. These labels contain no raw errors or response bodies and never replace
+the kernel-refusal or host-receipt proof. Older records show exchange diagnostics
+as unavailable; they are not reinterpreted as new observations. The host summary
+tool exposes the same view to Nitro via `--workload-summary --include-coverage`.
+
+Daytona's native snapshot metadata currently exposes UUIDs and tagged registry
+references, not an OCI image-content verification result. WGR-8 preserves that
+as `image-content-binding: unknown`. API `public=false` is not private-process
+namespace verification, so the corresponding host guard remains unverified.
+MEAS-1–4 adds the shared receiver calibration used by provider adapters. The host
+freezes the receiver identity, endpoint, pin and three nonces before the first
+model call. Only the middle nonce reaches the guest probe. Host-only controls
+run before the workload and after confirmed original-sandbox deletion; final
+receipts are collected after a grace interval. `receiver-binding.json` and
+`receiver-calibration.json` preserve that evidence. This receiver's public or
+private address scope is explicit: a public receiver does not measure private
+network isolation. A calibrated missing receipt is not proof of refusal.
+
+Image and private-process evidence gaps still prevent A/B, even if all nine functional
+cases pass. A C with missing evidence is not a provider vulnerability or proof
+that its isolation failed. Required positive exposures remain D/F under WGR-3.
+
+## Run and recovery
+
+Use a clean reviewed source checkout, Go1.25.14, Python3, the hash-locked Daytona
+SDK environment, a separate Python3.10+ environment installed from
+`deploy/eks-agent/requirements.lock`, AWS CLI, Bash, make, jq, OpenSSL and the existing owned-zone `cf`
+helper. The DNS reference contains only an existing secret identifier and zone
+ID; its token is fetched in memory and never included in guest environments or
+records. AWS is restricted to the account named in `SANDPROBE_AWS_ACCOUNT`,
+us-west-2 and the profile named in `SANDPROBE_AWS_PROFILE` (no default); the DNS token is read through
+`SANDPROBE_AWS_BOOTSTRAP_PROFILE`. No new model agreement is enabled.
+
+```sh
+python3 deploy/daytona-agent/run.py \
+  --key-file /path/to/owner-only-daytona.key \
+  --sdk-python /path/to/pinned-sdk/bin/python \
+  --model-python /path/to/pinned-nitro-bedrock-sdk/bin/python \
+  --go /path/to/go1.25.14/bin/go \
+  --cf-helper /path/to/owned-zone-cf-helper \
+  --dns-reference /path/to/private-dns-reference.json
+```
+
+The script creates one private journal/output directory under
+`~/.config/sandprobe/daytona-workload-<run-id>`, provisions a dedicated canary and
+makes exactly one sandbox create attempt. It does not reuse an existing operator canary
+or retry an ambiguous create. It freezes the native configuration/fixture
+contract before the first model call, preserves failed workload records and
+confirms original-ID sandbox cleanup before releasing receiver IP/DNS resources.
+Unconfirmed sandbox cleanup retains the receiver and recovery journal.
+
+For interrupted cleanup, pass the printed run ID with `--cleanup-run <run-id>`
+and the same access/tool arguments. Recovery uses recorded original IDs only;
+it makes no sandbox create or model request. Never delete by a guessed name.
+The script exits5 on incomplete execution, assessment or cleanup, and6 on a
+configuration exposure graded D/F. Exit0 requires passing workload/benchmark
+requirements and confirmed cleanup. Inspect the primary assessment for grade
+and unknowns; exit0 is not a deployment-security gate.
+
+Run records remain private until credential-scanned and reviewed for internal
+publication. Neither exported records nor host declarations are attestations.

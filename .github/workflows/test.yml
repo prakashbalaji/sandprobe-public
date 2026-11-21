@@ -1,0 +1,83 @@
+name: Offline validation
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  report-compatibility:
+    name: Report contract compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.25.14'
+      - name: Check formatter and collector compatibility without cloud access
+        # It needs the recorded runs in runs/: where that directory doesn't exist, the test skips and the log says why.
+        run: go test ./cmd/sandprobe-agent-grade -run '^TestReportCompatibilityPreservesCollectorAndWorkloadGrade$' -count=1 -v
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.25.14'
+      - run: make package
+      - name: Verify local artifact checksums
+        run: cd bin/package && sha256sum -c SHA256SUMS
+      - name: Quick-mode smoke in network-disabled root and nobody containers
+        run: sh test/quick.sh
+      - name: Managed Daytona offline lifecycle and controller tests
+        run: python3 -m unittest discover -s deploy/daytona-agent -p 'test_*.py'
+      - name: Pinned host model request shape without cloud access
+        run: |
+          python3 -m venv "$RUNNER_TEMP/bedrock-sdk"
+          "$RUNNER_TEMP/bedrock-sdk/bin/pip" install --disable-pip-version-check --require-hashes --only-binary=:all: -r deploy/eks-agent/requirements.lock
+          "$RUNNER_TEMP/bedrock-sdk/bin/python" -I deploy/daytona-agent/model.py check
+      - name: Pinned Daytona SDK wire contracts
+        run: |
+          python3 -m venv "$RUNNER_TEMP/daytona-sdk"
+          "$RUNNER_TEMP/daytona-sdk/bin/pip" install --disable-pip-version-check --require-hashes --only-binary=:all: -r internal/host/daytona-requirements.lock
+          "$RUNNER_TEMP/daytona-sdk/bin/python" -I internal/host/daytona_runtime_test.py
+      - name: Managed canary failure and cleanup contracts
+        run: bash deploy/canary_test.sh
+      - name: Vet all packages
+        run: go vet ./...
+      - name: Host unit tests
+        # Probe tests require the isolated root/nobody environment below.
+        run: go test $(go list ./... | sed '\#^sandprobe/internal/probe$#d')
+      - name: Probe contract tests as root and nobody, without network
+        run: sh test/probe.sh
+      - run: go test -race ./internal/strictjson ./internal/obs
+      - run: go test ./internal/strictjson -run '^$' -fuzz FuzzDecode -fuzztime 10s
+      - name: Native Docker volume ownership and reset regressions
+        env:
+          SANDPROBE_DOCKER_VOLUME_TESTS: '1'
+        run: go test ./internal/host -run '^TestDockerVolumeNative$' -count=1 -timeout 2m -v
+  calibration:
+    name: Synthetic calibration controls
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.25.14'
+      - name: Verify calibration cannot silently skip controls
+        run: python3 -m unittest discover -s test -p calibration_summary_test.py
+      - name: Execute real Linux probe and local-canary controls
+        run: sh test/calibration.sh
+      - name: Execute pinned reference task locally without network
+        env:
+          SANDPROBE_REFERENCE_WORKLOAD: '1'
+        run: go test ./internal/host -run '^(TestReferenceWorkloadDocker|TestProtectedHomeWorkloadDocker)$' -count=1 -v -timeout 6m

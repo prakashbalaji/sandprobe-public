@@ -1,0 +1,153 @@
+"""PRV-12 pinned SDK bridge. One request; fixed origins; never raw SDK errors."""
+import base64,contextlib,importlib.metadata,io,json,logging,re,sys
+from urllib.parse import urlsplit
+API='https://app.daytona.io/api'
+PROXY='https://proxy.app.daytona.io/toolbox'
+UUID=re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$')
+def safe_url(url,sandbox_id=None):
+    parsed=urlsplit(str(url))
+    if parsed.scheme!='https' or parsed.username or parsed.password or parsed.port not in (None,443) or parsed.fragment:return False
+    if parsed.hostname=='app.daytona.io' and (parsed.path=='/api' or parsed.path.startswith('/api/')):return True
+    return bool(sandbox_id and parsed.hostname=='proxy.app.daytona.io' and parsed.path.startswith('/toolbox/'+sandbox_id+'/'))
+def install_transport_guards(sandbox_id=None):
+    import urllib3,httpx
+    original=urllib3.PoolManager.request
+    def request(pool,method,url,*args,**kwargs):
+        if not safe_url(url,sandbox_id):raise ValueError('unapproved SDK origin')
+        kwargs['redirect']=False;kwargs['retries']=False;kwargs['preload_content']=False
+        response=original(pool,method,url,*args,**kwargs)
+        read=response.read;total=0
+        def bounded_read(amt=None,*a,**kw):
+            nonlocal total
+            remaining=8*1024*1024-total
+            data=read(min(remaining+1,amt) if amt is not None else remaining+1,*a,**kw);total+=len(data)
+            if total>8*1024*1024:response.close();raise ValueError('response limit')
+            return data
+        response.read=bounded_read
+        return response
+    urllib3.PoolManager.request=request
+    original_httpx=httpx.Client.send
+    def send(client,request,*args,**kwargs):
+        if not safe_url(request.url,sandbox_id):raise ValueError('unapproved SDK origin')
+        kwargs['follow_redirects']=False;kwargs['stream']=True
+        response=original_httpx(client,request,*args,**kwargs)
+        chunks=[];total=0
+        try:
+            for chunk in response.iter_bytes():
+                total+=len(chunk)
+                if total>8*1024*1024:raise ValueError('response limit')
+                chunks.append(chunk)
+            headers={k:v for k,v in response.headers.items() if k.lower() not in ('content-encoding','content-length')}
+            return httpx.Response(response.status_code,headers=headers,content=b''.join(chunks),request=response.request)
+        finally:response.close()
+    httpx.Client.send=send
+
+def timestamp(value):
+    from datetime import datetime
+    text=value if isinstance(value,str) else value.isoformat()
+    parsed=datetime.fromisoformat(text.replace("Z","+00:00"))
+    if parsed.tzinfo is None:raise ValueError("creation timezone missing")
+    return text
+def metadata(s):
+    return {'id':s.id,'name':s.name,'organization':s.organization_id,'born':timestamp(s.created_at),'state':str(s.state.value),'desired_state':str(s.desired_state.value) if s.desired_state is not None else '','labels':s.labels or {},'user':s.user,'public':s.public,'auto_delete':s.auto_delete_interval,'auto_stop':s.auto_stop_interval,'auto_pause':s.auto_pause_interval,'proxy':s.toolbox_proxy_url,'volumes':len(s.volumes or []),'snapshot':getattr(s,'snapshot',None),'network_allow_list':getattr(s,'network_allow_list',None),'network_block_all':getattr(s,'network_block_all',None),'domain_allow_list':getattr(s,'domain_allow_list',None)}
+def bound(client,req):
+    s=client._sandbox_api.get_sandbox(req['id'],_request_timeout=25)
+    m=metadata(s)
+    if m['id']!=req['id'] or m['labels'].get('sandprobe_run')!=req['nonce'] or m['born']!=req['born'] or m['organization']!=req['organization'] or m['public'] or m['auto_delete']!=0 or m['auto_stop']!=15 or m['auto_pause']!=0 or m['volumes']!=0:raise ValueError('identity/policy mismatch')
+    return s,m
+
+def create_identity(response):
+    try:
+        if response.status not in (200,201):raise ValueError('create refused')
+        raw=response.read(8*1024*1024+1)
+        if len(raw)>8*1024*1024:raise ValueError('create response limit')
+        value=json.loads(raw)
+        if not isinstance(value,dict) or not isinstance(value.get('id'),str) or not UUID.fullmatch(value['id']):raise ValueError('create ID unavailable')
+        return {'id':value['id']}
+    finally:response.close()
+
+def dispatch(req):
+    if importlib.metadata.version('daytona')!='0.198.0':raise ValueError('unsupported SDK')
+    if req['op']=='check':return {'version':'0.198.0'}
+    sandbox_id=req.get('id')
+    if sandbox_id and not UUID.fullmatch(sandbox_id):raise ValueError('invalid ID')
+    install_transport_guards(sandbox_id)
+    from daytona import Daytona,DaytonaConfig
+    from daytona_api_client.models.create_sandbox import CreateSandbox
+    client=Daytona(DaytonaConfig(api_key=req['key'],api_url=API,target='us'))
+    # Disable SDK retries, with origin/redirect guards also enforced at transport.
+    client._api_client.configuration.retries=0
+    if req['op']=='available':
+        client._sandbox_api.list_sandboxes(limit=1,_request_timeout=25)
+        return {'available':True}
+    if req['op']=='snapshot':
+        from daytona_api_client.api.snapshots_api import SnapshotsApi
+        snapshot=SnapshotsApi(client._api_client).get_snapshot(req['snapshot_id'],_request_timeout=25)
+        if snapshot.id!=req['snapshot_id'] or str(snapshot.state.value)!='active' or snapshot.gpu not in (None,0):raise ValueError('snapshot identity/state/CPU mismatch')
+        return {'id':snapshot.id,'name':snapshot.name,'image_name':snapshot.image_name,'ref':snapshot.ref,'cpu':snapshot.cpu,'memory':snapshot.mem}
+    if req['op']=='create':
+        extra={}
+        if req.get('workload'):
+            import ipaddress
+            if not UUID.fullmatch(req['snapshot_id']):raise ValueError('invalid snapshot')
+            nets=req['network_allow_list'].split(',')
+            if not 1<=len(nets)<=16 or any(not ipaddress.ip_network(n).is_global or ipaddress.ip_network(n).prefixlen!=32 for n in nets):raise ValueError('invalid workload network')
+            extra={'snapshot':req['snapshot_id'],'user':'root','network_allow_list':req['network_allow_list']}
+        response=client._sandbox_api.create_sandbox_without_preload_content(CreateSandbox(name=req['name'],target='us',env={},labels={'sandprobe_run':req['nonce']},public=False,auto_delete_interval=0,auto_stop_interval=15,auto_pause_interval=0,volumes=[],secrets=[],**extra),_request_timeout=60)
+        # No generated optional model parsing before the host journals ID.
+        return create_identity(response)
+    if req['op']=='lookup':
+        try:s=client._sandbox_api.get_sandbox(sandbox_id,_request_timeout=25)
+        except Exception as e:
+            if getattr(e,'status',None)==404:return {'absent':True}
+            raise
+        value=metadata(s)
+        if req.get('workload'):
+            from daytona_api_client.api.snapshots_api import SnapshotsApi
+            snapshot=SnapshotsApi(client._api_client).get_snapshot(s.snapshot,_request_timeout=25)
+            value['snapshot_id']=snapshot.id
+            value['snapshot_ref']=snapshot.ref
+        return value
+    if req['op']=='delete':
+        s=client._sandbox_api.get_sandbox(sandbox_id,_request_timeout=25)
+        if s.id!=sandbox_id or (s.labels or {}).get('sandprobe_run')!=req['nonce'] or (req.get('born') and timestamp(s.created_at)!=req['born']):raise ValueError('cleanup ownership mismatch')
+        client._sandbox_api.delete_sandbox(sandbox_id,_request_timeout=60)
+        return {'deleted_request':True,'id':sandbox_id}
+    _,m=bound(client,req)
+    if m['state']!='started' or m['proxy']!=PROXY:raise ValueError('runtime not ready/approved')
+    sandbox=client.get(sandbox_id,request_timeout=25)
+    if sandbox.id!=sandbox_id or sandbox.toolbox_proxy_url!=PROXY:raise ValueError('runtime identity changed')
+    def command(script):
+        result=sandbox.process.exec(script,env={'SANDPROBE_TWIN':'1'},timeout=95)
+        output=result.artifacts.stdout if result.artifacts else result.result
+        if result.exit_code!=0 or not isinstance(output,str) or len(output.encode())>1024*1024:raise ValueError('execution failed/limit')
+        return output
+    if req.get('boot'):
+        if command('cat /proc/sys/kernel/random/boot_id').strip()!=req['boot']:raise ValueError('boot changed')
+    if req['op']=='exec':return {'stdout':command(req['command']),'id':sandbox_id,'exit_code':0}
+    if req['op']=='upload':
+        names=r'(?:probe|input-i[a-f0-9]{24})'
+        if req.get('workload'):names=r'(?:probe|input-i[a-f0-9]{24}|coding\.py|project_exec\.py|worker\.py|solution-s[a-f0-9]{24}\.py)'
+        if not re.fullmatch(r'/tmp/\.sandprobe-[A-Za-z0-9]{12}/'+names,req['path']):raise ValueError('private path invalid')
+        data=base64.b64decode(req['data'],validate=True)
+        if len(data)>16*1024*1024:raise ValueError('upload limit')
+        sandbox.fs.upload_file(data,req['path'],timeout=95)
+        return {'uploaded':True,'id':sandbox_id}
+    raise ValueError('unsupported operation')
+def main():
+    logging.disable(logging.CRITICAL)
+    try:
+        raw=sys.stdin.buffer.read(24*1024*1024+1)
+        if len(raw)>24*1024*1024:raise ValueError('request limit')
+        req=json.loads(raw)
+        # Providers can log request headers/bodies in exceptions; silence both channels.
+        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):result=dispatch(req)
+        sys.stdout.write(json.dumps(result))
+    except Exception as e:
+        code=getattr(e,'status',None)
+        suffix=' HTTP '+str(code) if isinstance(code,int) and 100<=code<=599 else ''
+        labels={'runtime not ready/approved':'runtime_proxy_guard','runtime identity changed':'runtime_identity_guard','identity/policy mismatch':'identity_policy_guard','execution failed/limit':'command_failed_or_output_limit','boot changed':'boot_guard','private path invalid':'upload_path_guard'}
+        label=labels.get(str(e),'unclassified_sdk_failure') if isinstance(e,ValueError) else 'unclassified_sdk_failure'
+        sys.stdout.write(json.dumps({'error':'sdk_failure','failure_code':label,'http_status':code if isinstance(code,int) and 100<=code<=599 else 0}));return 1
+    return 0
+if __name__=='__main__':sys.exit(main())

@@ -1,0 +1,101 @@
+//go:build linux
+
+package main
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"sandprobe/internal/obs"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestHostInputFraming(t *testing.T) {
+	for _, s := range []string{`{"run_id":"a","Run_ID":"b"}`, `{} {}`, `{"unknown":1}`, `{}` + strings.Repeat(" ", obs.MaxDoc)} {
+		var in obs.Input
+		if readFrom(strings.NewReader(s), &in) == nil {
+			t.Fatal("accepted ambiguous/oversized host input")
+		}
+	}
+	var in obs.Input
+	if err := readFrom(strings.NewReader(`{"run_id":"r1"}`), &in); err != nil || in.RunID != "r1" {
+		t.Fatal("canonical input rejected")
+	}
+}
+func TestProbeArguments(t *testing.T) {
+	for _, args := range [][]string{{"-survey", "extra"}, {"unknown"}, {"", "extra"}} {
+		if _, err := parseMode(args); err == nil {
+			t.Fatal("extra arguments accepted")
+		}
+	}
+	for _, args := range [][]string{nil, {"-survey"}, {"-mark"}, {"-recheck"}, {"-receiver"}, {"-quick"}, {"-quick", "/tmp"}} {
+		if _, err := parseMode(args); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestQuickWatchdog(t *testing.T) {
+	if os.Getenv("SANDPROBE_WATCHDOG_HELPER") == "1" {
+		quickDeadline(50 * time.Millisecond)
+		b := make([]byte, 1<<20)
+		for {
+			_, _ = os.Stderr.Write(b)
+		}
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestQuickWatchdog$")
+	cmd.Env = []string{"SANDPROBE_WATCHDOG_HELPER=1"}
+	cmd.Stderr = w
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatal("watchdog blocked on stderr")
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 5 {
+		t.Fatal("watchdog failed to terminate with partial status")
+	}
+}
+
+// PRV-15: -expect-uid binds every probe run and nothing else; -whoami takes at most one plain user name.
+func TestExpectAndWhoAmIArguments(t *testing.T) {
+	for _, args := range [][]string{{"-expect-uid"}, {"-expect-uid", "x"}, {"-expect-uid", "-1"}, {"-expect-uid", "99999999999"},
+		{"-expect-uid", "1000", "-whoami"}, {"-expect-uid", "1000", "-quick"}, {"-expect-uid", "1", "-expect-uid", "2"}} {
+		if _, _, _, err := parseExpect(args); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want int
+		rest []string
+	}{{[]string{"-expect-uid", "1000", "-survey"}, 1000, []string{"-survey"}}, {[]string{"-expect-uid", "0"}, 0, []string{}}} {
+		n, rest, bound, err := parseExpect(tc.args)
+		if err != nil || !bound || n != tc.want || len(rest) != len(tc.rest) {
+			t.Errorf("%q: %d %q %v %v", tc.args, n, rest, bound, err)
+		}
+	}
+	if _, rest, bound, _ := parseExpect([]string{"-survey"}); bound || len(rest) != 1 {
+		t.Error("an unbound run was bound")
+	}
+	for _, args := range [][]string{{"-whoami"}, {"-whoami", "agent"}, {"-whoami", "1000"}} {
+		if m, err := parseMode(args); err != nil || m != "-whoami" {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{{"-whoami", "Agent;rm"}, {"-whoami", "a", "b"}, {"-whoami", ""}} {
+		if _, err := parseMode(args); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+	}
+}

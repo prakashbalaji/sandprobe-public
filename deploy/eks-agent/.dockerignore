@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!requirements.lock
+!task.py
+!coding.py
+!project_exec.py
+!checks.py
+!receiver.py
+!execute.py

@@ -1,0 +1,6 @@
+{
+  "name": "studio-booking",
+  "private": true,
+  "scripts": { "dev": "vite --port 5173" },
+  "dependencies": { "@supabase/supabase-js": "2.45.0", "openai": "4.56.0", "stripe": "16.8.0", "resend": "4.0.0" }
+}

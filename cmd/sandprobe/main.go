@@ -1,0 +1,241 @@
+// sandprobe grades how well an AI agent's sandbox contains it. It creates a throwaway box on a provider, runs the
+// probe in it as the agent, asks our canary what got out, resets the box, grades the result A to F, deletes the box,
+// and writes the report as JSON and as a self-contained web page.
+//
+//	sandprobe providers                  which providers are ready
+//	sandprobe plan <provider>            what a run would create, contact, mark and delete
+//	sandprobe run <provider> [-y]        the plan, then the probe, reset and delete
+//	sandprobe explain <check>            what a check does, what it means, and its fix
+//
+// Every command takes -o json (AGT-2). Exit codes are OUT-4's.
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"sandprobe/recipes"
+)
+
+// Version is Sandprobe's own version.
+const Version = "0.2.0"
+
+// OUT-4's exit codes.
+const (
+	exitGraded   = 0
+	exitUsage    = 2
+	exitApproval = 3
+	exitLogin    = 4
+	exitPartial  = 5 // incomplete or invalid
+	exitBelowMin = 6
+	exitCleanup  = 7 // a box or volume Sandprobe created isn't confirmed deleted
+)
+
+// cliError is AGT-5: a fixed code, what happened, and what to do.
+type cliError struct {
+	Code    string `json:"error"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+	exit    int
+}
+
+func (e *cliError) Error() string { return e.Message }
+
+func fail(code, msg, fix string, exit int) error {
+	return &cliError{Code: code, Message: msg, Fix: fix, exit: exit}
+}
+
+// opts are the flags every command shares.
+type opts struct {
+	out    string // text or json
+	yes    bool
+	stdout io.Writer
+}
+
+func (o opts) json() bool { return o.out == "json" }
+
+// tty says whether a person is at the terminal: no animation, prompt or wait otherwise (AGT-1).
+func (o opts) tty() bool { return !o.json() && isTerminal(os.Stdout) && isTerminal(os.Stdin) }
+
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+func (o opts) emit(v any) {
+	enc := json.NewEncoder(o.stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(v)
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] == "-h" || args[0] == "help" || args[0] == "--help" {
+		fmt.Fprintln(stdout, usage)
+		return exitGraded
+	}
+	cmd, rest := args[0], args[1:]
+	var passthrough []string // PRV-14: docker run options, after "--", passed through unchanged
+	for i, a := range rest {
+		if a == "--" {
+			rest, passthrough = rest[:i], rest[i+1:]
+			break
+		}
+	}
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	o := opts{stdout: stdout}
+	fs.StringVar(&o.out, "o", "text", "output: text or json")
+	fs.BoolVar(&o.yes, "y", false, "approve the plan: create, reset and delete without asking (AGT-3)")
+	var r runFlags
+	r.register(fs)
+	positional, err := parse(fs, rest)
+	if err != nil {
+		return reportErr(o, stderr, fail("usage", err.Error(), "sandprobe help", exitUsage))
+	}
+	fs.Visit(func(f *flag.Flag) { r.outSet = r.outSet || f.Name == "out" })
+	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
+	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
+	if passthrough != nil && !docker && !execRun {
+		return reportErr(o, stderr, fail("usage", "what follows -- goes only to run docker (its docker run options) or run exec (your command)", "sandprobe run exec -y -- docker exec -i mybox sh", exitUsage))
+	}
+	r.dockerOpts = passthrough
+	if o.out != "text" && o.out != "json" {
+		return reportErr(o, stderr, fail("usage", "-o takes text or json", "sandprobe "+cmd+" -o json", exitUsage))
+	}
+	if r.noCanary && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
+		return reportErr(o, stderr, fail("usage", "-no-canary applies only to run exec, a recipe such as run kubernetes, and their plans", "sandprobe run exec -no-canary -y -- <command>", exitUsage))
+	}
+	if r.tlsInsecure && cmd != "canary" {
+		return reportErr(o, stderr, fail("usage", "-tls-insecure applies only to canary check", "sandprobe canary check -tls-insecure -canary-url <url> -canary-pin <pin>", exitUsage))
+	}
+	if r.setup != "" && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "sprites") {
+		return reportErr(o, stderr, fail("usage", "-setup applies only to a Sprites plan or run", "sandprobe run sprites -setup <file> -y", exitUsage))
+	}
+	if r.keepSandbox && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "baseten") {
+		return reportErr(o, stderr, fail("usage", "-keep-sandbox applies only to Baseten plan/run", "sandprobe plan baseten -keep-sandbox", exitUsage))
+	}
+	if r.basetenState != "" && !(cmd == "cleanup" && len(positional) == 1 && positional[0] == "baseten") {
+		return reportErr(o, stderr, fail("usage", "-baseten-state applies only to Baseten cleanup", "sandprobe cleanup baseten -baseten-state <journal> -y", exitUsage))
+	}
+	if r.exedevState != "" && !(cmd == "cleanup" && len(positional) == 1 && positional[0] == "exe.dev") {
+		return reportErr(o, stderr, fail("usage", "-exedev-state applies only to exe.dev cleanup", "sandprobe cleanup exe.dev -exedev-state <journal> -y", exitUsage))
+	}
+	var code int
+	switch cmd {
+	case "version":
+		if o.json() {
+			o.emit(map[string]string{"version": Version})
+		} else {
+			fmt.Fprintln(stdout, "sandprobe", Version)
+		}
+	case "profile", "compare":
+		code, err = offline(o, positional, cmd == "compare")
+	case "assess":
+		code, err = assessSaved(o, positional)
+	case "scorecard":
+		code, err = scorecard(o, r, positional)
+	case "canary":
+		code, err = canaryCheck(o, r, positional, r.tlsInsecure)
+	case "cleanup":
+		if len(positional) == 1 && positional[0] == "exe.dev" {
+			code, err = cleanupExedev(o, r, stderr)
+		} else {
+			code, err = cleanupBaseten(o, r, positional, stderr)
+		}
+	case "providers":
+		err = providers(o, r)
+	case "explain":
+		err = explain(o, positional)
+	case "plan":
+		err = plan(o, r, positional)
+	case "run":
+		code, err = runCmd(o, r, positional, stderr)
+	case "poc":
+		if pocCmd == nil {
+			err = fail("usage", "this build has no poc command: the Modal proof of concept is built only with -tags poc", "make poc", exitUsage)
+			break
+		}
+		code, err = pocCmd(o, r, positional, stderr)
+	default:
+		err = fail("usage", "no command "+cmd, "sandprobe help", exitUsage)
+	}
+	if err != nil {
+		return reportErr(o, stderr, err)
+	}
+	return code
+}
+
+// parse reads flags wherever they appear among the positional arguments.
+func parse(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			return pos, nil
+		}
+		pos, args = append(pos, args[0]), args[1:]
+	}
+}
+
+// reportErr prints an error the way AGT-5 says, and returns its exit code.
+func reportErr(o opts, stderr io.Writer, err error) int {
+	var ce *cliError
+	if !errors.As(err, &ce) {
+		ce = &cliError{Code: "provider_error", Message: err.Error(), Fix: "see the message; nothing was left behind unless it says so", exit: exitPartial}
+	}
+	if o.json() {
+		o.emit(ce)
+	} else {
+		fmt.Fprintf(stderr, "sandprobe: %s\n  fix: %s\n", ce.Message, ce.Fix)
+	}
+	return ce.exit
+}
+
+const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to F.
+
+  sandprobe providers              which providers are ready, and how to log in to the rest
+  sandprobe plan <provider>        what a run would create, contact, mark and delete
+  sandprobe run <provider> -y      the plan, then the probe, the reset and the delete
+  sandprobe run docker <image> [-as <user>] -y [-- <docker run options>]
+                                   grade a throwaway container from a local image (PRV-14)
+  sandprobe run exec [-as <user>] -canary-url <url> -canary-pin <pin> -y -- <command that starts sh in the box>
+                                   grade a box you already have, through your own command (PRV-15)
+  sandprobe canary check -canary-url <url> -canary-pin <pin>
+                                   ask a public canary for its signed status (HCN-1); reserves nothing
+  sandprobe cleanup baseten -baseten-state <journal> -y  verify/delete a retained sandbox
+  sandprobe cleanup exe.dev -exedev-state <journal> -y   reconcile a recorded VM
+  sandprobe scorecard <report.json>  the six-category score of a saved report; -out <dir> re-renders its page (offline)
+  sandprobe profile <report.json>  five-area coverage of a saved report (offline)
+  sandprobe assess <report.json> canary-egress-deny-v1  retrospective six-route assessment (offline)
+  sandprobe compare <a> <b>        compare saved findings/coverage (offline)
+  sandprobe explain <check>        what a check does, what a finding means, and its fix
+
+Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
+-min <letter> to exit 6 below a grade; -theme modern|mission; -allow-local-proxy.
+Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
+E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
+Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....
+Providers: sprites, aws-nitro (-variant isolated or network-isolated), baseten, e2b, vercel, cloudflare. Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login,
+5 incomplete or invalid, 6 below -min, 7 a box neither deleted nor intentionally retained.`
+
+// pocCmd is the Modal proof of concept, set only in a -tags poc build (SPEC.md, the Modal section; never shipped).
+var pocCmd func(o opts, r runFlags, args []string, stderr io.Writer) (int, error)
+
+// letters orders grades, best first.
+const letters = "ABCDF"
+
+func below(letter, min string) bool {
+	return min != "" && strings.Index(letters, letter) > strings.Index(letters, strings.ToUpper(min))
+}
