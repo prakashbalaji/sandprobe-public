@@ -2046,6 +2046,32 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
   direction: the lifetime counts create and teardown time Modal may not bill, and bursting bills more. The summary
   says so, and points to the workspace's usage page for the real figure. Image builds aren't included.
 
+## Releases, 21 November 2026
+
+- **REL-1 A reproducible build.** `make release` builds the four `sandprobe` binaries a release ships (macOS and
+  Linux, arm64 and amd64) from one commit: cgo off, `-trimpath`, `-buildvcs=false` and `-ldflags "-s -w"`. They embed
+  the Linux probes and canary as `make probes` builds them: cgo off, `-trimpath` and `-buildvcs=false` (deterministic,
+  not stripped), with the probe's `BuildVersion` set to the CLI's `Version`. Each binary is compressed with `gzip -9 -n`. `SHA256SUMS` lists the `.gz` files, which
+  the installer checks, and `SHA256SUMS-binaries` lists the uncompressed binaries, so anyone with the same Go version
+  can rebuild and compare without depending on their gzip.
+- **REL-2 Two builds, one release.** The release workflow runs REL-1 twice, on separate runners from separate clean
+  checkouts of the same commit, and publishes only if every file matches byte for byte and both checksum files
+  match the files they list (the binaries' after decompressing every archive). It does the same on every pull
+  request, publishing nothing. A release publishes the CLI's own `Version` as the tag `v<Version>`, from `main`, and
+  stops if the version asked for, the CLI's `version` output and the probe's `BuildVersion` don't all agree.
+- **REL-3 Provenance.** Each published `.gz`, and both checksum files, carry a GitHub build attestation for the
+  workflow run that built them. Verifying one binds it to this repository's release workflow, on `main`, at the
+  release's commit:
+  `gh attestation verify <file> --repo summationai/sandprobe --signer-workflow
+  summationai/sandprobe/.github/workflows/release.yml --source-ref refs/heads/main --source-digest <release commit>
+  --deny-self-hosted-runners`. The repository alone (`--repo`) is only the minimum identity check, and a
+  `SHA256SUMS` fetched beside a file proves transport integrity, not authenticity, unless the checksum file's own
+  attestation is verified the same way. The release notes give the exact command with the commit filled in. Only
+  the release workflow creates tags: the repository's tag ruleset lets GitHub Actions alone create one, which holds
+  only while no other workflow can write contents. So CI parses every workflow, `.yml` and `.yaml`, and fails unless
+  the release workflow's publish job is the only place that grants `contents: write` or `write-all`; the repository's
+  default workflow permission stays read.
+
 ## Tests
 
 Some tests replay recorded provider runs (the saved AWS, Daytona, Boat and Modal reports). Those records stay with
@@ -2056,6 +2082,7 @@ report-compatibility check uses the same decision, and its log says when it skip
 
 | Extension rule | Tests |
 | --- | --- |
+| REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing; on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression |
 | HCN-1 | `internal/canarycontrol`: the whole public path over HTTPS, every answer verified under the pinned control key and naming the canary's receipt address and domain (`TestPublicAnswersNameTheReceiptAddress`); an answer replayed for another challenge, altered, re-signed or under an unpinned key is refused; the control name never gets the receipt key and a box name never reaches the control server; method, path, unknown field, op mismatch, trailing data and oversize refusals; a long run label never makes an answer over the bound (`TestPublicAnswerBoundedForLongRun`, `TestControlAnswerBounded`); a control key file that's a symlink, not regular, open to others, not this user's, oversize or carrying trailing bytes is refused (`TestLoadKeyFileSafety`); a browser's cross-site POST (simple content type, Origin or Sec-Fetch-Site) is refused (`TestControlRefusesBrowserPosts`); `TestPublicNeedsAChallenge`; host: `TestHTTPSCanaryImpostor` (an impostor behind a trusted interception root and a redirected name is never believed, and Execute stops before the probe), `TestHTTPSCanaryRefusesRedirectAndOversize`, `TestNewHTTPSCanaryChecks`, `TestHTTPSCanaryAddressFromSignedStatus` (the receipt address comes from the signed status, never from where the control connection went, and a changed one is refused), `TestHTTPSCanaryErrorsRedact` |

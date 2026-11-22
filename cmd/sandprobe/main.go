@@ -210,8 +210,10 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
   sandprobe run <provider> -y      the plan, then the probe, the reset and the delete
   sandprobe run docker <image> [-as <user>] -y [-- <docker run options>]
                                    grade a throwaway container from a local image (PRV-14)
-  sandprobe run exec [-as <user>] -canary-url <url> -canary-pin <pin> -y -- <command that starts sh in the box>
+  sandprobe run exec [-as <user>] -y -- <command that starts sh in the box>
                                    grade a box you already have, through your own command (PRV-15)
+  sandprobe run kubernetes [-as <user>] -y
+                                   grade a throwaway pod in your cluster, by recipe; set SANDPROBE_KUBE_CONTEXT (PRV-16)
   sandprobe canary check -canary-url <url> -canary-pin <pin>
                                    ask a public canary for its signed status (HCN-1); reserves nothing
   sandprobe cleanup baseten -baseten-state <journal> -y  verify/delete a retained sandbox
@@ -224,10 +226,13 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
 -min <letter> to exit 6 below a grade; -theme modern|mission; -allow-local-proxy.
+run exec and recipes use the hosted canary by default; -canary-url <url> -canary-pin <pin> names your own, and
+-no-canary sends no test traffic at all, leaving Exfiltration untested (HCN-5).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....
-Providers: sprites, aws-nitro (-variant isolated or network-isolated), baseten, e2b, vercel, cloudflare. Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login,
+Providers: sprites, aws-nitro (-variant isolated or network-isolated), baseten, e2b, vercel, cloudflare, boat,
+daytona, exe.dev, kubernetes (a recipe). Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login,
 5 incomplete or invalid, 6 below -min, 7 a box neither deleted nor intentionally retained.`
 
 // pocCmd is the Modal proof of concept, set only in a -tags poc build (SPEC.md, the Modal section; never shipped).

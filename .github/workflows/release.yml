@@ -1,0 +1,127 @@
+name: Release
+# REL-1 to REL-3. Every pull request: build the release twice, on separate runners from separate clean checkouts, and
+# compare every file byte for byte. A release (run by hand from main, naming its version): the same, then the version
+# check, a build attestation for each .gz, and the GitHub release with the tag v<version>.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to release, without a leading v; it must equal the CLI's Version"
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Release build (${{ matrix.copy }})
+    strategy:
+      matrix:
+        copy: [first, second]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.25.14'
+          cache: false
+      - name: Only the release workflow may write contents (REL-3)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          writers=$(grep -l -i -E "contents:[[:space:]]*[\"']?write|write-all" "${files[@]}" || true)
+          echo "workflows that could write contents: $writers"
+          [ "$writers" = ".github/workflows/release.yml" ]
+          python3 .github/workflow-writers.py
+      - name: Build the release (REL-1)
+        run: make release
+      - name: The embedded probe carries the CLI's version (REL-2)
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' cmd/sandprobe/main.go)
+          got=$(./internal/probes/bin/sandprobe-probe-linux-amd64 -quick | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          echo "CLI $want, probe $got"
+          [ -n "$want" ] && [ "$got" = "$want" ]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.copy }}
+          path: bin/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: Both builds match byte for byte (REL-2)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: builds
+      - name: Compare every file
+        run: |
+          set -euo pipefail
+          diff -r builds/release-first builds/release-second
+          [ "$(ls builds/release-first | wc -l)" -eq 6 ]
+          cd builds/release-first
+          sha256sum -c SHA256SUMS
+          mkdir "$RUNNER_TEMP/binaries"
+          for f in *.gz; do gunzip -c "$f" > "$RUNNER_TEMP/binaries/${f%.gz}"; done
+          (cd "$RUNNER_TEMP/binaries" && sha256sum -c "$OLDPWD/SHA256SUMS-binaries" && [ "$(ls | wc -l)" -eq 4 ])
+          cat SHA256SUMS SHA256SUMS-binaries
+
+  publish:
+    name: Publish the release (REL-2, REL-3)
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: compare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-first
+          path: release
+      - name: The version asked for is the CLI's own
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$WANT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [ "$(sed -n 's/^const Version = "\(.*\)"$/\1/p' cmd/sandprobe/main.go)" = "$WANT" ]
+          gunzip -c release/sandprobe-linux-amd64.gz > "$RUNNER_TEMP/sandprobe"
+          chmod +x "$RUNNER_TEMP/sandprobe"
+          [ "$("$RUNNER_TEMP/sandprobe" version)" = "sandprobe $WANT" ]
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release/*.gz
+            release/SHA256SUMS
+            release/SHA256SUMS-binaries
+      - name: Publish v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" release/*.gz release/SHA256SUMS release/SHA256SUMS-binaries \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Sandprobe $VERSION" \
+            --notes "$(cat <<NOTES
+          Built twice on separate runners from $GITHUB_SHA and published only because both builds matched byte for byte (REL-2).
+
+          Every file here carries a build attestation. To check that a file came from this repository's release workflow, on main, at this commit (REL-3):
+
+              gh attestation verify <file> --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $GITHUB_SHA --deny-self-hosted-runners
+
+          SHA256SUMS lists the .gz files and SHA256SUMS-binaries the uncompressed binaries; on its own, a checksum file fetched beside a download proves the download arrived intact, not who built it, so verify the checksum file's attestation the same way. To rebuild and compare, use Go 1.25.14 and make release (REL-1).
+          NOTES
+          )"
