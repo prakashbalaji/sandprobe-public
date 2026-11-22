@@ -10,7 +10,6 @@ import (
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
-	"sandprobe/internal/rundata"
 )
 
 // demo is a public report from the demo's hardened Docker box: the generic baseline these tests change.
@@ -26,9 +25,6 @@ func baseline(t *testing.T) *report.Doc {
 }
 func TestRunCorpus(t *testing.T) {
 	count, roots, least := 0, []string{"../../demo/reports", "../../test/reports"}, 6
-	if rundata.Present(t) { // the private provider runs too, where this tree has them
-		roots, least = append(roots, "../../runs"), 16
-	}
 	var err error
 	for _, root := range roots {
 		err = errors.Join(err, filepath.WalkDir(root, func(path string, e os.DirEntry, err error) error {

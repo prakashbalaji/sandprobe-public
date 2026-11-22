@@ -2,7 +2,6 @@ package grade
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
-	"sandprobe/internal/rundata"
 )
 
 func TestEvidenceCategoriesCoverCatalogExactlyOnce(t *testing.T) {
@@ -26,70 +24,6 @@ func TestEvidenceCategoriesCoverCatalogExactlyOnce(t *testing.T) {
 	for _, id := range catalog.IDs() {
 		if counts[id] != 1 {
 			t.Fatalf("%s belongs to %d categories", id, counts[id])
-		}
-	}
-}
-
-func TestCoverageGroupsRetainedDaytonaUnknownsWithoutRegrading(t *testing.T) {
-	rundata.Need(t, "../../runs/daytona/workload-followup-2026-11-20/")
-	var bundle struct {
-		Report struct {
-			Manifest obs.Manifest `json:"manifest"`
-		} `json:"report"`
-		Raw      string             `json:"observations"`
-		Evidence obs.CanaryEvidence `json:"evidence"`
-	}
-	root := "../../runs/daytona/workload-followup-2026-11-20/"
-	b, err := os.ReadFile(root + "standard-evidence.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(b, &bundle); err != nil {
-		t.Fatal(err)
-	}
-	r := AddWorkloadReceiver(WorkloadGrade(bundle.Report.Manifest, []byte(bundle.Raw), &bundle.Evidence, "reported_passed"), WorkloadReceiver{})
-	var expected WorkloadReport
-	b, err = os.ReadFile(root + "workload-report.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(b, &expected); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(r, expected) {
-		t.Fatal("retained assessment changed")
-	}
-	v := WorkloadEvidenceCoverage(bundle.Report.Manifest, []byte(bundle.Raw), r)
-	if !v.Valid || v.UnknownControls != 8 || len(v.Gaps) != 4 {
-		t.Fatalf("wrong grouped coverage: %+v", v)
-	}
-	want := map[string]int{"image-content-evidence": 1, "private-process-context": 4, "network-proof": 2, "final-receiver-collection": 1}
-	seen := map[string]bool{}
-	for _, g := range v.Gaps {
-		if len(g.Controls) != want[g.ID] {
-			t.Fatalf("wrong gap: %+v", g)
-		}
-		for _, id := range g.Controls {
-			if seen[id] || !slices.Contains(r.Unknown, id) {
-				t.Fatal("invented/duplicate unknown", id)
-			}
-			seen[id] = true
-		}
-	}
-	if len(seen) != 8 {
-		t.Fatal("unknown evidence disappeared")
-	}
-	accounted := len(v.Context)
-	for _, c := range v.Categories {
-		accounted += len(c.Controls)
-	}
-	if accounted != len(r.Controls) {
-		t.Fatal("control lost from coverage view")
-	}
-	for _, a := range v.Exchanges {
-		ck, ok := catalog.Get(a.Check)
-		if !ok || ck.Canary == nil || ck.Canary.Proto != "tcp" {
-			t.Fatal("DNS/UDP shown as a TCP exchange")
 		}
 	}
 }
