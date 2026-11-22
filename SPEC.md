@@ -843,12 +843,15 @@ retrospective assessment, not an alternative overall sandbox letter or a declara
   do not prove reset survival. Preserve all findings and unknowns, do not infer process ownership/trust roles from
   path names, and do not retrospectively invent image, namespace or policy context. Old grades, `run -min`, existing
   report formats and gate semantics remain unchanged.
-- **CAL-5 Calibration.** Add deterministic saved-AWS replay tests (open versus isolated), synthetic four-TCP-refused,
+- **CAL-5 Calibration.** Add deterministic replay tests on saved open-versus-refused reports (`test/reports`: the same
+  local Docker box with every route out, and with every route refused by its own firewall), synthetic four-TCP-refused,
   delivery, unknown, invalid, omitted route, absent, wrong proof/scope, missing identity and unrelated incompleteness
   cases. Forged six-pass reports are rejected. DNS/UDP silence stays inconclusive, guest root never overrides a route refusal, and a delivery never gets
   hidden by other unknowns. Test CLI output/exit behavior and safe escaping. These are offline interpretation tests,
   not new live runs or proof that the probe's underlying controls work on an untested provider. Any later live
   calibration must still obey the provider's terms, bounded spend, owned disposable resources and verified cleanup.
+  Replays of a real provider's saved reports, which check that this interpretation still reads a recorded provider
+  report the same way, run where the operators keep those records, not in this repository.
 
 Tests: CAL-1–5 map to `internal/analysis/assessment_test.go` and `cmd/sandprobe/assessment_test.go`.
 
