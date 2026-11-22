@@ -2066,11 +2066,12 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
   summationai/sandprobe/.github/workflows/release.yml --source-ref refs/heads/main --source-digest <release commit>
   --deny-self-hosted-runners`. The repository alone (`--repo`) is only the minimum identity check, and a
   `SHA256SUMS` fetched beside a file proves transport integrity, not authenticity, unless the checksum file's own
-  attestation is verified the same way. The release notes give the exact command with the commit filled in. Only
-  the release workflow creates tags: the repository's tag ruleset lets GitHub Actions alone create one, which holds
-  only while no other workflow can write contents. So CI parses every workflow, `.yml` and `.yaml`, and fails unless
-  the release workflow's publish job is the only place that grants `contents: write` or `write-all`; the repository's
-  default workflow permission stays read.
+  attestation is verified the same way. The release notes give the exact command with the commit filled in. The
+  release workflow creates the tag `v<Version>`. The repository refuses any other new tag; a version-shaped tag can
+  be made by anyone with write access, so a release is authentic only when its files verify as above, never because
+  its tag exists. CI parses every workflow, `.yml` and `.yaml`, and fails unless the release workflow's publish job
+  is the only place that grants `contents: write` or `write-all`; the repository's default workflow permission stays
+  read.
 
 ## Tests
 
