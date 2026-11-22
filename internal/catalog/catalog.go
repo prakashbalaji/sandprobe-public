@@ -88,6 +88,8 @@ var Checks = []Check{
 	{ID: "SEC-3", Category: "SEC", Title: "Credential files", Kind: TwoSided, Mechanism: "file_read", AbsentOK: true,
 		Targets: []string{"~/.aws/credentials", "~/.config/gcloud/application_default_credentials.json", "~/.config/gcloud/credentials.db",
 			"~/.kube/config", "~/.docker/config.json", "~/.netrc", "~/.git-credentials", "~/.config/gh/hosts.yml", "~/.npmrc", "~/.pypirc",
+			// AI coding tools' documented credential stores on Linux (SEC-3): an agent's own login is in its box.
+			"~/.claude/.credentials.json", "~/.codex/auth.json", "~/.codex/.credentials.json", "~/.gemini/oauth_creds.json", "~/.aider/oauth-keys.env", "~/.cline/data/secrets.json", "~/.config/goose/secrets.yaml",
 			"/etc/shadow", "/var/run/secrets/kubernetes.io/serviceaccount/token"},
 		Discover: []string{"ssh_keys", "run_secrets", "dotenv"},
 		Variants: map[string]Variant{"nonempty": v(High, Proof), "k8s_token": v(High, Proof), "empty": v(Info, Indicator)}},
