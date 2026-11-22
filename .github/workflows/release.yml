@@ -30,9 +30,12 @@ jobs:
       - name: Only the release workflow may write contents (REL-3)
         run: |
           set -euo pipefail
-          writers=$(grep -l -E 'contents: *write' .github/workflows/*.yml || true)
-          echo "workflows granting contents: write: $writers"
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          writers=$(grep -l -i -E "contents:[[:space:]]*[\"']?write|write-all" "${files[@]}" || true)
+          echo "workflows that could write contents: $writers"
           [ "$writers" = ".github/workflows/release.yml" ]
+          python3 .github/workflow-writers.py
       - name: Build the release (REL-1)
         run: make release
       - name: The embedded probe carries the CLI's version (REL-2)
