@@ -67,6 +67,16 @@ var fixtures = []fixture{
 	{name: "net-one-port", image: "net", expect: expectNetOnePort, opts: func(w world) []string {
 		return []string{"--network", w.network, "--dns", w.canaryIP, "--cap-add", "NET_ADMIN", "-e", "ONE_PORT_CANARY=" + w.canaryIP}
 	}},
+	// exported: real runs of local boxes, saved as bundles for the public test reports in test/reports (see its README)
+	{name: "export-egress-open", image: "net", user: "root", expect: exportOpen, opts: func(w world) []string {
+		return []string{"--network", w.network, "--dns", w.canaryIP, "--cap-add", "NET_ADMIN", "--security-opt", "no-new-privileges"} // the refused box's identity, no firewall
+	}},
+	{name: "export-egress-refused", image: "net", user: "root", settle: time.Second, expect: exportRefused, opts: func(w world) []string {
+		return []string{"--network", w.network, "--dns", w.canaryIP, "--cap-add", "NET_ADMIN", "--security-opt", "no-new-privileges", "-e", "REFUSE_CANARY=" + w.canaryIP}
+	}},
+	{name: "export-canary-down", image: "net", user: "root", pause: true, expect: exportCanaryDown, opts: func(w world) []string {
+		return []string{"--network", w.network, "--dns", w.canaryIP}
+	}},
 	{name: "net-local-resolver", image: "clean", expect: expectLocalResolver, opts: func(w world) []string {
 		return []string{"--network", w.network, "--dns", w.stubIP}
 	}},
@@ -938,4 +948,54 @@ func expectSubstituted(t *testing.T, w world, r *Run) {
 		}
 	}
 	t.Logf("recorded, as SBX-10 says: a substituted probe on an open box graded %s, undetected", r.Report.Letter)
+}
+
+// The exported fixtures: each run is checked for the shape the public tests rely on, then, when
+// SANDPROBE_WRITE_FIXTURES names a directory, saved there as a bundle: the manifest, the probe's own observations and
+// the canary's evidence, exactly as this run produced them. internal/report builds test/reports from the bundles.
+func exportBundle(t *testing.T, name string, r *Run) {
+	t.Helper()
+	dir := os.Getenv("SANDPROBE_WRITE_FIXTURES")
+	if dir == "" {
+		return
+	}
+	b, err := json.MarshalIndent(struct {
+		Manifest     obs.Manifest       `json:"manifest"`
+		Observations string             `json:"observations"`
+		Evidence     obs.CanaryEvidence `json:"evidence"`
+	}{r.Manifest, string(r.Doc), r.Evidence}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".bundle.json"), append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Root, with every route out to the canary open: all six canary routes deliver.
+func exportOpen(t *testing.T, w world, r *Run) {
+	canaryWorked(t, r)
+	expectResults(map[string]string{"EGR-1": obs.Finding, "EGR-2": obs.Finding, "EGR-5.22": obs.Finding, "EGR-5.80": obs.Finding,
+		"EGR-5.8080": obs.Finding, "EGR-5.53u": obs.Finding, "AMP-2": obs.Finding, "AMP-3": obs.Pass})(t, w, r)
+	exportBundle(t, "egress-open", r)
+}
+
+// Root, with every TCP port to the canary refused and UDP to it rejected: four TCP refusals proven, and DNS and UDP
+// silent, which proves nothing.
+func exportRefused(t *testing.T, w world, r *Run) {
+	canaryWorked(t, r)
+	expectResults(map[string]string{"EGR-2": obs.Pass, "EGR-5.22": obs.Pass, "EGR-5.80": obs.Pass, "EGR-5.8080": obs.Pass,
+		"AMP-2": obs.Finding, "AMP-3": obs.Pass})(t, w, r)
+	for _, id := range []string{"EGR-1", "EGR-5.53u"} {
+		if o := outcome(r.Report, id); o.Result == obs.Pass || o.Result == obs.Finding {
+			t.Errorf("%s: silence must prove nothing, got %+v", id, o)
+		}
+	}
+	exportBundle(t, "egress-refused", r)
+}
+
+// The canary paused: no canary result counts, and the run is incomplete.
+func exportCanaryDown(t *testing.T, w world, r *Run) {
+	expectCanaryUnknown(t, w, r)
+	exportBundle(t, "canary-down", r)
 }

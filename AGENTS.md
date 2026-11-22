@@ -20,8 +20,8 @@ deploy/canary_test.sh; deploy/eks_test.sh      # tests for the deploy scripts (n
 cd proto/tui && go run .                       # the UX prototype on demo data (its own module)
 ```
 
-Tests that replay recorded provider runs need run data this repository doesn't carry; they skip and say why
-(`internal/rundata`).
+Every test runs on public data: saved reports come from `demo/reports` and `test/reports` (runs of local Docker boxes;
+`test/reports/README.md` rebuilds them).
 
 ## Layout
 

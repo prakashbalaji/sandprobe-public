@@ -14,7 +14,7 @@ func analysisWorkload(box string) *obs.WorkloadContract {
 func TestWorkloadComparisonIncludesAddedRemovedChangedAndInvalidContext(t *testing.T) {
 	for _, kind := range []string{"added", "removed", "image", "policy", "alias", "invalid-left", "invalid-right"} {
 		t.Run(kind, func(t *testing.T) {
-			a, b := loadAWS(t, awsOpen), loadAWS(t, awsOpen)
+			a, b := loadReport(t, openReport), loadReport(t, openReport)
 			a.Manifest.WorkloadContract = analysisWorkload(a.Manifest.BoxID)
 			b.Manifest.WorkloadContract = analysisWorkload(b.Manifest.BoxID)
 			switch kind {
@@ -41,7 +41,7 @@ func TestWorkloadComparisonIncludesAddedRemovedChangedAndInvalidContext(t *testi
 			}
 		})
 	}
-	a := loadAWS(t, awsOpen)
+	a := loadReport(t, openReport)
 	a.Manifest.WorkloadContract = analysisWorkload(a.Manifest.BoxID)
 	p := Summarize(a)
 	a.Manifest.WorkloadContract.TokenInode = 999

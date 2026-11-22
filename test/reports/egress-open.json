@@ -1,0 +1,966 @@
+{
+  "schema": "sandprobe/1",
+  "probe": {
+    "version": "fixture",
+    "sha256": "7985904c5652a19cfa791443c3d67a2e9156ef9264ba95a79a7932b31f80b400",
+    "host_shipped": true,
+    "attested": false
+  },
+  "run": {
+    "id": "r498af19de5e6f86540f7c284",
+    "nonce": "nbb53379372c0f857ae57c866",
+    "started_at": "2026-11-21T00:00:00Z",
+    "duration_ms": 4000,
+    "mode": "exec",
+    "provider": "docker-fixture",
+    "box": {
+      "provider_id": "324ceb3a574ec94bc1cf6a4c5baafdbd0224c83d097df1a8f03af340245c8850",
+      "name": "324ceb3a574ec94bc1cf6a4c5baafdbd0224c83d097df1a8f03af340245c8850",
+      "created_by_sandprobe": true
+    }
+  },
+  "grade": {
+    "letter": "F",
+    "complete": true,
+    "valid": true,
+    "unknown": [],
+    "counts": {
+      "critical": 2,
+      "high": 3,
+      "info": 0,
+      "low": 4,
+      "medium": 6
+    },
+    "notes": [
+      "CHN-2: a proven root-equivalent amplifier; every refusal above held only for an unprivileged agent"
+    ]
+  },
+  "statement": "Graded on 24 checks for this box at Nov 20, 2026 4:00 PM PST, from a host-shipped probe's own observations; not a certification.",
+  "boundary": "No false passes holds against faults, misconfiguration, wrappers and shims in the agent's environment, for the host-shipped probe run as the agent. It does not hold against a box that deceives the probe: one that substitutes or tampers with it can report the expected digest and fabricate every observation, and the host can't tell. The only evidence from outside the box is the canary's receipts, which can prove a way out but never a refusal.",
+  "lead": "A hijacked agent here can act as root, or with root's powers through Linux capabilities, can open a credential or process surface and send data out of the box, and can open other processes' environments, where their secrets are often passed. It also has write permission on the startup files a shell reads, and has write permission on a PATH directory that comes before the system's (indicators, not proof).",
+  "findings": [
+    {
+      "id": "AMP-2",
+      "severity": "critical",
+      "class": "proof",
+      "title": "Root or capabilities",
+      "checks": null,
+      "gets": "can act as root, or with root's powers through Linux capabilities",
+      "fix": "Run the agent as an unprivileged user with an empty capability set."
+    },
+    {
+      "id": "CHN-1",
+      "severity": "critical",
+      "class": "proof",
+      "title": "A readable credential or process surface, with a proven way out",
+      "checks": [
+        "SEC-2",
+        "SEC-5",
+        "SEC-3",
+        "EGR-1",
+        "EGR-2",
+        "EGR-5.22",
+        "EGR-5.80",
+        "EGR-5.8080",
+        "EGR-5.53u"
+      ],
+      "gets": "can open a credential or process surface and send data out of the box",
+      "fix": "Fix either side: cut the way out, or close the readable surface. Both is better."
+    },
+    {
+      "id": "SEC-2",
+      "severity": "high",
+      "class": "proof",
+      "title": "Other processes' environments",
+      "checks": null,
+      "gets": "can open other processes' environments, where their secrets are often passed",
+      "fix": "Run the agent in its own PID namespace, or as a user that owns no other process."
+    },
+    {
+      "id": "SEC-3",
+      "severity": "high",
+      "class": "proof",
+      "title": "Credential files",
+      "checks": null,
+      "gets": "can open credential files on disk",
+      "fix": "Remove credentials from the image and home directory; mount any it needs read-only, for that process alone."
+    },
+    {
+      "id": "SEC-5",
+      "severity": "high",
+      "class": "proof",
+      "title": "Other processes' memory",
+      "checks": null,
+      "gets": "can open other processes' memory",
+      "fix": "Set kernel.yama.ptrace_scope to 2 or more, and run the agent as a user that owns no other process."
+    },
+    {
+      "id": "EGR-1",
+      "severity": "medium",
+      "class": "proof",
+      "title": "A looked-up name reaches our name server",
+      "checks": null,
+      "gets": "can get a looked-up name to an outside name server, enough to leak data through DNS",
+      "fix": "Resolve only an allowlist of names, through a resolver that doesn't forward other lookups."
+    },
+    {
+      "id": "EGR-2",
+      "severity": "medium",
+      "class": "proof",
+      "title": "A nonce sent by HTTPS straight out reaches our canary",
+      "checks": null,
+      "gets": "can send data straight out over HTTPS",
+      "fix": "Deny egress by default, and allow only the hosts the agent needs."
+    },
+    {
+      "id": "EGR-5.22",
+      "severity": "medium",
+      "class": "proof",
+      "title": "TCP 22 out",
+      "checks": null,
+      "gets": "can open TCP connections out on port 22",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.80",
+      "severity": "medium",
+      "class": "proof",
+      "title": "TCP 80 out",
+      "checks": null,
+      "gets": "can open TCP connections out on port 80",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.8080",
+      "severity": "medium",
+      "class": "proof",
+      "title": "TCP 8080 out",
+      "checks": null,
+      "gets": "can open TCP connections out on port 8080",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.53u",
+      "severity": "medium",
+      "class": "proof",
+      "title": "UDP 53 out",
+      "checks": null,
+      "gets": "can send UDP straight out on port 53",
+      "fix": "Deny UDP egress except to the box's own resolver."
+    },
+    {
+      "id": "PER-1",
+      "severity": "low",
+      "class": "indicator",
+      "title": "Startup files",
+      "checks": null,
+      "gets": "has write permission on the startup files a shell reads",
+      "fix": "Make the agent's startup files read-only to it, or restore them on every reset."
+    },
+    {
+      "id": "PER-2",
+      "severity": "low",
+      "class": "indicator",
+      "title": "PATH directories ahead of the system's",
+      "checks": null,
+      "gets": "has write permission on a PATH directory that comes before the system's",
+      "fix": "Keep writable directories off the front of PATH."
+    },
+    {
+      "id": "PER-3",
+      "severity": "low",
+      "class": "indicator",
+      "title": "Boot and schedule",
+      "checks": null,
+      "gets": "has write permission on boot or schedule directories",
+      "fix": "Keep the system's boot and cron directories read-only to the agent."
+    },
+    {
+      "id": "PER-4",
+      "severity": "low",
+      "class": "indicator",
+      "title": "Supply chain and access config",
+      "checks": null,
+      "gets": "has write permission on package, git or SSH configuration",
+      "fix": "Restore these files on every reset, or keep them read-only to the agent."
+    }
+  ],
+  "checks": [
+    {
+      "id": "SEC-1",
+      "category": "SEC",
+      "title": "Secret-shaped names in the agent's environment",
+      "kind": "two_sided",
+      "result": "pass",
+      "proof": {
+        "mechanism": "env_names",
+        "result": "pass"
+      },
+      "gets": "sees secret-shaped names in its own environment (names only; values are never read)",
+      "fix": "Keep credentials out of the agent's environment: inject them at a proxy outside the box."
+    },
+    {
+      "id": "SEC-2",
+      "category": "SEC",
+      "title": "Other processes' environments",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "high",
+      "evidence": "the agent can open /proc/1/environ (nothing was read)",
+      "proof": {
+        "mechanism": "proc_open",
+        "result": "finding"
+      },
+      "gets": "can open other processes' environments, where their secrets are often passed",
+      "fix": "Run the agent in its own PID namespace, or as a user that owns no other process."
+    },
+    {
+      "id": "SEC-3",
+      "category": "SEC",
+      "title": "Credential files",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "high",
+      "evidence": "the agent can read /etc/shadow (opened, never read)",
+      "proof": {
+        "mechanism": "file_read",
+        "result": "finding"
+      },
+      "gets": "can open credential files on disk",
+      "fix": "Remove credentials from the image and home directory; mount any it needs read-only, for that process alone."
+    },
+    {
+      "id": "SEC-4",
+      "category": "SEC",
+      "title": "Cloud metadata credentials",
+      "kind": "find_only",
+      "result": "not_found",
+      "reason": "no metadata service listed a role or identity, and none was offered",
+      "gets": "gets a role or identity listed by a cloud metadata service",
+      "fix": "Block the link-local metadata addresses from the box, or require IMDSv2 with a hop limit of 1."
+    },
+    {
+      "id": "SEC-5",
+      "category": "SEC",
+      "title": "Other processes' memory",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "high",
+      "evidence": "the agent can open /proc/1/mem (nothing was read)",
+      "proof": {
+        "mechanism": "proc_open",
+        "result": "finding"
+      },
+      "gets": "can open other processes' memory",
+      "fix": "Set kernel.yama.ptrace_scope to 2 or more, and run the agent as a user that owns no other process."
+    },
+    {
+      "id": "EGR-1",
+      "category": "EGR",
+      "title": "A looked-up name reaches our name server",
+      "kind": "find_only",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "53",
+        "route": "resolver"
+      },
+      "evidence": "EGR-1's nonce reached our canary on dns/53, from 172.30.98.2:44414; the probe sent it by the resolver route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can get a looked-up name to an outside name server, enough to leak data through DNS",
+      "fix": "Resolve only an allowlist of names, through a resolver that doesn't forward other lookups."
+    },
+    {
+      "id": "EGR-2",
+      "category": "EGR",
+      "title": "A nonce sent by HTTPS straight out reaches our canary",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "443",
+        "route": "direct"
+      },
+      "evidence": "EGR-2's nonce reached our canary on tcp/443, from 172.30.98.2:51322; the probe sent it by the direct route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can send data straight out over HTTPS",
+      "fix": "Deny egress by default, and allow only the hosts the agent needs."
+    },
+    {
+      "id": "EGR-3",
+      "category": "EGR",
+      "title": "HTTPS through the box's proxy",
+      "kind": "find_only",
+      "result": "skipped",
+      "reason": "the agent's environment names no proxy",
+      "gets": "can send data out through the box's proxy",
+      "fix": "Have the proxy allow only the hosts the agent needs."
+    },
+    {
+      "id": "EGR-4",
+      "category": "EGR",
+      "title": "TLS interception",
+      "kind": "find_only",
+      "result": "not_found",
+      "reason": "no interception seen",
+      "gets": "can be read in transit: something rewrites its TLS on the way out",
+      "fix": "Find and remove the interception, or make sure it's yours and its key is protected."
+    },
+    {
+      "id": "EGR-5.22",
+      "category": "EGR",
+      "title": "TCP 22 out",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "22",
+        "route": "direct"
+      },
+      "evidence": "EGR-5.22's nonce reached our canary on tcp/22, from 172.30.98.2:32846; the probe sent it by the direct route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can open TCP connections out on port 22",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.80",
+      "category": "EGR",
+      "title": "TCP 80 out",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "80",
+        "route": "direct"
+      },
+      "evidence": "EGR-5.80's nonce reached our canary on tcp/80, from 172.30.98.2:34388; the probe sent it by the direct route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can open TCP connections out on port 80",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.8080",
+      "category": "EGR",
+      "title": "TCP 8080 out",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "8080",
+        "route": "direct"
+      },
+      "evidence": "EGR-5.8080's nonce reached our canary on tcp/8080, from 172.30.98.2:34496; the probe sent it by the direct route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can open TCP connections out on port 8080",
+      "fix": "Deny egress by default, and allow only the hosts and ports the agent needs."
+    },
+    {
+      "id": "EGR-5.53u",
+      "category": "EGR",
+      "title": "UDP 53 out",
+      "kind": "find_only",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "medium",
+      "scope": {
+        "destination": "172.30.98.10",
+        "port": "53",
+        "route": "direct"
+      },
+      "evidence": "EGR-5.53u's nonce reached our canary on udp/53, from 172.30.98.2:56691; the probe sent it by the direct route, and the receipt shows it got out, not that this route carried it (SBX-11)",
+      "proof": {
+        "mechanism": "canary",
+        "result": "finding"
+      },
+      "gets": "can send UDP straight out on port 53",
+      "fix": "Deny UDP egress except to the box's own resolver."
+    },
+    {
+      "id": "EGR-6",
+      "category": "EGR",
+      "title": "Upload-capable hosts on an allowlist",
+      "kind": "find_only",
+      "result": "skipped",
+      "reason": "contacting EGR-6's public upload hosts wasn't approved",
+      "gets": "completes a TLS handshake with a public host where anyone can upload data",
+      "fix": "Drop upload-capable hosts from the allowlist, or pin the paths the agent may use."
+    },
+    {
+      "id": "PER-1",
+      "category": "PER",
+      "title": "Startup files",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "indicator",
+      "severity": "low",
+      "evidence": "the agent can write or replace ~/.bashrc, ~/.profile, ~/.bash_profile, ~/.zshrc, /etc/profile.d, /etc/bash.bashrc",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "finding"
+      },
+      "gets": "has write permission on the startup files a shell reads",
+      "fix": "Make the agent's startup files read-only to it, or restore them on every reset."
+    },
+    {
+      "id": "PER-2",
+      "category": "PER",
+      "title": "PATH directories ahead of the system's",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "indicator",
+      "severity": "low",
+      "evidence": "the agent can write or replace /usr/local/bin, /usr/local/sbin",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "finding"
+      },
+      "gets": "has write permission on a PATH directory that comes before the system's",
+      "fix": "Keep writable directories off the front of PATH."
+    },
+    {
+      "id": "PER-3",
+      "category": "PER",
+      "title": "Boot and schedule",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "indicator",
+      "severity": "low",
+      "evidence": "the agent can write or replace /etc/systemd/system, ~/.config/systemd/user, /etc/cron.d, /var/spool/cron/crontabs, /etc/rc.local, /etc/init.d",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "finding"
+      },
+      "gets": "has write permission on boot or schedule directories",
+      "fix": "Keep the system's boot and cron directories read-only to the agent."
+    },
+    {
+      "id": "PER-4",
+      "category": "PER",
+      "title": "Supply chain and access config",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "indicator",
+      "severity": "low",
+      "evidence": "the agent can write or replace ~/.npmrc, ~/.config/pip/pip.conf, ~/.pip/pip.conf, ~/.gitconfig, ~/.git-templates/hooks, ~/.ssh/authorized_keys",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "finding"
+      },
+      "gets": "has write permission on package, git or SSH configuration",
+      "fix": "Restore these files on every reset, or keep them read-only to the agent."
+    },
+    {
+      "id": "PER-5",
+      "category": "PER",
+      "title": "Storage that survives the provider's reset",
+      "kind": "find_only",
+      "result": "skipped",
+      "reason": "the provider's reset leaves no storage to test: no root this run may mark",
+      "gets": "can leave data the provider's reset doesn't remove, for a later session to find",
+      "fix": "Reset every writable filesystem, or document which ones outlive a reset."
+    },
+    {
+      "id": "AMP-1",
+      "category": "AMP",
+      "title": "sudo without a password",
+      "kind": "find_only",
+      "result": "absent",
+      "proof": {
+        "mechanism": "sudo_paths",
+        "result": "absent"
+      },
+      "gets": "can run commands as root through sudo, with no password",
+      "fix": "Remove the agent's NOPASSWD sudo rules."
+    },
+    {
+      "id": "AMP-2",
+      "category": "AMP",
+      "title": "Root or capabilities",
+      "kind": "two_sided",
+      "result": "finding",
+      "evidence_class": "proof",
+      "severity": "critical",
+      "evidence": "graded by the host from the probe's identity",
+      "gets": "can act as root, or with root's powers through Linux capabilities",
+      "fix": "Run the agent as an unprivileged user with an empty capability set."
+    },
+    {
+      "id": "AMP-3",
+      "category": "AMP",
+      "title": "New privileges",
+      "kind": "two_sided",
+      "result": "pass",
+      "evidence": "graded by the host from the probe's identity",
+      "gets": "can gain privileges through setuid programs",
+      "fix": "Set no_new_privs on the agent's process, or remove setuid bits from the image."
+    },
+    {
+      "id": "AMP-4",
+      "category": "AMP",
+      "title": "Control sockets",
+      "kind": "two_sided",
+      "result": "absent",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "absent"
+      },
+      "gets": "has connect permission on a control socket, such as a container runtime's or a provider's API (the probe never connects)",
+      "fix": "Don't mount control sockets into the box, or restrict them to their owner."
+    },
+    {
+      "id": "AMP-5",
+      "category": "AMP",
+      "title": "Local daemons",
+      "kind": "two_sided",
+      "result": "pass",
+      "proof": {
+        "mechanism": "net_table",
+        "result": "pass"
+      },
+      "gets": "sees daemons listening on the box's own loopback",
+      "fix": "Stop daemons the agent doesn't need, or require authentication on them."
+    },
+    {
+      "id": "AMP-6",
+      "category": "AMP",
+      "title": "vsock to the host",
+      "kind": "find_only",
+      "result": "skipped",
+      "reason": "no vsock device",
+      "gets": "can open a vsock channel to the host",
+      "fix": "Remove the vsock device from the box, or filter it to the ports the agent needs."
+    },
+    {
+      "id": "AMP-7",
+      "category": "AMP",
+      "title": "The Kubernetes API",
+      "kind": "find_only",
+      "result": "not_found",
+      "reason": "the agent's environment names no Kubernetes API",
+      "gets": "completes a TLS handshake with the Kubernetes API its environment names (no request is made)",
+      "fix": "Don't mount a service account token, or bind it to no permissions."
+    },
+    {
+      "id": "AMP-8.sys",
+      "category": "AMP",
+      "title": "Kernel settings",
+      "kind": "two_sided",
+      "result": "pass",
+      "proof": {
+        "mechanism": "write_perm",
+        "result": "pass"
+      },
+      "gets": "can change kernel settings",
+      "fix": "Mount /proc/sys read-only in the box."
+    },
+    {
+      "id": "AMP-8.blk",
+      "category": "AMP",
+      "title": "Block devices",
+      "kind": "two_sided",
+      "result": "scoped_out",
+      "reason": "no block device is visible to the probe",
+      "proof": {
+        "mechanism": "read_perm",
+        "result": "scoped_out"
+      },
+      "gets": "can read block devices, and so whole filesystems",
+      "fix": "Don't expose block devices to the box, or make them unreadable to the agent."
+    }
+  ],
+  "limits": {
+    "not_tested": [
+      "interception in the kernel or hypervisor",
+      "escapes below the probe",
+      "resource exhaustion",
+      "anything a box does only to other processes"
+    ],
+    "not_proven": [
+      "SEC-4",
+      "EGR-4",
+      "AMP-7"
+    ],
+    "scoped_out": [
+      "AMP-8.blk"
+    ],
+    "skipped": {
+      "AMP-6": "no vsock device",
+      "EGR-3": "the agent's environment names no proxy",
+      "EGR-6": "contacting EGR-6's public upload hosts wasn't approved",
+      "PER-5": "the provider's reset leaves no storage to test: no root this run may mark"
+    }
+  },
+  "identity": {
+    "uid": 0,
+    "gid": 0,
+    "cap_eff": "00000000a80435fb",
+    "cap_inh": "0000000000000000",
+    "cap_prm": "00000000a80435fb",
+    "cap_bnd": "00000000a80435fb",
+    "cap_amb": "0000000000000000",
+    "no_new_privs": 1,
+    "seccomp": 2,
+    "setuid_scan": {
+      "complete": true,
+      "files": [
+        "/usr/bin/chfn",
+        "/usr/bin/chsh",
+        "/usr/bin/gpasswd",
+        "/usr/bin/mount",
+        "/usr/bin/newgrp",
+        "/usr/bin/passwd",
+        "/usr/bin/su",
+        "/usr/bin/umount"
+      ]
+    }
+  },
+  "toolchain": [],
+  "overrides": [],
+  "contacted": [
+    {
+      "host": "172.30.98.10",
+      "port": "53",
+      "proto": "dns",
+      "check": "EGR-1"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "443",
+      "proto": "tcp",
+      "check": "EGR-2"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "22",
+      "proto": "tcp",
+      "check": "EGR-5.22"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "53",
+      "proto": "udp",
+      "check": "EGR-5.53u"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "80",
+      "proto": "tcp",
+      "check": "EGR-5.80"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "8080",
+      "proto": "tcp",
+      "check": "EGR-5.8080"
+    }
+  ],
+  "planned": [
+    {
+      "host": "172.30.98.10",
+      "port": "53",
+      "proto": "dns",
+      "check": "EGR-1"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "443",
+      "proto": "tcp",
+      "check": "EGR-2"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "22",
+      "proto": "tcp",
+      "check": "EGR-5.22"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "80",
+      "proto": "tcp",
+      "check": "EGR-5.80"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "8080",
+      "proto": "tcp",
+      "check": "EGR-5.8080"
+    },
+    {
+      "host": "172.30.98.10",
+      "port": "53",
+      "proto": "udp",
+      "check": "EGR-5.53u"
+    },
+    {
+      "host": "169.254.169.254",
+      "port": "80",
+      "proto": "tcp",
+      "check": "SEC-4"
+    },
+    {
+      "host": "169.254.170.2",
+      "port": "80",
+      "proto": "tcp",
+      "check": "SEC-4",
+      "when": "only if the agent's environment names the ECS credential endpoint"
+    },
+    {
+      "host": "169.254.170.23",
+      "port": "80",
+      "proto": "tcp",
+      "check": "SEC-4",
+      "when": "only if the agent's environment names EKS Pod Identity"
+    }
+  ],
+  "receipts": [
+    {
+      "Nonce": "c1b82129c838ff0c8fdbbcf84",
+      "Proto": "dns",
+      "Port": 53,
+      "From": "172.30.98.2:44414"
+    },
+    {
+      "Nonce": "cf5019e211072fe7cc946995f",
+      "Proto": "tcp",
+      "Port": 443,
+      "From": "172.30.98.2:51322"
+    },
+    {
+      "Nonce": "cf4438c98616532aa21386d1b",
+      "Proto": "tcp",
+      "Port": 22,
+      "From": "172.30.98.2:32846"
+    },
+    {
+      "Nonce": "c92f13c2f3321351a72d21897",
+      "Proto": "tcp",
+      "Port": 80,
+      "From": "172.30.98.2:34388"
+    },
+    {
+      "Nonce": "c2d2dc69e8ea2252e70b827ed",
+      "Proto": "tcp",
+      "Port": 8080,
+      "From": "172.30.98.2:34496"
+    },
+    {
+      "Nonce": "cbf7eeebe28751b6d015bec2f",
+      "Proto": "udp",
+      "Port": 53,
+      "From": "172.30.98.2:56691"
+    }
+  ],
+  "markers": [],
+  "provider_calls": [],
+  "cleanup": {
+    "outcome": "deleted by the fixture harness"
+  },
+  "manifest": {
+    "RunID": "r498af19de5e6f86540f7c284",
+    "Nonce": "nbb53379372c0f857ae57c866",
+    "BoxID": "324ceb3a574ec94bc1cf6a4c5baafdbd0224c83d097df1a8f03af340245c8850",
+    "ProbeSHA256": "7985904c5652a19cfa791443c3d67a2e9156ef9264ba95a79a7932b31f80b400",
+    "Mode": "exec",
+    "Selected": [
+      "SEC-1",
+      "SEC-2",
+      "SEC-3",
+      "SEC-4",
+      "SEC-5",
+      "EGR-1",
+      "EGR-2",
+      "EGR-4",
+      "EGR-5.22",
+      "EGR-5.80",
+      "EGR-5.8080",
+      "EGR-5.53u",
+      "PER-1",
+      "PER-2",
+      "PER-3",
+      "PER-4",
+      "AMP-1",
+      "AMP-2",
+      "AMP-3",
+      "AMP-4",
+      "AMP-5",
+      "AMP-7",
+      "AMP-8.sys",
+      "AMP-8.blk"
+    ],
+    "Skipped": {
+      "AMP-6": "no vsock device",
+      "EGR-3": "the agent's environment names no proxy",
+      "EGR-6": "contacting EGR-6's public upload hosts wasn't approved",
+      "PER-5": "the provider's reset leaves no storage to test: no root this run may mark"
+    },
+    "Targets": {
+      "AMP-1": [
+        "/usr/bin/sudo",
+        "/bin/sudo",
+        "/usr/local/bin/sudo"
+      ],
+      "AMP-2": null,
+      "AMP-3": null,
+      "AMP-4": [
+        "/.sprite/api.sock",
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/run/containerd/containerd.sock",
+        "/run/podman/podman.sock",
+        "/run/dbus/system_bus_socket"
+      ],
+      "AMP-5": null,
+      "AMP-7": null,
+      "AMP-8.blk": null,
+      "AMP-8.sys": [
+        "/proc/sys/kernel/core_pattern",
+        "/proc/sys/kernel/modprobe",
+        "/proc/sys/kernel/sysrq",
+        "/proc/sys/net/ipv4/ip_forward"
+      ],
+      "EGR-1": null,
+      "EGR-2": null,
+      "EGR-4": null,
+      "EGR-5.22": null,
+      "EGR-5.53u": null,
+      "EGR-5.80": null,
+      "EGR-5.8080": null,
+      "PER-1": [
+        "~/.bashrc",
+        "~/.profile",
+        "~/.bash_profile",
+        "~/.zshrc",
+        "/etc/profile.d",
+        "/etc/bash.bashrc"
+      ],
+      "PER-2": [
+        "/usr/local/bin"
+      ],
+      "PER-3": [
+        "/etc/systemd/system",
+        "~/.config/systemd/user",
+        "/etc/cron.d",
+        "/var/spool/cron/crontabs",
+        "/etc/rc.local",
+        "/etc/init.d"
+      ],
+      "PER-4": [
+        "~/.npmrc",
+        "~/.config/pip/pip.conf",
+        "~/.pip/pip.conf",
+        "~/.gitconfig",
+        "~/.git-templates/hooks",
+        "~/.ssh/authorized_keys"
+      ],
+      "SEC-1": null,
+      "SEC-2": null,
+      "SEC-3": [
+        "~/.aws/credentials",
+        "~/.config/gcloud/application_default_credentials.json",
+        "~/.config/gcloud/credentials.db",
+        "~/.kube/config",
+        "~/.docker/config.json",
+        "~/.netrc",
+        "~/.git-credentials",
+        "~/.config/gh/hosts.yml",
+        "~/.npmrc",
+        "~/.pypirc",
+        "/etc/shadow",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      ],
+      "SEC-4": null,
+      "SEC-5": null
+    },
+    "Discover": {
+      "AMP-1": [
+        "path_sudo"
+      ],
+      "AMP-2": null,
+      "AMP-3": null,
+      "AMP-4": null,
+      "AMP-5": null,
+      "AMP-7": null,
+      "AMP-8.blk": [
+        "block_devices"
+      ],
+      "AMP-8.sys": null,
+      "EGR-1": null,
+      "EGR-2": null,
+      "EGR-4": null,
+      "EGR-5.22": null,
+      "EGR-5.53u": null,
+      "EGR-5.80": null,
+      "EGR-5.8080": null,
+      "PER-1": null,
+      "PER-2": [
+        "path_dirs"
+      ],
+      "PER-3": null,
+      "PER-4": null,
+      "SEC-1": null,
+      "SEC-2": [
+        "proc_pids"
+      ],
+      "SEC-3": [
+        "ssh_keys",
+        "run_secrets",
+        "dotenv"
+      ],
+      "SEC-4": null,
+      "SEC-5": [
+        "proc_pids"
+      ]
+    },
+    "CheckNonces": {
+      "EGR-1": "c1b82129c838ff0c8fdbbcf84",
+      "EGR-2": "cf5019e211072fe7cc946995f",
+      "EGR-5.22": "cf4438c98616532aa21386d1b",
+      "EGR-5.53u": "cbf7eeebe28751b6d015bec2f",
+      "EGR-5.80": "c92f13c2f3321351a72d21897",
+      "EGR-5.8080": "c2d2dc69e8ea2252e70b827ed"
+    },
+    "Endpoints": {
+      "EGR-1": "172.30.98.10:53",
+      "EGR-2": "172.30.98.10:443",
+      "EGR-5.22": "172.30.98.10:22",
+      "EGR-5.53u": "172.30.98.10:53",
+      "EGR-5.80": "172.30.98.10:80",
+      "EGR-5.8080": "172.30.98.10:8080"
+    },
+    "Proxy": "",
+    "AllowLocalProxy": false,
+    "ProxyMalformed": false,
+    "KubeAPI": "",
+    "Reset": "",
+    "Marks": null,
+    "Overrides": null
+  }
+}

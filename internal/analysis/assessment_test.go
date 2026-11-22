@@ -6,15 +6,15 @@ import (
 
 	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
-	"sandprobe/internal/rundata"
 )
 
-const awsOpen = "../../runs/aws-nitro/sandprobe-aws-nitro-r338b2e7085c6db7838db7da6.json"
-const awsIsolated = "../../runs/aws-nitro/sandprobe-aws-nitro-r799395c577da14d6d222e452.json"
+// Two real runs of local Docker boxes, as root, that differ only in a firewall: every route out to the canary open, or
+// every TCP port to it refused with a reset and UDP to it rejected (test/reports/README.md).
+const openReport = "../../test/reports/egress-open.json"
+const refusedReport = "../../test/reports/egress-refused.json"
 
-func loadAWS(t *testing.T, path string) *report.Doc {
+func loadReport(t *testing.T, path string) *report.Doc {
 	t.Helper()
-	rundata.Need(t, path)
 	d, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -22,18 +22,17 @@ func loadAWS(t *testing.T, path string) *report.Doc {
 	return d
 }
 
-// CAL-5: replay the saved provider evidence, not expectations tuned from prose.
-func TestAssessmentAWSCalibration(t *testing.T) {
-	rundata.Need(t, awsOpen, awsIsolated)
+// CAL-5: replay saved evidence, not expectations tuned from prose.
+func TestAssessmentCalibration(t *testing.T) {
 	for _, tc := range []struct {
 		path, outcome, tcp          string
 		refused, delivered, unknown int
 		drivers                     []string
 	}{
-		{awsOpen, "reported_violation", "reported_violation", 0, 6, 0, []string{"AMP-2", "CHN-1"}},
-		{awsIsolated, Inconclusive, "reported_four_route_requirements_met", 4, 0, 2, []string{"AMP-2"}},
+		{openReport, "reported_violation", "reported_violation", 0, 6, 0, []string{"AMP-2", "CHN-1"}},
+		{refusedReport, Inconclusive, "reported_four_route_requirements_met", 4, 0, 2, []string{"AMP-2"}},
 	} {
-		d := loadAWS(t, tc.path)
+		d := loadReport(t, tc.path)
 		a, err := Assess(d, CanaryDenyProfile)
 		if err != nil {
 			t.Fatal(err)
@@ -75,7 +74,6 @@ func checkRow(d *report.Doc, id string) *report.Check {
 }
 
 func TestAssessmentDoesNotInventNegativeProof(t *testing.T) {
-	rundata.Need(t, awsOpen, awsIsolated)
 	for _, tc := range []struct {
 		name string
 		edit func(*report.Doc)
@@ -119,7 +117,7 @@ func TestAssessmentDoesNotInventNegativeProof(t *testing.T) {
 		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := loadAWS(t, awsIsolated)
+			d := loadReport(t, refusedReport)
 			tc.edit(d)
 			recountAssessmentFixture(d)
 			a, err := Assess(d, CanaryDenyProfile)
@@ -134,8 +132,7 @@ func TestAssessmentDoesNotInventNegativeProof(t *testing.T) {
 }
 
 func TestAssessmentRejectsForgedAllRefused(t *testing.T) {
-	rundata.Need(t, awsOpen, awsIsolated)
-	d := loadAWS(t, awsIsolated)
+	d := loadReport(t, refusedReport)
 	for _, id := range []string{"EGR-1", "EGR-5.53u"} {
 		c := checkRow(d, id)
 		c.Result = obs.Pass
@@ -147,8 +144,7 @@ func TestAssessmentRejectsForgedAllRefused(t *testing.T) {
 }
 
 func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
-	rundata.Need(t, awsOpen, awsIsolated)
-	d := loadAWS(t, awsOpen)
+	d := loadReport(t, openReport)
 	checkRow(d, "EGR-2").Result = obs.Unknown
 	checkRow(d, "EGR-2").Severity = ""
 	checkRow(d, "EGR-2").EvidenceClass = ""
@@ -158,7 +154,7 @@ func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
 	if err != nil || a.SourceComplete || a.Outcome != "reported_violation" || a.Counts[ReportedDelivery] != 5 || a.Counts[Inconclusive] != 1 {
 		t.Fatal("uncertainty hid delivery")
 	}
-	d = loadAWS(t, awsIsolated)
+	d = loadReport(t, refusedReport)
 	d.Identity = nil
 	if _, err = Assess(d, CanaryDenyProfile); err == nil {
 		t.Fatal("derived pass without identity accepted")
@@ -170,7 +166,7 @@ func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
 	if err != nil || a.SourceComplete || a.ObservedUID != nil {
 		t.Fatal("missing identity treated as complete")
 	}
-	d = loadAWS(t, awsIsolated)
+	d = loadReport(t, refusedReport)
 	d.Grade.Valid = false
 	d.Grade.Complete = false
 	d.Grade.Letter = ""
@@ -181,7 +177,7 @@ func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
 	if _, err = Assess(nil, CanaryDenyProfile); err == nil {
 		t.Fatal("nil source accepted")
 	}
-	if _, err = Assess(loadAWS(t, awsIsolated), "custom-drop-DNS"); err == nil {
+	if _, err = Assess(loadReport(t, refusedReport), "custom-drop-DNS"); err == nil {
 		t.Fatal("unsupported profile accepted")
 	}
 }

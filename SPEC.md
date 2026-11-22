@@ -459,8 +459,9 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Complete independent spec/code/security review and offline calibration first. No new
   provider-wide claims or cloud reruns are justified just to reproduce the old letter.
 
-- **WGR-6 Report-format compatibility watch.** All PRs run a credential-free, offline
-  report compatibility check using a retained fixture collection. Rebuild the report with
+- **WGR-6 Report-format compatibility watch.** A credential-free, offline report compatibility check runs
+  against a retained collection of a recorded managed run. That collection is a real provider's, so the check runs
+  where the operators keep their records, not in this repository's CI. Rebuild the report with
   the current formatter, validate the literal JSON keys/types consumed by the managed
   collector, preserve the frozen contract/raw evidence bindings, then feed the serialized
   result through the current workload finalizer. It must retain conditional configuration B,
@@ -842,12 +843,15 @@ retrospective assessment, not an alternative overall sandbox letter or a declara
   do not prove reset survival. Preserve all findings and unknowns, do not infer process ownership/trust roles from
   path names, and do not retrospectively invent image, namespace or policy context. Old grades, `run -min`, existing
   report formats and gate semantics remain unchanged.
-- **CAL-5 Calibration.** Add deterministic saved-AWS replay tests (open versus isolated), synthetic four-TCP-refused,
+- **CAL-5 Calibration.** Add deterministic replay tests on saved open-versus-refused reports (`test/reports`: the same
+  local Docker box with every route out, and with every route refused by its own firewall), synthetic four-TCP-refused,
   delivery, unknown, invalid, omitted route, absent, wrong proof/scope, missing identity and unrelated incompleteness
   cases. Forged six-pass reports are rejected. DNS/UDP silence stays inconclusive, guest root never overrides a route refusal, and a delivery never gets
   hidden by other unknowns. Test CLI output/exit behavior and safe escaping. These are offline interpretation tests,
   not new live runs or proof that the probe's underlying controls work on an untested provider. Any later live
   calibration must still obey the provider's terms, bounded spend, owned disposable resources and verified cleanup.
+  Replays of a real provider's saved reports, which check that this interpretation still reads a recorded provider
+  report the same way, run where the operators keep those records, not in this repository.
 
 Tests: CAL-1–5 map to `internal/analysis/assessment_test.go` and `cmd/sandprobe/assessment_test.go`.
 
@@ -2074,11 +2078,9 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
 
 ## Tests
 
-Some tests replay recorded provider runs (the saved AWS, Daytona, Boat and Modal reports). Those records stay with
-the project's operators (AGENTS rule 10), so a tree without them skips each such test and says why
-(`internal/rundata`) only when `runs/` doesn't exist; if it can't be read, or a record is missing, the test fails.
-Generic tests that only need a report use the demo's public Docker reports in `demo/reports`. CI's
-report-compatibility check uses the same decision, and its log says when it skipped.
+Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
+are runs of local Docker boxes against the local canary (`test/reports/README.md` rebuilds them). Replays of recorded
+provider runs stay with the operators' records (AGENTS rule 9), not in this repository.
 
 | Extension rule | Tests |
 | --- | --- |
@@ -2203,7 +2205,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |
 | WGR-7 | `TestPortableWorkloadDeclaration`, `TestPortableWorkloadCalibration`; version1 retained Nitro report compatibility test |
-| WGR-6 | `TestReportCompatibilityPreservesCollectorAndWorkloadGrade` and the Report contract compatibility PR check |
+| WGR-6 | run where the operators keep their recorded collections, not in this repository |
 | WGR-1..5 | `internal/grade/workload_test.go` (allowed vs forbidden, mixed proof faults, immutable context, independent positive evidence); `internal/obs/workload_test.go`; `internal/host/workload_test.go`; `internal/probe/workload_test.go` (Linux root/nobody); `internal/report/workload_test.go`; `cmd/sandprobe-agent-grade/workload_test.go`; `deploy/eks-agent/test_workload_contract.py` |
 | RUN-8 | `TestAgentPodBindingGuardsEveryInvocation`, `TestAgentPodRejectsNonRunBindingBeforeKubectl`, `test_standard_grade.py`; same-pod standard grading, failed-task preservation, binding changes and independent canary cleanup |
 | PRV-5 | a Modal plan selects none of SEC-4, AMP-6, AMP-7 or EGR-3, lists each as skipped with its reason, and its manifest names no metadata address, vsock port, Kubernetes API or proxy |

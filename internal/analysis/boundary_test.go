@@ -16,7 +16,7 @@ func analysisBoundary() *obs.BoundaryContract {
 }
 
 func TestBoundaryOfflineCompatibilityAndContext(t *testing.T) {
-	a, b := loadAWS(t, awsOpen), loadAWS(t, awsOpen)
+	a, b := loadReport(t, openReport), loadReport(t, openReport)
 	old, err := Assess(a, CanaryDenyProfile)
 	if err != nil || old.BoundaryContract != nil {
 		t.Fatal("old context invented")
@@ -68,7 +68,7 @@ func TestBoundaryOfflineCompatibilityAndContext(t *testing.T) {
 // BND-3: invalid evidence cannot conceal a declared-context change.
 func TestBoundaryInvalidComparisonContext(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
-		a, b := loadAWS(t, awsOpen), loadAWS(t, awsOpen)
+		a, b := loadReport(t, openReport), loadReport(t, openReport)
 		a.Grade.Valid = false
 		b.Manifest.BoundaryContract = analysisBoundary()
 		if reverse {
