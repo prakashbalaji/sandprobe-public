@@ -2049,18 +2049,26 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
 ## Releases, 21 November 2026
 
 - **REL-1 A reproducible build.** `make release` builds the four `sandprobe` binaries a release ships (macOS and
-  Linux, arm64 and amd64) from one commit: cgo off, `-trimpath`, `-buildvcs=false` and `-ldflags "-s -w"`, with the
-  Linux probes and canary embedded as `make probes` builds them under the same flags and the probe's `BuildVersion`
-  set to the CLI's `Version`. Each binary is compressed with `gzip -9 -n`. `SHA256SUMS` lists the `.gz` files, which
+  Linux, arm64 and amd64) from one commit: cgo off, `-trimpath`, `-buildvcs=false` and `-ldflags "-s -w"`. They embed
+  the Linux probes and canary as `make probes` builds them: cgo off, `-trimpath` and `-buildvcs=false` (deterministic,
+  not stripped), with the probe's `BuildVersion` set to the CLI's `Version`. Each binary is compressed with `gzip -9 -n`. `SHA256SUMS` lists the `.gz` files, which
   the installer checks, and `SHA256SUMS-binaries` lists the uncompressed binaries, so anyone with the same Go version
   can rebuild and compare without depending on their gzip.
 - **REL-2 Two builds, one release.** The release workflow runs REL-1 twice, on separate runners from separate clean
-  checkouts of the same commit, and publishes only if every file matches byte for byte. It does the same on every pull
+  checkouts of the same commit, and publishes only if every file matches byte for byte and both checksum files
+  match the files they list (the binaries' after decompressing every archive). It does the same on every pull
   request, publishing nothing. A release publishes the CLI's own `Version` as the tag `v<Version>`, from `main`, and
   stops if the version asked for, the CLI's `version` output and the probe's `BuildVersion` don't all agree.
-- **REL-3 Provenance.** Each published `.gz` carries a GitHub build attestation for the workflow run that built it
-  (`gh attestation verify <file> -R summationai/sandprobe`). Only the release workflow creates tags: the repository's
-  tag ruleset lets GitHub Actions alone create one.
+- **REL-3 Provenance.** Each published `.gz`, and both checksum files, carry a GitHub build attestation for the
+  workflow run that built them. Verifying one binds it to this repository's release workflow, on `main`, at the
+  release's commit:
+  `gh attestation verify <file> --repo summationai/sandprobe --signer-workflow
+  summationai/sandprobe/.github/workflows/release.yml --source-ref refs/heads/main --source-digest <release commit>
+  --deny-self-hosted-runners`. The repository alone (`--repo`) is only the minimum identity check, and a
+  `SHA256SUMS` fetched beside a file proves transport integrity, not authenticity, unless the checksum file's own
+  attestation is verified the same way. The release notes give the exact command with the commit filled in. Only
+  the release workflow creates tags: the repository's tag ruleset lets GitHub Actions alone create one, which holds
+  only while no other workflow is granted `contents: write`, so CI fails if another one is.
 
 ## Tests
 
