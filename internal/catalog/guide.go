@@ -15,7 +15,7 @@ var Guide = map[string]Advice{
 	"SEC-2": {"can open other processes' environments, where their secrets are often passed",
 		"Run the agent in its own PID namespace, or as a user that owns no other process.", "other envs"},
 	"SEC-3": {"can open credential files on disk",
-		"Remove credentials from the image and home directory; mount any it needs read-only, for that process alone.", "cred files"},
+		"Remove credentials from the image and home directory, an AI coding tool's own login included; mount any it needs read-only, for that process alone.", "cred files"},
 	"SEC-4": {"gets a role or identity listed by a cloud metadata service",
 		"Block the link-local metadata addresses from the box, or require IMDSv2 with a hop limit of 1.", "metadata"},
 	"SEC-5": {"can open other processes' memory",
