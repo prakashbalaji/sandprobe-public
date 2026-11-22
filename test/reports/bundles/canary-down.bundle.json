@@ -1,0 +1,195 @@
+{
+  "manifest": {
+    "RunID": "r21727215717190a7979a786f",
+    "Nonce": "n879e0a0ee94784605c3e7627",
+    "BoxID": "76f915f009c6e9a20c79bca12134245f9f37dcbe051e9136a0e65dcbb6991375",
+    "ProbeSHA256": "7985904c5652a19cfa791443c3d67a2e9156ef9264ba95a79a7932b31f80b400",
+    "Mode": "exec",
+    "Selected": [
+      "SEC-1",
+      "SEC-2",
+      "SEC-3",
+      "SEC-4",
+      "SEC-5",
+      "EGR-1",
+      "EGR-2",
+      "EGR-4",
+      "EGR-5.22",
+      "EGR-5.80",
+      "EGR-5.8080",
+      "EGR-5.53u",
+      "PER-1",
+      "PER-2",
+      "PER-3",
+      "PER-4",
+      "AMP-1",
+      "AMP-2",
+      "AMP-3",
+      "AMP-4",
+      "AMP-5",
+      "AMP-7",
+      "AMP-8.sys",
+      "AMP-8.blk"
+    ],
+    "Skipped": {
+      "AMP-6": "no vsock device",
+      "EGR-3": "the agent's environment names no proxy",
+      "EGR-6": "contacting EGR-6's public upload hosts wasn't approved",
+      "PER-5": "the provider's reset leaves no storage to test: no root this run may mark"
+    },
+    "Targets": {
+      "AMP-1": [
+        "/usr/bin/sudo",
+        "/bin/sudo",
+        "/usr/local/bin/sudo"
+      ],
+      "AMP-2": null,
+      "AMP-3": null,
+      "AMP-4": [
+        "/.sprite/api.sock",
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/run/containerd/containerd.sock",
+        "/run/podman/podman.sock",
+        "/run/dbus/system_bus_socket"
+      ],
+      "AMP-5": null,
+      "AMP-7": null,
+      "AMP-8.blk": null,
+      "AMP-8.sys": [
+        "/proc/sys/kernel/core_pattern",
+        "/proc/sys/kernel/modprobe",
+        "/proc/sys/kernel/sysrq",
+        "/proc/sys/net/ipv4/ip_forward"
+      ],
+      "EGR-1": null,
+      "EGR-2": null,
+      "EGR-4": null,
+      "EGR-5.22": null,
+      "EGR-5.53u": null,
+      "EGR-5.80": null,
+      "EGR-5.8080": null,
+      "PER-1": [
+        "~/.bashrc",
+        "~/.profile",
+        "~/.bash_profile",
+        "~/.zshrc",
+        "/etc/profile.d",
+        "/etc/bash.bashrc"
+      ],
+      "PER-2": [
+        "/usr/local/bin"
+      ],
+      "PER-3": [
+        "/etc/systemd/system",
+        "~/.config/systemd/user",
+        "/etc/cron.d",
+        "/var/spool/cron/crontabs",
+        "/etc/rc.local",
+        "/etc/init.d"
+      ],
+      "PER-4": [
+        "~/.npmrc",
+        "~/.config/pip/pip.conf",
+        "~/.pip/pip.conf",
+        "~/.gitconfig",
+        "~/.git-templates/hooks",
+        "~/.ssh/authorized_keys"
+      ],
+      "SEC-1": null,
+      "SEC-2": null,
+      "SEC-3": [
+        "~/.aws/credentials",
+        "~/.config/gcloud/application_default_credentials.json",
+        "~/.config/gcloud/credentials.db",
+        "~/.kube/config",
+        "~/.docker/config.json",
+        "~/.netrc",
+        "~/.git-credentials",
+        "~/.config/gh/hosts.yml",
+        "~/.npmrc",
+        "~/.pypirc",
+        "/etc/shadow",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      ],
+      "SEC-4": null,
+      "SEC-5": null
+    },
+    "Discover": {
+      "AMP-1": [
+        "path_sudo"
+      ],
+      "AMP-2": null,
+      "AMP-3": null,
+      "AMP-4": null,
+      "AMP-5": null,
+      "AMP-7": null,
+      "AMP-8.blk": [
+        "block_devices"
+      ],
+      "AMP-8.sys": null,
+      "EGR-1": null,
+      "EGR-2": null,
+      "EGR-4": null,
+      "EGR-5.22": null,
+      "EGR-5.53u": null,
+      "EGR-5.80": null,
+      "EGR-5.8080": null,
+      "PER-1": null,
+      "PER-2": [
+        "path_dirs"
+      ],
+      "PER-3": null,
+      "PER-4": null,
+      "SEC-1": null,
+      "SEC-2": [
+        "proc_pids"
+      ],
+      "SEC-3": [
+        "ssh_keys",
+        "run_secrets",
+        "dotenv"
+      ],
+      "SEC-4": null,
+      "SEC-5": [
+        "proc_pids"
+      ]
+    },
+    "CheckNonces": {
+      "EGR-1": "cb4b7fad66665c78054f01fd5",
+      "EGR-2": "c204b0e097d3df80a97cc9420",
+      "EGR-5.22": "c8e893d39941f50f3898fd43b",
+      "EGR-5.53u": "cd3ad74d2e121fee266ff57ed",
+      "EGR-5.80": "c104fdb18a590157de4c04157",
+      "EGR-5.8080": "cd6e9937c1fb1992f73f52988"
+    },
+    "Endpoints": {
+      "EGR-1": "172.30.98.10:53",
+      "EGR-2": "172.30.98.10:443",
+      "EGR-5.22": "172.30.98.10:22",
+      "EGR-5.53u": "172.30.98.10:53",
+      "EGR-5.80": "172.30.98.10:80",
+      "EGR-5.8080": "172.30.98.10:8080"
+    },
+    "Proxy": "",
+    "AllowLocalProxy": false,
+    "ProxyMalformed": false,
+    "KubeAPI": "",
+    "Reset": "",
+    "Marks": null,
+    "Overrides": null
+  },
+  "observations": "{\"schema\":\"sandprobe.obs/1\",\"run_id\":\"r21727215717190a7979a786f\",\"nonce\":\"n879e0a0ee94784605c3e7627\",\"box_id\":\"76f915f009c6e9a20c79bca12134245f9f37dcbe051e9136a0e65dcbb6991375\",\"probe_sha256\":\"7985904c5652a19cfa791443c3d67a2e9156ef9264ba95a79a7932b31f80b400\",\"duration_ms\":3035,\"identity\":{\"uid\":0,\"gid\":0,\"cap_eff\":\"00000000a80425fb\",\"cap_inh\":\"0000000000000000\",\"cap_prm\":\"00000000a80425fb\",\"cap_bnd\":\"00000000a80425fb\",\"cap_amb\":\"0000000000000000\",\"no_new_privs\":0,\"seccomp\":2,\"setuid_scan\":{\"complete\":true,\"files\":[\"/usr/bin/chfn\",\"/usr/bin/chsh\",\"/usr/bin/gpasswd\",\"/usr/bin/mount\",\"/usr/bin/newgrp\",\"/usr/bin/passwd\",\"/usr/bin/su\",\"/usr/bin/umount\"]}},\"observations\":[{\"id\":\"SEC-1\",\"result\":\"pass\",\"proof\":{\"mechanism\":\"env_names\",\"twin\":true,\"root\":true,\"count\":4}},{\"id\":\"SEC-2\",\"result\":\"finding\",\"variant\":\"readable\",\"evidence\":\"the agent can open /proc/1/environ (nothing was read)\",\"proof\":{\"mechanism\":\"proc_open\",\"twin\":true,\"root\":true,\"discovered\":{\"proc_pids\":1},\"targets\":[{\"name\":\"/proc/1/environ\",\"rule\":\"proc_pids\",\"state\":\"found\"}]}},{\"id\":\"SEC-3\",\"result\":\"finding\",\"variant\":\"nonempty\",\"evidence\":\"the agent can read /etc/shadow (opened, never read)\",\"proof\":{\"mechanism\":\"file_read\",\"twin\":true,\"root\":true,\"discovered\":{\"dotenv\":0,\"run_secrets\":0,\"ssh_keys\":0},\"targets\":[{\"name\":\"~/.aws/credentials\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.config/gcloud/application_default_credentials.json\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.config/gcloud/credentials.db\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.kube/config\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.docker/config.json\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.netrc\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.git-credentials\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.config/gh/hosts.yml\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.npmrc\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"~/.pypirc\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"device\":71,\"inode\":3156189,\"name\":\"/etc/shadow\",\"state\":\"found\"},{\"name\":\"/var/run/secrets/kubernetes.io/serviceaccount/token\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true}]}},{\"id\":\"SEC-4\",\"result\":\"not_found\",\"reason\":\"no metadata service listed a role or identity, and none was offered\"},{\"id\":\"SEC-5\",\"result\":\"finding\",\"variant\":\"readable\",\"evidence\":\"the agent can open /proc/1/mem (nothing was read)\",\"proof\":{\"mechanism\":\"proc_open\",\"twin\":true,\"root\":true,\"discovered\":{\"proc_pids\":1},\"targets\":[{\"name\":\"/proc/1/mem\",\"rule\":\"proc_pids\",\"state\":\"found\"}]}},{\"id\":\"EGR-1\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"EGR-2\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"EGR-4\",\"result\":\"not_found\",\"reason\":\"no interception seen\"},{\"id\":\"EGR-5.22\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"EGR-5.80\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"EGR-5.8080\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"EGR-5.53u\",\"result\":\"unknown\",\"reason\":\"the run has no canary endpoint, nonce or pin for this check\"},{\"id\":\"PER-1\",\"result\":\"finding\",\"variant\":\"writable\",\"evidence\":\"the agent can write or replace ~/.bashrc, ~/.profile, ~/.bash_profile, ~/.zshrc, /etc/profile.d, /etc/bash.bashrc\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":true,\"root\":true,\"targets\":[{\"name\":\"~/.bashrc\",\"state\":\"found\"},{\"name\":\"~/.profile\",\"state\":\"found\"},{\"name\":\"~/.bash_profile\",\"state\":\"found\"},{\"name\":\"~/.zshrc\",\"state\":\"found\"},{\"name\":\"/etc/profile.d\",\"state\":\"found\"},{\"name\":\"/etc/bash.bashrc\",\"state\":\"found\"}]}},{\"id\":\"PER-2\",\"result\":\"finding\",\"variant\":\"writable\",\"evidence\":\"the agent can write or replace /usr/local/bin, /usr/local/sbin\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":true,\"root\":true,\"discovered\":{\"path_dirs\":1},\"targets\":[{\"name\":\"/usr/local/bin\",\"state\":\"found\"},{\"name\":\"/usr/local/sbin\",\"rule\":\"path_dirs\",\"state\":\"found\"}]}},{\"id\":\"PER-3\",\"result\":\"finding\",\"variant\":\"writable\",\"evidence\":\"the agent can write or replace /etc/systemd/system, ~/.config/systemd/user, /etc/cron.d, /var/spool/cron/crontabs, /etc/rc.local, /etc/init.d\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":true,\"root\":true,\"targets\":[{\"name\":\"/etc/systemd/system\",\"state\":\"found\"},{\"name\":\"~/.config/systemd/user\",\"state\":\"found\"},{\"name\":\"/etc/cron.d\",\"state\":\"found\"},{\"name\":\"/var/spool/cron/crontabs\",\"state\":\"found\"},{\"name\":\"/etc/rc.local\",\"state\":\"found\"},{\"name\":\"/etc/init.d\",\"state\":\"found\"}]}},{\"id\":\"PER-4\",\"result\":\"finding\",\"variant\":\"writable\",\"evidence\":\"the agent can write or replace ~/.npmrc, ~/.config/pip/pip.conf, ~/.pip/pip.conf, ~/.gitconfig, ~/.git-templates/hooks, ~/.ssh/authorized_keys\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":true,\"root\":true,\"targets\":[{\"name\":\"~/.npmrc\",\"state\":\"found\"},{\"name\":\"~/.config/pip/pip.conf\",\"state\":\"found\"},{\"name\":\"~/.pip/pip.conf\",\"state\":\"found\"},{\"name\":\"~/.gitconfig\",\"state\":\"found\"},{\"name\":\"~/.git-templates/hooks\",\"state\":\"found\"},{\"name\":\"~/.ssh/authorized_keys\",\"state\":\"found\"}]}},{\"id\":\"AMP-1\",\"result\":\"absent\",\"proof\":{\"mechanism\":\"sudo_paths\",\"twin\":false,\"root\":true,\"discovered\":{\"path_sudo\":0},\"targets\":[{\"name\":\"/usr/bin/sudo\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/bin/sudo\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/usr/local/bin/sudo\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true}]}},{\"id\":\"AMP-4\",\"result\":\"absent\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":false,\"root\":true,\"targets\":[{\"name\":\"/.sprite/api.sock\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/var/run/docker.sock\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/run/docker.sock\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/run/containerd/containerd.sock\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/run/podman/podman.sock\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true},{\"name\":\"/run/dbus/system_bus_socket\",\"state\":\"absent\",\"errno\":\"ENOENT\",\"parent_searchable\":true}]}},{\"id\":\"AMP-5\",\"result\":\"pass\",\"proof\":{\"mechanism\":\"net_table\",\"twin\":true,\"root\":true,\"count\":2}},{\"id\":\"AMP-7\",\"result\":\"not_found\",\"reason\":\"the agent's environment names no Kubernetes API\"},{\"id\":\"AMP-8.sys\",\"result\":\"pass\",\"proof\":{\"mechanism\":\"write_perm\",\"twin\":true,\"root\":true,\"targets\":[{\"name\":\"/proc/sys/kernel/core_pattern\",\"state\":\"refused\",\"errno\":\"EROFS\"},{\"name\":\"/proc/sys/kernel/modprobe\",\"state\":\"refused\",\"errno\":\"EROFS\"},{\"name\":\"/proc/sys/kernel/sysrq\",\"state\":\"refused\",\"errno\":\"EROFS\"},{\"name\":\"/proc/sys/net/ipv4/ip_forward\",\"state\":\"refused\",\"errno\":\"EROFS\"}]}},{\"id\":\"AMP-8.blk\",\"result\":\"scoped_out\",\"reason\":\"no block device is visible to the probe\",\"proof\":{\"mechanism\":\"read_perm\",\"twin\":false,\"root\":true,\"discovered\":{\"block_devices\":0}}}]}\n",
+  "evidence": {
+    "Live": false,
+    "Launched": "2026-11-21T18:13:34.054223-08:00",
+    "Returned": "2026-11-21T18:13:37.132575-08:00",
+    "Health": {},
+    "Receipts": null,
+    "Elsewhere": null,
+    "ReceiptsRead": false,
+    "ReceiptsQueriedAt": "2026-11-21T18:13:39.234624-08:00",
+    "Overloaded": false,
+    "Reset": null
+  }
+}

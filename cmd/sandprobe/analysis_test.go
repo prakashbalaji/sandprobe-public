@@ -6,15 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"sandprobe/internal/report"
-	"sandprobe/internal/rundata"
 	"strings"
 	"testing"
 )
 
 func TestOfflineCLI(t *testing.T) {
-	rundata.Need(t, "../../runs/boat/baseline-2026-11-16/sandprobe-boat-r1d2e3a1865e7e893f02a9469.json", "../../runs/daytona/sandprobe-daytona-r55beda362a5cd432a4c9b518.json")
-	const report = "../../runs/boat/baseline-2026-11-16/sandprobe-boat-r1d2e3a1865e7e893f02a9469.json"
-	const partial = "../../runs/daytona/sandprobe-daytona-r55beda362a5cd432a4c9b518.json"
+	const report = "../../test/reports/egress-open.json"  // complete
+	const partial = "../../test/reports/canary-down.json" // incomplete: the canary was down
 	for _, tc := range []struct {
 		args     []string
 		exit     int
@@ -25,7 +23,7 @@ func TestOfflineCLI(t *testing.T) {
 		{[]string{"compare", partial, partial, "-o", "json"}, 5, `"incomplete": true`},
 		{[]string{"profile", "/dev/null", "-o", "json"}, 2, `report.input`},
 		{[]string{"compare", report, "-o", "json"}, 2, `usage`},
-		{[]string{"scorecard", report}, 0, "Score 0/6"},
+		{[]string{"scorecard", report}, 0, "Score 2/6"},
 		{[]string{"scorecard", report, "-o", "json"}, 0, `"of": 6`},
 		{[]string{"scorecard", partial}, 5, "Score "},
 		{[]string{"scorecard", "-o", "json"}, 2, `usage`},
@@ -61,15 +59,9 @@ func TestScorecardWritesOnlyWithOut(t *testing.T) {
 }
 
 func TestComparisonContextDoesNotHideFindings(t *testing.T) {
-	rundata.Need(t, "../../runs/modal-poc/reports/block", "../../runs/modal-poc/reports/default")
-	before, e := filepath.Glob("../../runs/modal-poc/reports/block/*.json")
-	if e != nil || len(before) != 1 {
-		t.Fatal("missing block fixture")
-	}
-	after, e := filepath.Glob("../../runs/modal-poc/reports/default/*.json")
-	if e != nil || len(after) != 1 {
-		t.Fatal("missing default fixture")
-	}
+	// The same box, refused at its firewall, then open: six routes newly out, and nothing else changed.
+	before := []string{"../../test/reports/egress-refused.json"}
+	after := []string{"../../test/reports/egress-open.json"}
 	b, e := os.ReadFile(after[0])
 	if e != nil {
 		t.Fatal(e)
@@ -109,15 +101,8 @@ func TestComparisonContextDoesNotHideFindings(t *testing.T) {
 }
 
 func TestComparisonRegressionExitIgnoresCHN2AndLifecycleNotes(t *testing.T) {
-	rundata.Need(t, "../../runs/modal-poc/reports/block", "../../runs/modal-poc/reports/default")
-	before, err := filepath.Glob("../../runs/modal-poc/reports/block/*.json")
-	if err != nil || len(before) != 1 {
-		t.Fatal("missing before fixture")
-	}
-	after, err := filepath.Glob("../../runs/modal-poc/reports/default/*.json")
-	if err != nil || len(after) != 1 {
-		t.Fatal("missing after fixture")
-	}
+	before := []string{"../../test/reports/egress-refused.json"}
+	after := []string{"../../test/reports/egress-open.json"}
 	var docs [2]report.Doc
 	for i, path := range []string{before[0], after[0]} {
 		data, err := os.ReadFile(path)
@@ -151,7 +136,7 @@ func TestComparisonRegressionExitIgnoresCHN2AndLifecycleNotes(t *testing.T) {
 			Findings []string `json:"new_or_worse_findings"`
 			Context  []string `json:"context_changes"`
 		}
-		if err = json.Unmarshal(out.Bytes(), &result); err != nil {
+		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
 		want := 6
@@ -172,13 +157,8 @@ func TestCompareVerdictWords(t *testing.T) {
 		exit              int
 	}{
 		{"../../demo/reports/hardened.json", "../../demo/reports/regressed.json", "Verdict: worse.", "no change", 6},
-		{"../../runs/daytona/sandprobe-daytona-r55beda362a5cd432a4c9b518.json", "../../runs/daytona/sandprobe-daytona-r55beda362a5cd432a4c9b518.json",
-			"wouldn't count either", "Verdict: no change", 5},
+		{"../../test/reports/canary-down.json", "../../test/reports/canary-down.json", "wouldn't count either", "Verdict: no change", 5},
 	} {
-		if strings.HasPrefix(tc.a, "../../runs/") && !rundata.Present(t) {
-			t.Logf("%s needs the private run data in runs/, which the public tree doesn't carry", tc.a)
-			continue
-		}
 		var out, errb bytes.Buffer
 		code := run([]string{"compare", tc.a, tc.b}, &out, &errb)
 		if code != tc.exit || !strings.Contains(out.String(), tc.want) || strings.Contains(out.String(), tc.never) {

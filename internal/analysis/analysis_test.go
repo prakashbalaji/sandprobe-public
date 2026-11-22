@@ -25,9 +25,9 @@ func baseline(t *testing.T) *report.Doc {
 	return d
 }
 func TestRunCorpus(t *testing.T) {
-	count, roots, least := 0, []string{"../../demo/reports"}, 3
+	count, roots, least := 0, []string{"../../demo/reports", "../../test/reports"}, 6
 	if rundata.Present(t) { // the private provider runs too, where this tree has them
-		roots, least = append(roots, "../../runs"), 13
+		roots, least = append(roots, "../../runs"), 16
 	}
 	var err error
 	for _, root := range roots {

@@ -10,24 +10,23 @@ import (
 
 	"sandprobe/internal/analysis"
 	"sandprobe/internal/obs"
-	"sandprobe/internal/rundata"
 )
 
-const awsAssessmentOpen = "../../runs/aws-nitro/sandprobe-aws-nitro-r338b2e7085c6db7838db7da6.json"
-const awsAssessmentIsolated = "../../runs/aws-nitro/sandprobe-aws-nitro-r799395c577da14d6d222e452.json"
+// Real runs of local Docker boxes that differ only in a firewall (test/reports/README.md).
+const assessOpen = "../../test/reports/egress-open.json"
+const assessRefused = "../../test/reports/egress-refused.json"
 
 func TestAssessmentCLI(t *testing.T) {
-	rundata.Need(t, awsAssessmentOpen, awsAssessmentIsolated)
 	for _, tc := range []struct {
 		args     []string
 		exit     int
 		contains string
 	}{
-		{[]string{"assess", awsAssessmentOpen, analysis.CanaryDenyProfile, "-o", "json"}, 6, `"reported_delivery": 6`},
-		{[]string{"assess", awsAssessmentIsolated, analysis.CanaryDenyProfile, "-o", "json"}, 5, `"reported_refusal": 4`},
-		{[]string{"assess", awsAssessmentIsolated, analysis.CanaryDenyProfile}, 5, `Saved grade "F" (unverified)`},
-		{[]string{"assess", awsAssessmentIsolated, "custom", "-o", "json"}, 2, "usage"},
-		{[]string{"assess", awsAssessmentIsolated, "-o", "json"}, 2, "usage"},
+		{[]string{"assess", assessOpen, analysis.CanaryDenyProfile, "-o", "json"}, 6, `"reported_delivery": 6`},
+		{[]string{"assess", assessRefused, analysis.CanaryDenyProfile, "-o", "json"}, 5, `"reported_refusal": 4`},
+		{[]string{"assess", assessRefused, analysis.CanaryDenyProfile}, 5, `Saved grade "F" (unverified)`},
+		{[]string{"assess", assessRefused, "custom", "-o", "json"}, 2, "usage"},
+		{[]string{"assess", assessRefused, "-o", "json"}, 2, "usage"},
 		{[]string{"assess", "/dev/null", analysis.CanaryDenyProfile, "-o", "json"}, 2, "report.input"},
 	} {
 		var out, stderr bytes.Buffer
@@ -39,8 +38,7 @@ func TestAssessmentCLI(t *testing.T) {
 }
 
 func TestAssessmentCLIPartialKeepsViolationAndEscapesSource(t *testing.T) {
-	rundata.Need(t, awsAssessmentOpen, awsAssessmentIsolated)
-	d, err := analysis.Load(awsAssessmentOpen)
+	d, err := analysis.Load(assessOpen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +54,7 @@ func TestAssessmentCLIPartialKeepsViolationAndEscapesSource(t *testing.T) {
 	}
 	d.Grade.Unknown = []string{"SEC-1"}
 	d.Grade.Complete = false
-	// SEC-1 was a pass on AWS, so no finding/count removal is needed.
+	// SEC-1 is a pass in the fixture, so no finding/count removal is needed.
 	b, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)

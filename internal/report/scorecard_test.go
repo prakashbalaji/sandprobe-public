@@ -134,7 +134,7 @@ func TestScoreNeverCleanByDefault(t *testing.T) {
 // SCR-2: across every saved report, six of six never shows where the letter isn't a complete A.
 func TestSixOfSixIsAnA(t *testing.T) {
 	var files []string
-	for _, pat := range []string{"../../runs/*/*.json", "../../runs/*/*/*.json", "../../runs/*/*/*/*.json", "../../demo/reports/*.json"} {
+	for _, pat := range []string{"../../runs/*/*.json", "../../runs/*/*/*.json", "../../runs/*/*/*/*.json", "../../demo/reports/*.json", "../../test/reports/*.json"} {
 		m, _ := filepath.Glob(pat)
 		files = append(files, m...)
 	}
@@ -156,9 +156,9 @@ func TestSixOfSixIsAnA(t *testing.T) {
 			}
 		}
 	}
-	least := 3 // the demo's three reports; the private provider runs add the rest where this tree has them
+	least := 6 // the demo's three reports and test/reports' three; the private provider runs add the rest where present
 	if rundata.Present(t) {
-		least = 18
+		least = 21
 	}
 	if n < least || six == 0 {
 		t.Fatalf("want the saved corpus with at least one 6/6 (the demo's hardened box), got %d reports, %d at 6/6", n, six)
