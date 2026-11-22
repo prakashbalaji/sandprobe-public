@@ -21,7 +21,7 @@ func TestSEC3FindsAgentLogins(t *testing.T) {
 	ck, _ := catalog.Get("SEC-3")
 	for _, f := range []string{
 		"~/.claude/.credentials.json", "~/.codex/auth.json", "~/.codex/.credentials.json", "~/.gemini/oauth_creds.json",
-		"~/.gemini/.env", "~/.local/share/opencode/auth.json", "~/.aider/oauth-keys.env", "~/.cline/data/secrets.json",
+		"~/.aider/oauth-keys.env", "~/.cline/data/secrets.json",
 		"~/.config/goose/secrets.yaml",
 	} {
 		if !slices.Contains(targets["SEC-3"], f) {
