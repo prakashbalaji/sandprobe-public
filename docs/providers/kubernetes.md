@@ -82,7 +82,7 @@ of them ([AWS Nitro on EKS](aws-nitro.md)).
 
 | Check | Why |
 |-|-|
-| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default. Whoever hosts the cluster has terms the recipe can't know, so the checks that contact a provider's own endpoints stay off (the recipe's header, PRV-16). |
+| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default, since whoever hosts the cluster has terms the recipe can't know (the recipe's header, PRV-16). SEC-4, EGR-3 and AMP-7 would contact the provider's own endpoints: cloud metadata, the pod's proxy, the Kubernetes API. AMP-6 only checks for a vsock device and connects to nothing. |
 | PER-5 | The recipe has no reset (RCP-3). |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 

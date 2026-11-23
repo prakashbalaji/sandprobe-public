@@ -7,9 +7,11 @@
 # Every resource carries a fresh deployment ID in its name and tag, and its exact ID goes in the state file. down
 # deletes only those, after checking the tag, and counts one gone only on a definitive "not found": for the cluster,
 # that's one up saw, or one down deleted and waited out; a cluster asked for but never seen stays unresolved.
+# up records nothing until AWS answers as the profile, and down retires a record of no create with no AWS call (CLN-2).
 set -euo pipefail
 PROFILE=${PROFILE:?set PROFILE to the AWS CLI profile for the account the cluster runs in} REGION=${REGION:-us-west-2} VERSION=${VERSION:-1.37}
-STATE=${STATE:-$HOME/.config/sandprobe/eks-$PROFILE-$REGION.state}
+OWN_STATE=$HOME/.config/sandprobe/eks-$PROFILE-$REGION.state
+STATE=${STATE:-$OWN_STATE}
 MARK=sandprobe:deployment
 aws() { command aws --profile "$PROFILE" --region "$REGION" "$@"; }
 fail() { echo "eks.sh: $*" >&2; exit 1; }
@@ -32,6 +34,17 @@ role_owned() {
   [ "$(aws iam list-role-tags --role-name "$1" --query "Tags[?Key=='$MARK'].Value | [0]" --output text)" = "$(get did)" ] ||
     fail "role $1 doesn't carry this deployment's marker"
 }
+# CLN-2: up writes crole, nrole and cluster each before its create, so a state with none of them created nothing
+created_nothing() { [ -z "$(get crole)$(get nrole)$(get cluster)" ]; }
+again() { # the command that reruns this script on this state file, as pasted
+  local s=""
+  [ "$STATE" = "$OWN_STATE" ] || s=$(printf 'STATE=%q ' "$STATE")
+  printf '%sPROFILE=%q REGION=%q %q %s' "$s" "$PROFILE" "$REGION" "$0" "$1"
+}
+stopped() {
+  fail "deployment $(get did) in $STATE records no create: an earlier up stopped before its first one, so nothing was created. Retire the record with this down, which makes no AWS call here, then run up again:
+  $(again down)"
+}
 cluster_owned() {
   [ "$(aws eks describe-cluster --name "$1" --query "cluster.tags.\"$MARK\"" --output text)" = "$(get did)" ] ||
     fail "cluster $1 doesn't carry this deployment's marker"
@@ -49,6 +62,7 @@ role() { # name, service principal, policies...
 status() {
   local name
   [ -f "$STATE" ] || fail "no deployment in $STATE"
+  if created_nothing; then stopped; fi
   name=$(get cluster)
   cluster_owned "$name"
   [ "$(aws eks describe-cluster --name "$name" --query cluster.status --output text)" = ACTIVE ] || fail "cluster $name isn't active"
@@ -59,7 +73,18 @@ status() {
 
 up() {
   local did subnets crole nrole name kc
-  [ ! -f "$STATE" ] || fail "a deployment is recorded in $STATE: run status, or down first"
+  if [ -f "$STATE" ]; then
+    if created_nothing; then stopped; fi
+    fail "a deployment is recorded in $STATE: run status, or down first"
+  fi
+  # CLN-2: prove the profile works before anything is recorded. AWS's own output isn't printed. Exit 3 is this refusal
+  # alone, so a caller knows nothing was written or created.
+  if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "eks.sh: AWS doesn't answer as profile $PROFILE: sts get-caller-identity failed, so up recorded and created nothing. The first command shows AWS's error; for an SSO profile, the second signs in again. Then run up again:
+  aws sts get-caller-identity --profile $(printf %q "$PROFILE")
+  aws sso login --profile $(printf %q "$PROFILE")" >&2
+    exit 3
+  fi
   did=$(openssl rand -hex 4)
   mkdir -p "$(dirname "$STATE")"
   if [ "${DURABLE_STATE:-0}" = 1 ]; then
@@ -107,6 +132,12 @@ up() {
 down() {
   local name r v deleted err
   [ -f "$STATE" ] || fail "no deployment in $STATE"
+  if created_nothing; then # CLN-2: nothing to delete and no AWS call; the record is kept, as every down keeps it
+    v=$(get did)
+    mv "$STATE" "$STATE.down-$(date +%Y%m%d%H%M%S)"
+    echo "down: deployment $v created nothing, so nothing was deleted; its record is retired"
+    return
+  fi
   name=$(get cluster)
   if [ -n "$name" ] && exists eks describe-cluster --name "$name"; then
     # CLN-1: a just-finished Auto Mode change can temporarily block deletion.

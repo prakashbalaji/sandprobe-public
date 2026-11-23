@@ -102,6 +102,7 @@ class Commands:
 
     def call(self, args, payload=None, env=None, timeout=60, limit=1 << 20, pass_fds=(), quiesce_group=False):
         self.last_group_quiescent = False
+        self.last_returncode = None  # CLN-2: the exit code alone, once the command has finished
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise Failure("run_deadline")
@@ -131,6 +132,7 @@ class Commands:
                 if isinstance(error, QuiescenceError):
                     raise Failure("command_quiescence_unconfirmed") from None
                 raise Failure("command_unavailable_or_timed_out") from None
+            self.last_returncode = returncode
             if returncode:
                 errors.seek(0)
                 error = errors.read(8192)
