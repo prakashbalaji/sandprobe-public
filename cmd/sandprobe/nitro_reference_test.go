@@ -36,7 +36,7 @@ func TestNitroReferenceVariantsAndPlan(t *testing.T) {
 				t.Fatal("reference requirement does not match variant")
 			}
 		}
-		plan := nitroPlan("/k", &host.SSMCanary{Addr: "203.0.113.10", Dom: "example.test"}, runFlags{variant: variant}, spec)
+		plan := nitroPlan("/k", hostedChoice(t), runFlags{variant: variant}, spec)
 		if reference && (!strings.Contains(strings.Join(plan.Creates, " "), "UID/GID10001") || !strings.Contains(strings.Join(plan.Runs, " "), "deterministic shell task") || !strings.Contains(plan.LaunchPath, "HOME=/workspace")) {
 			t.Fatal("reference not disclosed before approval")
 		}

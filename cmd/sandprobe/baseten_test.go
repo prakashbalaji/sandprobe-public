@@ -16,7 +16,7 @@ import (
 
 func TestBasetenPlanAndApproval(t *testing.T) {
 	var out, errs bytes.Buffer
-	p := basetenPlan(&host.SSMCanary{Addr: "203.0.113.1", Dom: "probe.example"}, runFlags{basetenTeam: "team-test", basetenRegion: "us-pdx-1"})
+	p := basetenPlan(hostedChoice(t), runFlags{basetenTeam: "team-test", basetenRegion: "us-pdx-1"})
 	for _, s := range []string{"15-minute", "no secrets", "no volumes"} {
 		// Different sentences describe the no-volume reset and no-secret creation.
 		text := strings.Join(p.Creates, " ") + " " + p.Residual

@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
@@ -33,15 +32,15 @@ func daytonaClient(r runFlags) (*host.DaytonaClient, error) {
 	}
 	return host.NewDaytonaClient(key, r.daytonaPython)
 }
-func daytonaPlan(c *host.SSMCanary) planDoc {
-	return planDoc{Provider: "daytona", Creates: []string{"one US default prebuilt CPU sandbox; private, autoDeleteInterval=0, autoStopInterval=15, autoPauseInterval=0; no secrets or volumes"}, LaunchPath: "pinned daytona0.198.0 isolated host Python SDK, fixed US proxy, original sandbox ID and boot identity", Probe: "static Go probe, private upload with original SHA-256 verification", Contacts: []string{"our canary " + c.Addr + " (" + c.Dom + ") only"}, BoxNamed: []string{"metadata/proxy/vsock/Kubernetes excluded"}, Reset: "none; PER-5 skipped", Deletes: "original sandbox ID; verify provider404 or identity-bound destroyed state per SDK; terminal metadata residual explicit", Time: "one of two total authorized baselines; idle15min backstop, no separate smoke/retry", Residual: host.DaytonaResidual}
+func daytonaPlan(c canaryChoice) planDoc {
+	return planDoc{Provider: "daytona", Creates: []string{"one US default prebuilt CPU sandbox; private, autoDeleteInterval=0, autoStopInterval=15, autoPauseInterval=0; no secrets or volumes"}, LaunchPath: "pinned daytona0.198.0 isolated host Python SDK, fixed US proxy, original sandbox ID and boot identity", Probe: "static Go probe, private upload with original SHA-256 verification", Contacts: []string{c.describe}, BoxNamed: []string{"metadata/proxy/vsock/Kubernetes excluded"}, Reset: "none; PER-5 skipped", Deletes: "original sandbox ID; verify provider404 or identity-bound destroyed state per SDK; terminal metadata residual explicit", Time: "one of two total authorized baselines; idle15min backstop, no separate smoke/retry", Residual: withRetention(host.DaytonaResidual, c)}
 }
 func runDaytona(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := daytonaPlan(c)
+	p := daytonaPlan(choice)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -60,9 +59,6 @@ func runDaytona(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 			fmt.Fprintln(stderr, "Review the plan, then run sandprobe run daytona -y.")
 		}
 		return exitApproval, nil
-	}
-	if canaryErr != nil {
-		return 0, canaryErr
 	}
 	client, err := daytonaClient(r)
 	if err != nil {
@@ -83,9 +79,11 @@ func runDaytona(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Daytona account and key", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

@@ -214,3 +214,28 @@ func TestRunExecProviderEndpointsDocker(t *testing.T) {
 	}
 	t.Logf("Cloud access: green %v, %q %q", r.Green, r.Why, r.NotProven)
 }
+
+// HCN-5 and PRV-15: merging the canary and endpoint flags must preserve both decisions.
+// Planning performs no network calls and an explicit canary choice clears stale environment defaults.
+func TestProviderEndpointsWithExplicitCanary(t *testing.T) {
+	isolateCanary(t)
+	t.Setenv("SANDPROBE_CANARY", "/stale-canary.state")
+	t.Setenv("SANDPROBE_CANARY_URL", "https://stale.example")
+	t.Setenv("SANDPROBE_CANARY_PIN", "stale-pin")
+	for _, args := range [][]string{
+		{"plan", "exec", "-no-canary", "-provider-endpoints", "SEC-4,AMP-7", "-o", "json", "--", "sh"},
+		{"plan", "exec", "-canary-url", "https://control.sandprobe.test", "-canary-pin", testPin, "-provider-endpoints", "SEC-4,AMP-7", "-o", "json", "--", "sh"},
+	} {
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 {
+			t.Fatalf("plan: exit %d, %s", code, errs.String())
+		}
+		var p planDoc
+		if err := json.Unmarshal(out.Bytes(), &p); err != nil || len(p.Attested) != 2 {
+			t.Fatalf("canary selection lost attestations: %+v %v", p, err)
+		}
+		if strings.Contains(out.String(), "stale") {
+			t.Fatal("explicit canary selection retained an environment default")
+		}
+	}
+}

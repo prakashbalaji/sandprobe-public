@@ -79,7 +79,7 @@ func recipeExclusions(rc *host.Recipe) map[string]string {
 	return out
 }
 
-func recipePlan(b *host.RecipeBox, as string, c execCanary, attested []string, allowLocalProxy bool) planDoc {
+func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string, allowLocalProxy bool) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	rc := b.Recipe
 	user := "whoever the box runs it as, which the report calls unconfirmed as the agent's user"
@@ -94,10 +94,7 @@ func recipePlan(b *host.RecipeBox, as string, c execCanary, attested []string, a
 	if rc.AddressedBy == "name" {
 		launch += ". Before every invocation sp_whois must name the box the create returned (RCP-2)"
 	}
-	residual := host.RecipeResidual(rc, b.Target, attested)
-	if c.retainNote != "" {
-		residual += " " + c.retainNote
-	}
+	residual := withRetention(host.RecipeResidual(rc, b.Target, attested), c)
 	contacts, boxNamed := []string{c.describe}, []string{named}
 	lines, extra, attestedNamed := attestedPlan(attested, recipeExclusions(rc), false, "RCP-4")
 	if len(attested) > 0 {
@@ -131,7 +128,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	if r.as != "" && !validExecUser(r.as) {
 		return 0, fail("usage", "-as takes a plain user name or a uid", "-as agent", exitUsage)
 	}
-	choice, err := r.execCanaryChoice()
+	choice, err := r.chooseCanary()
 	if err != nil {
 		return 0, err
 	}
@@ -192,23 +189,14 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	if err != nil {
 		return 0, err
 	}
-	closeCanary := func() { // its own budget, even after Ctrl-C or a run that used all of its own
-		if public != nil {
-			cctx, ccancel := context.WithTimeout(context.Background(), time.Minute)
-			defer ccancel()
-			if cerr := public.Close(cctx); cerr != nil {
-				fmt.Fprintf(stderr, "sandprobe: %s\n", cerr)
-			}
-		}
-	}
 	j := recipeJournal{Recipe: name, SHA256: rc.SHA256, Target: target, Name: box.Name, Created: time.Now().UTC()}
 	if err := j.write(); err != nil { // nothing is created that isn't named on disk first
-		closeCanary()
+		closeCanary(public, stderr)
 		return 0, fail("local_error", "the box couldn't be recorded before its create, so nothing was created: "+err.Error(), "check that "+configDir()+" is writable", exitUsage)
 	}
 	fmt.Fprintf(stderr, "sandprobe: creating %s through the %s recipe in %s (recorded in %s)\n", box.Name, name, target, j.path())
 	if err := box.Create(ctx); err != nil && box.BoxID == "" {
-		closeCanary()
+		closeCanary(public, stderr)
 		return 0, fail("provider_error", err.Error()+"; it stays recorded in "+j.path(), "look for "+box.Name+" yourself; Sandprobe deletes only by a returned ID", exitCleanup)
 	} else {
 		j.ID = box.BoxID
@@ -218,7 +206,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		if err != nil {
 			err = fmt.Errorf("the create returned %s, then: %w", box.BoxID, err)
 			cleanup, cleaned := recipeCleanup(box, j, stderr)
-			closeCanary()
+			closeCanary(public, stderr)
 			return 0, fail("provider_error", err.Error()+"; "+cleanup, "see the message", failExit(cleaned))
 		}
 	}
@@ -245,7 +233,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		return err
 	}()
 	cleanup, cleaned := recipeCleanup(box, j, stderr)
-	closeCanary()
+	closeCanary(public, stderr)
 	if err != nil {
 		return 0, fail("provider_error", err.Error()+"; "+cleanup, "see the message", failExit(cleaned))
 	}

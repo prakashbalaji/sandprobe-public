@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
@@ -31,7 +30,7 @@ func basetenClient(r runFlags) (*host.BasetenClient, error) {
 	}
 	return c, nil
 }
-func basetenPlan(c *host.SSMCanary, r runFlags) planDoc {
+func basetenPlan(c canaryChoice, r runFlags) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	team := r.basetenTeam
 	if team == "" {
@@ -45,13 +44,13 @@ func basetenPlan(c *host.SSMCanary, r runFlags) planDoc {
 		LaunchPath:    "Baseten /process API as the image's default user, with no restart and a 95-second command timeout",
 		Probe:         "host-shipped binary in a private /tmp/sandprobe-<random> directory, digest verified before execution",
 		Markers:       "none: PER-5 is skipped because there is no run-owned persistent volume",
-		Contacts:      []string{"our canary " + c.Addr + " (" + c.Dom + "): TCP 443, 22, 80, 8080 and UDP 53, carrying only test nonces", "DNS names under dns." + c.Dom + " through the sandbox resolver"},
+		Contacts:      []string{c.describe, "its DNS names, through the sandbox resolver"},
 		BoxNamed:      []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 excluded by the initial Baseten scope (PRV-6)"},
 		OpensReadOnly: append(append([]string{}, sec3.Targets...), "credential-shaped paths and other-process environment/memory accessibility; never collect secret values"),
 		Runs:          []string{"sudo -n -l (policy listing only), plus probe upload/digest and architecture helpers"},
 		Reset:         "none: suspend/resume is not a reset; PER-5 is skipped",
 		Deletes:       "only the create-returned incarnation; verify TERMINATED or 404, otherwise retain journal and exit 7",
-		LocalProxy:    "excluded by Baseten scope even with -allow-local-proxy", Time: "one sandbox at a time, ten-minute run deadline and three-minute independent cleanup", Residual: host.BasetenResidual}
+		LocalProxy:    "excluded by Baseten scope even with -allow-local-proxy", Time: "one sandbox at a time, ten-minute run deadline and three-minute independent cleanup", Residual: withRetention(host.BasetenResidual, c)}
 	if r.keepSandbox {
 		p.Creates[1] = "one-hour automatic DELETE expiry from creation; lifecycle journal retained for inspection and verified cleanup"
 		p.Deletes = "after a valid complete run: intentionally retain the verified original sandbox until its fixed one-hour expiry; errors and interruptions still delete"
@@ -83,11 +82,11 @@ func approveBaseten(o opts, p planDoc, stderr io.Writer) (bool, error) {
 }
 func runBaseten(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	// Plan/approval comes before authentication or any resource creation (AGT-3).
-	c, err := r.liveCanary()
+	choice, err := r.chooseCanary()
 	if err != nil {
 		return 0, err
 	}
-	p := basetenPlan(c, r)
+	p := basetenPlan(choice, r)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -119,9 +118,11 @@ func runBaseten(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Baseten team access and API key", exitLogin)
 	}
-	if a, err := c.Ask(ctx, canary.Request{Op: "status"}); err != nil || !a.OK {
-		return 0, fail("provider_error", "the canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

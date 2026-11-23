@@ -18,12 +18,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"sandprobe/internal/canary"
 	"sandprobe/internal/canarycontrol"
+	"sandprobe/internal/obs"
 )
 
 const controlName = "control.sandprobe.test"
@@ -359,5 +362,101 @@ func TestHTTPSCanaryErrorsRedact(t *testing.T) {
 	}
 	if _, err := NewHTTPSCanary(context.Background(), "https://control.sandprobe.test", []string{"hunter2"}); err == nil || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("%v", err)
+	}
+}
+
+// steadyHealth is a public canary whose health connects are taken as confirmed, so the test never dials ports on this
+// machine; every control answer is still the real, signed one.
+type steadyHealth struct{ *HTTPSCanary }
+
+func (steadyHealth) Health(context.Context, int, canary.Key) bool { return true }
+
+// stepLog is one ordered record of what a run did: its control requests and its box's steps.
+type stepLog struct {
+	mu    sync.Mutex
+	steps []string
+}
+
+func (l *stepLog) add(s string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.steps = append(l.steps, s)
+}
+
+// logged records each control request's path before sending it.
+type logged struct {
+	base http.RoundTripper
+	log  *stepLog
+}
+
+func (l logged) RoundTrip(r *http.Request) (*http.Response, error) {
+	l.log.add("control " + r.URL.Path)
+	return l.base.RoundTrip(r)
+}
+
+// restoreBox resets in place (TWN-3's restore model) over one declared mount, so PER-5 runs, and logs each step.
+type restoreBox struct{ log *stepLog }
+
+func (restoreBox) ID() string { return "box-1" }
+func (b restoreBox) Probe(_ context.Context, args []string, stdin []byte) ([]byte, error) {
+	b.log.add("probe " + strings.Join(args, " "))
+	switch strings.Join(args, " ") {
+	case "-survey":
+		return json.Marshal(obs.Survey{Schema: obs.SurveySchema})
+	case "-mark":
+		var in obs.MarkInput
+		json.Unmarshal(stdin, &in)
+		d := obs.MarkDoc{Schema: obs.MarkSchema, RunID: in.RunID, Nonce: in.Nonce, BoxID: in.BoxID}
+		for _, pm := range in.Marks {
+			d.Marks = append(d.Marks, obs.Placed{Root: pm.Root, Path: pm.Path, Placed: true, Ino: 1, Size: int64(len(in.RunID))})
+		}
+		return json.Marshal(d)
+	}
+	return []byte("{}"), nil // the main run and the recheck: the grader judges them, not this test
+}
+func (restoreBox) Storage(context.Context) (Storage, error) {
+	return Storage{Model: "restore", Mounts: []string{"/data"}}, nil
+}
+func (b restoreBox) Reset(context.Context) (Box, *obs.ResetEvidence, error) {
+	b.log.add("reset")
+	return b, &obs.ResetEvidence{Model: "restore", BoxBefore: "box-1", BoxAfter: "box-1", Done: true}, nil
+}
+func (restoreBox) Teardown(context.Context, []obs.Volume) map[string]bool {
+	return map[string]bool{"": true}
+}
+
+// HCN-5's native adapters on a public canary, through PER-5's reset (TWN-3): one reserved slot covers the run, which is
+// armed, queried after the probe and disarmed before the mark and reset; the reset and recheck ask the canary nothing;
+// and Close leaves no slot held.
+func TestPublicCanaryThroughAReset(t *testing.T) {
+	c, _, hc := publicCanary(t)
+	log := &stepLog{}
+	hc.Client.Transport = logged{base: hc.Client.Transport, log: log}
+	ctx := context.Background()
+	if err := hc.Reserve(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	log.steps = nil
+	r, err := Execute(ctx, restoreBox{log: log}, steadyHealth{hc}, Options{Mode: "exec"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"probe -survey", "control /v1/status", "control /v1/arm", "probe ", "control /v1/query", "control /v1/disarm",
+		"probe -mark", "reset", "probe -recheck"}
+	if !slices.Equal(log.steps, want) {
+		t.Fatalf("steps:\n%s\nwant:\n%s", strings.Join(log.steps, "\n"), strings.Join(want, "\n"))
+	}
+	ev := r.Evidence
+	if !ev.Live || !ev.ReceiptsRead || ev.Reset == nil || ev.Reset.Mark == nil || ev.Reset.Recheck == nil {
+		t.Fatalf("live %v, read %v, reset %+v", ev.Live, ev.ReceiptsRead, ev.Reset)
+	}
+	if err := hc.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		q := canary.Request{Op: "reserve", TTL: 60, SecretSHA256: sha(fmt.Sprintf("%064x", i+1)), Challenge: strings.Repeat("ab", 32)}
+		if a := c.HandlePublic(q, "127.0.0.1"); !a.OK {
+			t.Fatalf("slot %d after the run: %s", i, a.Error)
+		}
 	}
 }

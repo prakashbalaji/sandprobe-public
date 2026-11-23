@@ -7,14 +7,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-
-	"sandprobe/internal/host"
 )
 
 // The Sprites plan names no Fly-owned endpoint: no metadata address, and the box-named destinations are excluded.
 func TestSpritesPlanContactsOnlyTheCanary(t *testing.T) {
 	var out bytes.Buffer
-	printPlan(&out, sprPlan("example-org", &host.SSMCanary{Addr: "192.0.2.10", Dom: "probe.example"}, runFlags{allowLocalProxy: true}, ""))
+	printPlan(&out, sprPlan("example-org", hostedChoice(t), runFlags{allowLocalProxy: true}, ""))
 	text := out.String()
 	for _, bad := range []string{"169.254.", "Kubernetes API the agent's environment names", "yes: EGR-3"} {
 		if strings.Contains(text, bad) {
@@ -40,7 +38,7 @@ func TestSpritesRefusesAllowLocalProxy(t *testing.T) {
 // SPR-1 and SPR-2: the approval names the setup script by its SHA-256, how it runs, the launcher it may leave, and
 // where the probe goes; a plan without -setup mentions none of that.
 func TestSpritesPlanNamesTheSetup(t *testing.T) {
-	c := &host.SSMCanary{Addr: "192.0.2.10", Dom: "probe.example"}
+	c := hostedChoice(t)
 	sum := strings.Repeat("ab", 32)
 	var with, without bytes.Buffer
 	printPlan(&with, sprPlan("example-org", c, runFlags{setup: "/home/me/setup.sh"}, sum))

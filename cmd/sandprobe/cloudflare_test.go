@@ -7,6 +7,7 @@ import (
 )
 
 func TestCloudflarePlanAndRunRequireNoCredentialsBeforeApproval(t *testing.T) {
+	isolateCanary(t) // HCN-5: nothing of the person's own canary setup reaches the test
 	for _, args := range [][]string{{"plan", "cloudflare", "-o", "json"}, {"run", "cloudflare", "-o", "json"}} {
 		var out, stderr bytes.Buffer
 		code := run(args, &out, &stderr)

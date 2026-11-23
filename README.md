@@ -71,13 +71,15 @@ its PRV row in SPEC.md.
 - **Test traffic, to a canary.** The probe sends DNS lookups and HTTPS, TCP and UDP attempts that carry only this
   run's random nonces. A way out counts only when the canary logs the nonce, and the host gets that receipt from the
   canary directly, never through the box.
-  - `run exec` and recipes use the hosted canary at `control.pub.probe.ac0.dev`, run by Summation and trusted only
-    under the control key this release pins. It sees two addresses. The box's public address, with the nonces its
-    test traffic carries, is kept only for the run's lifetime, at most 30 minutes. The public address of the machine
-    running Sandprobe, which reserves and arms the run, is kept in a rate counter for at most an hour. Both stay in
-    memory: the canary writes no access log and stores nothing.
-  - `run docker` starts its own canary container on your machine.
-  - The native provider adapters use a canary you deploy yourself (`deploy/canary.sh`).
+  - Every run but `run docker` uses the hosted canary at `control.pub.probe.ac0.dev` by default: `run exec`, recipes
+    and the native provider adapters. It is run by Summation and trusted only under the control key this release
+    pins. It sees two addresses. The box's public address, with the nonces its test traffic carries, is kept only for
+    the run's lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and
+    arms the run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log
+    and stores nothing.
+  - `run docker` always starts its own canary container on your machine, and refuses a canary flag.
+  - To use a canary you run yourself instead, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
+    `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No test traffic, with `-no-canary`** (`run exec` and recipes): the probe sends nothing out of the box, and no
   canary is contacted. Your own command, or the provider's API, is still used to reach the box. Exfiltration is then
   reported as not tested, and the run can't grade above C.
@@ -119,6 +121,18 @@ applicable: it is never green, the score is out of five, and a line under the sc
 injected into the box is still caught under Secrets. `run exec` and recipes leave Cloud access "Not tested", since
 there those endpoints may be yours, until you turn its checks on with `-provider-endpoints`. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its
 structure only: it can't re-verify the run or tell an edited report apart, and each says so.
+
+Current source builds also show catalog-wide measurement coverage (SCR-5): which
+checks have usable or conclusive results, and which remain skipped, missing,
+scoped out, unknown or unproven. The exposure score and coverage answer different
+questions; six green categories do not mean every check was conclusively assessed.
+
+For a network-enabled model workload, the managed [Nitro](deploy/eks-agent/README.md)
+and [Daytona](deploy/daytona-agent/README.md) guides run the same nine-case coding
+task and collect RC exposure plus a separate configuration assessment. Nitro uses
+guest-side model inference; Daytona uses host-controller inference without guest
+model credentials. Preserve that context when comparing results. Run records
+stay local and must not be committed to this public repository.
 
 Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 below `-min`, 7 a box not
 confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.

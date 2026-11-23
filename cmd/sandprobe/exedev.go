@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
@@ -35,15 +34,15 @@ func exedevClient(r runFlags) (*host.ExedevClient, error) {
 	return host.NewExedevClient(key)
 }
 func exedevDir() string { return filepath.Join(configDir(), "exedev") }
-func exedevPlan(c *host.SSMCanary, r runFlags) planDoc {
-	return planDoc{Provider: "exe.dev", Creates: []string{"one standalone Ubuntu 24.04 CPU VM, 2 vCPU/4GB; egress=all; unique sandprobe run tag; no supplied integrations or service credentials"}, LaunchPath: "native HTTPS /exec with one launch and bounded polls as image user; token stays on host", Probe: "shared static amd64/arm64 probe; chunked gzip upload, SHA-256 verified", Contacts: []string{"our canary " + c.Addr + " (" + c.Dom + ") only"}, BoxNamed: []string{"guest metadata/proxy/vsock/Kubernetes requests excluded"}, Reset: "none; PER-5 skipped", Deletes: "original create-returned NAME with birth/region/run-tag checks; acknowledged rm plus scoped API absence, not immutable-ID deletion", Time: "one fresh CPU VM; no automatic create retry; NO provider-enforced expiry", Residual: host.ExedevResidual}
+func exedevPlan(c canaryChoice, r runFlags) planDoc {
+	return planDoc{Provider: "exe.dev", Creates: []string{"one standalone Ubuntu 24.04 CPU VM, 2 vCPU/4GB; egress=all; unique sandprobe run tag; no supplied integrations or service credentials"}, LaunchPath: "native HTTPS /exec with one launch and bounded polls as image user; token stays on host", Probe: "shared static amd64/arm64 probe; chunked gzip upload, SHA-256 verified", Contacts: []string{c.describe}, BoxNamed: []string{"guest metadata/proxy/vsock/Kubernetes requests excluded"}, Reset: "none; PER-5 skipped", Deletes: "original create-returned NAME with birth/region/run-tag checks; acknowledged rm plus scoped API absence, not immutable-ID deletion", Time: "one fresh CPU VM; no automatic create retry; NO provider-enforced expiry", Residual: withRetention(host.ExedevResidual, c)}
 }
 func runExedev(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := exedevPlan(c, r)
+	p := exedevPlan(choice, r)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -63,9 +62,6 @@ func runExedev(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		return exitApproval, nil
 	}
-	if canaryErr != nil {
-		return 0, canaryErr
-	}
 	client, err := exedevClient(r)
 	if err != nil {
 		return 0, err
@@ -82,9 +78,11 @@ func runExedev(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check exe.dev token and account access", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the VM exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

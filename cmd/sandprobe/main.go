@@ -101,10 +101,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return reportErr(o, stderr, fail("usage", err.Error(), "sandprobe help", exitUsage))
 	}
-	fs.Visit(func(f *flag.Flag) {
-		r.outSet = r.outSet || f.Name == "out"
-		r.providerEndpointsSet = r.providerEndpointsSet || f.Name == "provider-endpoints"
-	})
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	r.outSet = given["out"]
+	r.settleCanary(given) // HCN-5: a canary flag beats every SANDPROBE_CANARY* value
+	r.providerEndpointsSet = given["provider-endpoints"]
 	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
 	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
 	if passthrough != nil && !docker && !execRun {
@@ -234,10 +235,12 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
 -min <letter> to exit 6 below a grade; -theme modern|mission; -allow-local-proxy.
-run exec and recipes use the hosted canary by default; -canary-url <url> -canary-pin <pin> names your own, and
--no-canary sends no test traffic at all, leaving Exfiltration untested (HCN-5). Both keep SEC-4, EGR-3, AMP-6 and
-AMP-7 off, since they contact your provider's own endpoints; -provider-endpoints <IDs> turns named ones on, each
-one you attest your provider's terms allow on your own account (PRV-15).
+Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names a public canary you run, and
+-canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
+SANDPROBE_CANARY* variable aside. run docker always starts its own canary and takes no canary flag.
+run exec and recipes also take -no-canary, which sends no test traffic at all, leaving Exfiltration untested (HCN-5).
+run exec and recipes keep SEC-4, EGR-3, AMP-6 and AMP-7 off, since they contact your provider's own endpoints;
+-provider-endpoints <IDs> turns named ones on, each one you attest your provider's terms allow on your account (PRV-15).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....

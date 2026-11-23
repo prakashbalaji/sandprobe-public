@@ -11,6 +11,7 @@ import (
 )
 
 func TestE2BPlanDoesNotNeedCredentialsCanaryOrSDK(t *testing.T) {
+	isolateCanary(t) // HCN-5: nothing of the person's own canary setup reaches the test
 	t.Setenv("SANDPROBE_E2B_KEY_FILE", "/does/not/exist")
 	t.Setenv("SANDPROBE_E2B_PYTHON", "/does/not/exist")
 	t.Setenv("SANDPROBE_CANARY", "/does/not/exist")
