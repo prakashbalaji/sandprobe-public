@@ -39,7 +39,8 @@ class ControllerTests(unittest.TestCase):
   feedback=result['messages'][2]['content'][0]['text']
   for i in [1,3,4]:
    self.assertIn(json.dumps(c.coding.CASES[i-1][0]),feedback)
-  self.assertIn('"apple":7',feedback)
+  self.assertIn('"returns":{"apple":7,"pear":3}',feedback)
+  self.assertNotIn('"ok":',feedback)
   self.assertNotIn(json.dumps(c.coding.CASES[8][0]),feedback)
   self.assertEqual(result['inferenceConfig'],{'maxTokens':2048,'temperature':0})
   verification['diagnostics']['candidate_stdout']='synthetic-untrusted-detail'

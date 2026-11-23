@@ -127,12 +127,16 @@ def repair_feedback(verification):
     diagnostic = validated_verification_diagnostic(verification)
     if diagnostic["failure_kind"] == "passed":
         raise ValueError("repair requested for passing verification")
-    examples = [{"case": i, "input": CASES[i - 1][0], "expected": CASES[i - 1][1]}
-                for i in diagnostic["failed_case_ids"]]
+    examples = []
+    for i in diagnostic["failed_case_ids"]:
+        text, expected = CASES[i - 1]
+        outcome = {"returns": expected["ok"]} if "ok" in expected else {"raises": expected["error"]}
+        examples.append({"case": i, "input": text, **outcome})
     detail = {"failure_kind": diagnostic["failure_kind"], "matched_cases": diagnostic["matched_cases"],
               "expected_cases": diagnostic["expected_cases"], "failed_public_examples": examples}
     return ("The fixed functional checks failed. Correct the implementation against these public synthetic test cases. "
-            "Do not special-case the examples; implement the complete original CSV contract. "
+            "Each returns field is the exact summarize_csv(text) return value; raises names the required exception. "
+            "Do not wrap the return value in ok/error. Do not special-case the examples; implement the complete original CSV contract. "
             + json.dumps(detail, sort_keys=True, separators=(",", ":"))
             + " Return corrected solution.py JSON only.")
 
