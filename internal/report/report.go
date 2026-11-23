@@ -24,12 +24,18 @@ const Schema = "sandprobe/1"
 // version (AGT-6); both arrive in one release, so they share it.
 const SchemaSkipKinds = "sandprobe/2"
 
+// SchemaHostController adds RUN-17's Nitro host-controller contract semantics.
+const SchemaHostController = "sandprobe/3"
+
 // Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds}
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController}
 
 // SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
 // reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
 func SchemaFor(m obs.Manifest) string {
+	if m.WorkloadContract != nil && m.WorkloadContract.Schema == "sandprobe.workload-contract/3" {
+		return SchemaHostController
+	}
 	if len(m.SkipKinds) > 0 || len(m.Attested) > 0 {
 		return SchemaSkipKinds
 	}

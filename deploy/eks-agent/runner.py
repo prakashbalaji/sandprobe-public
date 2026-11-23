@@ -15,6 +15,7 @@ import sys
 import time
 
 from assessment import evaluate, guest_document
+import host_workload
 from coding import strict
 from lifecycle import Commands, Failure, Journal, directory
 from render_profile import HOSTNAME, REGION, FixedErrorParser, render
@@ -109,9 +110,12 @@ def trust_policy(cluster_arn, namespace):
 
 
 class Runner:
-    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None):
+    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python=""):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
             raise Failure("invalid_profile")
+        if controller not in {"guest", "host"}:
+            raise Failure("invalid_controller_pattern")
+        self.controller, self.model_python, self.source_root = controller, model_python, ROOT
         self.journal, self.profile = journal, profile
         parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
         self.upload_hosts = parse_hosts(",".join(upload_hosts or []))
@@ -163,9 +167,13 @@ class Runner:
     def preflight(self, model, approval, image_run_id=None):
         if not isinstance(approval, str) or not 3 <= len(approval) <= 512 or not approval.isprintable():
             raise Failure("aws_eks_testing_approval_reference_required")
+        if self.controller == "host":
+            if model != host_workload.MODEL:
+                raise Failure("host_controller_requires_fixed_model")
+            host_workload.model_preflight(self)
         # Validate the supported model syntax using the same renderer as live.
         render(self.run_id, f"{ACCOUNT}.dkr.ecr.{REGION}.amazonaws.com/{self.name}@sha256:" + "a" * 64,
-               ACCOUNT, model, ["52.94.0.1"], "172.20.0.10")
+               ACCOUNT, model, ["52.94.0.1"], "172.20.0.10", controller=self.controller)
         tools = ["aws", "kubectl", "bash", "git", "go", "make", "cf", "jq", "openssl", "ps"] + (["docker"] if image_run_id is None else ["gh", "skopeo"])
         for tool in tools:
             if not shutil.which(tool):
@@ -212,7 +220,8 @@ class Runner:
         self.journal.data.update(model=model, profile=self.profile, account=ACCOUNT,
             approval_reference_sha256=hashlib.sha256(approval.encode()).hexdigest(),
             endpoint_resolution={"hostname": HOSTNAME, "ipv4": ips, "resolved_at": int(time.time())},
-            source_commit=source_commit, phase="preflight_passed")
+            source_commit=source_commit, controller=self.controller,
+            deployment_pattern="host_controller_no_guest_credentials" if self.controller == "host" else "guest_assigned_identity", phase="preflight_passed")
         self.journal.save()
 
     def kube(self, *args, payload=None, timeout=60):
@@ -494,11 +503,12 @@ class Runner:
         self.stage("task_setup")
         model = self.journal.data["model"]
         plan = render(self.run_id, self.image, ACCOUNT, model,
-                      self.journal.data["endpoint_resolution"]["ipv4"], dns_ip)
+                      self.journal.data["endpoint_resolution"]["ipv4"], dns_ip, controller=self.controller)
         items = plan["kubernetes"]["items"]
         for resource in items[:-1]:
             self.create(resource)
-        self.role(plan["iam_policy"])
+        if self.controller == "guest":
+            self.role(plan["iam_policy"])
         nonces = [secrets.token_hex(24) for _ in range(3)]
         self.journal.data["nonces"] = nonces
         self.journal.save()
@@ -536,7 +546,7 @@ class Runner:
         spec["nodeSelector"] = self.task_node_selector()
         spec["tolerations"] = [{"key": "sandprobe.run", "operator": "Equal", "value": self.run_id, "effect": "NoSchedule"}]
         container = spec["containers"][0]
-        container["command"] = ["python", "-I", "/opt/sandprobe/execute.py"]
+        container["command"] = host_workload.IDLE_COMMAND if self.controller == "host" else ["python", "-I", "/opt/sandprobe/execute.py"]
         container["env"] += [{"name": "SANDPROBE_RUN_ID", "value": self.run_id},
                              {"name": "SANDPROBE_POD_UID", "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}}},
                              {"name": "SANDPROBE_RECEIVER_IP", "value": receiver_ip},
@@ -565,8 +575,9 @@ class Runner:
         self.stage("workload_contract_freeze")
         self.freeze_workload_contract(pod_name)
         self.stage("task_execution")
-        self.kube("exec", pod_name, "-n", self.ns, "--", "python", "-I", "-c",
-            "import os;f=os.open('/workspace/.host-release',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600);os.write(f,b'" + self.run_id + "');os.close(f)")
+        if self.controller == "guest":
+            self.kube("exec", pod_name, "-n", self.ns, "--", "python", "-I", "-c",
+                "import os;f=os.open('/workspace/.host-release',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600);os.write(f,b'" + self.run_id + "');os.close(f)")
         raw = self.collect_task_and_grade(pod_name, job_uid, config_sha)
         self.delete_job()
         self.control(receiver_ip, nonces[2])
@@ -584,7 +595,8 @@ class Runner:
         self.journal.save()
 
     def collect_task_and_grade(self, pod_name, job_uid, config_sha):
-        raw = self.wait_workload(pod_name, config_sha)
+        raw = (host_workload.perform(self, pod_name, config_sha) if self.controller == "host"
+               else self.wait_workload(pod_name, config_sha))
         # RUN-8: preserve workload outcome even if standard grading fails.
         self.journal.data["guest"] = raw
         self.journal.save()
@@ -595,6 +607,8 @@ class Runner:
         return raw
 
     def identity_configuration_hash(self):
+        if self.controller == "host":
+            return host_workload.identity_hash(self)
         # WGR-4: exact requested IAM configuration, not all effective permissions.
         role = self.journal.data["resources"]["role"]
         if self.aws("iam", "get-role", "--role-name", self.name, query="Role.RoleId") != role["role_id"]:
@@ -611,6 +625,8 @@ class Runner:
         return hashlib.sha256(encoded(policy)).hexdigest()
 
     def workload_fixture_context(self, pod_name):
+        if self.controller == "host":
+            return host_workload.fixture_context(self, pod_name)
         # WGR-1/2: stat metadata only; no token/marker contents read. The image,
         # private PID/mount/identity context were checked by verify_task_pod.
         script = """import os,stat,json
@@ -640,13 +656,22 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
             home_context=guard['validate'](strict(raw.decode(),8192))
         except (ValueError,TypeError,KeyError):
             raise Failure('workload_home_configuration_mismatch') from None
-        return {"schema": "sandprobe.workload-contract/1", "profile": "networked-coding-v1",
+        contract = {"schema": "sandprobe.workload-contract/1", "profile": "networked-coding-v1",
                 "managed_run_id": self.run_id, "box_id": self.journal.data["context"]["pod_uid"],
                 "image": self.image, "config_sha256": self.journal.data["context"]["config_sha256"],
                 "agent_home_sha256": hashlib.sha256(encoded(home_context)).hexdigest(),
                 "identity_policy_sha256": self.identity_configuration_hash(),
-                "token_canonical": token["canonical"], "token_device": token["device"], "token_inode": token["inode"], "protected_device": token["protected_device"], "protected_inode": token["protected_inode"],
+                "token_canonical": token.get("canonical", ""), "token_device": token.get("device", 0), "token_inode": token.get("inode", 0), "protected_device": token["protected_device"], "protected_inode": token["protected_inode"],
                 "private_container_verified": True, "identity_configuration_verified": True, "protected_fixture_verified": True}
+        if self.controller == "host":
+            if not runtime_image_matches(self.image, self.journal.data.get("runtime_image_id")):
+                raise Failure("host_controller_image_unverified")
+            for key in ["token_canonical", "token_device", "token_inode"]:
+                del contract[key]
+            contract.update(schema="sandprobe.workload-contract/3", provider="aws-nitro",
+                            identity_mode="host_controller_no_guest_credentials", agent_uid=10001, agent_gid=10001,
+                            image_content_verified=True)
+        return contract
 
     def freeze_workload_contract(self, pod_name):
         if "workload_contract" in self.journal.data:
@@ -781,7 +806,8 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         bundle = strict(self.ops.call([str(self.journal.folder / "standard-grade")],
             payload=encoded(request), env=self.env, timeout=500, limit=4 << 20).decode(), 4 << 20)
         report = bundle["report"]
-        if (report["schema"] != "sandprobe/1" or report["run"]["box"]["provider_id"] != request["pod"]["uid"]
+        expected_schema = "sandprobe/3" if self.controller == "host" else "sandprobe/1"
+        if (report["schema"] != expected_schema or report["run"]["box"]["provider_id"] != request["pod"]["uid"]
                 or report["run"]["provider"] != "aws-nitro"):
             raise Failure("standard_report_binding_mismatch")
         for name, data in [("legacy-standard-report.json", encoded(report)),
@@ -823,41 +849,47 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                 actual_pod.pop(key)
         if actual_pod != expected_pod:
             raise Failure("unexpected_pod_security_override")
-        volumes = self.projection("pod", name, "{.spec.volumes}", self.ns)
-        if not isinstance(volumes, list) or len(volumes) != 3:
-            raise Failure("unexpected_volume_set")
-        by_name = {v.get("name"): v for v in volumes}
-        if len(by_name) != 3 or set(by_name) != {"workspace", "scratch", "eks-pod-identity-token"}:
-            raise Failure("unexpected_volume_set")
-        for key in ["workspace", "scratch"]:
-            if by_name[key] != {"name": key, "emptyDir": {"sizeLimit": "64Mi"}}:
-                raise Failure("unexpected_volume_source")
-        token = by_name["eks-pod-identity-token"]
-        projected = token.get("projected", {})
-        if set(token) != {"name", "projected"} or set(projected) - {"defaultMode", "sources"}:
-            raise Failure("unexpected_identity_volume")
-        sources = projected.get("sources")
-        if (projected.get("defaultMode", 420) != 420 or not isinstance(sources, list) or len(sources) != 1
-                or set(sources[0]) != {"serviceAccountToken"}):
-            raise Failure("unexpected_identity_projection")
-        value = sources[0]["serviceAccountToken"]
-        lifetime = value.get("expirationSeconds")
-        if (set(value) != {"audience", "path", "expirationSeconds"} or value.get("audience") != "pods.eks.amazonaws.com"
-                or value.get("path") != "eks-pod-identity-token" or type(lifetime) is not int
-                or not 3600 <= lifetime <= 86400):
-            raise Failure("unexpected_identity_token_context")
-        mounts = self.projection("pod", name, "{.spec.containers[0].volumeMounts}", self.ns)
-        if not isinstance(mounts, list) or len(mounts) != 3:
-            raise Failure("unexpected_mount_set")
-        mount_map = {m.get("name"): m for m in mounts}
-        expected_mounts = {"workspace": {"name": "workspace", "mountPath": "/workspace"},
-                           "scratch": {"name": "scratch", "mountPath": "/tmp"},
-                           "eks-pod-identity-token": {"name": "eks-pod-identity-token", "mountPath": "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount", "readOnly": True}}
-        for mount in mount_map.values():
-            if mount.get("readOnly") is False:
-                mount.pop("readOnly")
-        if mount_map != expected_mounts or len(mount_map) != 3:
-            raise Failure("unexpected_mount_options")
+        if self.controller == "host":
+            volumes = self.projection("pod", name, "{.spec.volumes}", self.ns)
+            mounts = self.projection("pod", name, "{.spec.containers[0].volumeMounts}", self.ns)
+            if not host_workload.valid_storage(volumes, mounts):
+                raise Failure("unexpected_host_controller_storage")
+        else:
+            volumes = self.projection("pod", name, "{.spec.volumes}", self.ns)
+            if not isinstance(volumes, list) or len(volumes) != 3:
+                raise Failure("unexpected_volume_set")
+            by_name = {v.get("name"): v for v in volumes}
+            if len(by_name) != 3 or set(by_name) != {"workspace", "scratch", "eks-pod-identity-token"}:
+                raise Failure("unexpected_volume_set")
+            for key in ["workspace", "scratch"]:
+                if by_name[key] != {"name": key, "emptyDir": {"sizeLimit": "64Mi"}}:
+                    raise Failure("unexpected_volume_source")
+            token = by_name["eks-pod-identity-token"]
+            projected = token.get("projected", {})
+            if set(token) != {"name", "projected"} or set(projected) - {"defaultMode", "sources"}:
+                raise Failure("unexpected_identity_volume")
+            sources = projected.get("sources")
+            if (projected.get("defaultMode", 420) != 420 or not isinstance(sources, list) or len(sources) != 1
+                    or set(sources[0]) != {"serviceAccountToken"}):
+                raise Failure("unexpected_identity_projection")
+            value = sources[0]["serviceAccountToken"]
+            lifetime = value.get("expirationSeconds")
+            if (set(value) != {"audience", "path", "expirationSeconds"} or value.get("audience") != "pods.eks.amazonaws.com"
+                    or value.get("path") != "eks-pod-identity-token" or type(lifetime) is not int
+                    or not 3600 <= lifetime <= 86400):
+                raise Failure("unexpected_identity_token_context")
+            mounts = self.projection("pod", name, "{.spec.containers[0].volumeMounts}", self.ns)
+            if not isinstance(mounts, list) or len(mounts) != 3:
+                raise Failure("unexpected_mount_set")
+            mount_map = {m.get("name"): m for m in mounts}
+            expected_mounts = {"workspace": {"name": "workspace", "mountPath": "/workspace"},
+                               "scratch": {"name": "scratch", "mountPath": "/tmp"},
+                               "eks-pod-identity-token": {"name": "eks-pod-identity-token", "mountPath": "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount", "readOnly": True}}
+            for mount in mount_map.values():
+                if mount.get("readOnly") is False:
+                    mount.pop("readOnly")
+            if mount_map != expected_mounts or len(mount_map) != 3:
+                raise Failure("unexpected_mount_options")
         if self.projection("pod", name, "{.spec.nodeSelector}", self.ns) != self.task_node_selector():
             raise Failure("unexpected_node_selector")
         tolerations = self.projection("pod", name, "{.spec.tolerations}", self.ns)
@@ -884,7 +916,10 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                     "SANDPROBE_CONFIG_SHA256": self.journal.data["context"]["config_sha256"],
                     "AWS_CONTAINER_CREDENTIALS_FULL_URI": "http://169.254.170.23/v1/credentials",
                     "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE": "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"}
-        optional = {"AWS_DEFAULT_REGION": REGION, "AWS_STS_REGIONAL_ENDPOINTS": "regional"}
+        if self.controller == "host":
+            for key in ["AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"]:
+                del expected[key]
+        optional = {} if self.controller == "host" else {"AWS_DEFAULT_REGION": REGION, "AWS_STS_REGIONAL_ENDPOINTS": "regional"}
         names = list(expected) + list(optional) + ["SANDPROBE_POD_UID"]
         allowed = " ".join("(eq .name " + json.dumps(key) + ")" for key in names)
         source = "{{with index .spec.containers 0}}{{range .env}}{{if not (or " + allowed + ")}}unexpected{{end}}{{end}}{{end}}"
@@ -902,12 +937,17 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         source = '{{with index .spec.containers 0}}{{if or .lifecycle .startupProbe .livenessProbe .readinessProbe .args}}unexpected{{end}}{{end}}'
         if self.template_result(name, source):
             raise Failure("unexpected_container_hook_or_arguments")
-        source = '{{with index .spec.containers 0}}{{if and (eq (len .command) 3) (eq (index .command 0) "python") (eq (index .command 1) "-I") (eq (index .command 2) "/opt/sandprobe/execute.py")}}match{{else}}mismatch{{end}}{{end}}'
+        command = host_workload.IDLE_COMMAND if self.controller == "host" else ["python", "-I", "/opt/sandprobe/execute.py"]
+        pieces = ["(eq (len .command) " + str(len(command)) + ")"] + ["(eq (index .command " + str(i) + ") " + json.dumps(value) + ")" for i, value in enumerate(command)]
+        source = '{{with index .spec.containers 0}}{{if and ' + ' '.join(pieces) + '}}match{{else}}mismatch{{end}}{{end}}'
         if self.template_result(name, source) != "match":
             raise Failure("unexpected_task_command")
         source = '{{if or .spec.hostAliases .spec.dnsConfig .spec.shareProcessNamespace}}unexpected{{end}}'
         if self.template_result(name, source):
             raise Failure("unexpected_pod_routing_or_process_override")
+        if self.controller == "host":
+            host_workload.fixture_context(self, name)
+            return
         # File metadata only; token value is consumed solely by the SDK later.
         self.stage("task_guard_token_metadata")
         result = self.guard_read(self.kube, "exec", name, "-n", self.ns, "--", "python", "-I", "-c",
@@ -1193,6 +1233,8 @@ def main():
     parser.add_argument("--run-id")
     parser.add_argument("--image-run-id")
     parser.add_argument("--profile", default=PROFILE)
+    parser.add_argument("--controller", choices=["guest", "host"], default="guest")
+    parser.add_argument("--model-python", default="")
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     journal = None
     try:
@@ -1211,7 +1253,7 @@ def main():
             if not args.approval_ref:
                 raise Failure("aws_eks_testing_approval_reference_required")
             journal = Journal(STATE_ROOT, secrets.token_hex(8), create=True)
-        runner = Runner(journal, args.profile, upload_hosts=approved_hosts)
+        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=args.controller, model_python=args.model_python)
         if args.command == "cleanup":
             clean = runner.cleanup()
             print(json.dumps({"run_id": runner.run_id, "cleanup_confirmed": clean}))

@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 
 sys.path.insert(0, "/opt/sandprobe")
 import task
@@ -14,6 +15,8 @@ class ExplicitStub:
         return {"output": {"message": {"content": [{"text": json.dumps({"solution.py": source})}]}}}
 
 assert os.getuid() == 10001
+prepared = subprocess.run([sys.executable, "-I", "/opt/sandprobe/worker.py", "prepare"], check=True, capture_output=True, timeout=10)
+assert json.loads(prepared.stdout) == {"worker_ready": True}
 result = task.perform(ExplicitStub(), "explicit-local-stub", "/workspace")
 assert result["functional_tests"] == 9 and result["independent_verification"] == "passed"
 assert result["security_grade"] == "not_assessed"

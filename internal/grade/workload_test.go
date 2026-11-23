@@ -2,6 +2,7 @@ package grade
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,6 +52,21 @@ func TestWorkloadAllowedCapabilitiesAreNotCritical(t *testing.T) {
 	}
 	if r.SecurityAssurance != ConfigurationAssurance {
 		t.Fatal("invented assurance")
+	}
+}
+
+func TestNitroHostControllerDoesNotPermitGuestCredentials(t *testing.T) {
+	m, d, evidence := workloadCase()
+	c := m.WorkloadContract
+	c.Schema, c.Provider, c.IdentityMode = "sandprobe.workload-contract/3", "aws-nitro", "host_controller_no_guest_credentials"
+	c.AgentUID, c.AgentGID, c.TokenCanonical, c.TokenDevice, c.TokenInode = 10001, 10001, "", 0, 0
+	c.ImageContentVerified, c.AgentHomeSHA256 = true, strings.Repeat("e", 64)
+	o := observation(d, "SEC-1")
+	o.Result, o.Variant, o.Proof = obs.Finding, "names", nil
+	o.ObservedNames = []string{"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"}
+	r := runWorkload(m, d, evidence, "reported_passed")
+	if !r.Valid || r.BenchmarkRequirementsMet || !slices.Contains(r.Unknown, "SEC-1") {
+		t.Fatalf("host-controller identity inherited a guest credential allowance: %+v", r)
 	}
 }
 

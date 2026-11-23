@@ -37,7 +37,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if err := catalog.ValidateUploadHosts(q.UploadHosts); err != nil {
 		return err
 	}
-	if q.Contract == nil || q.Contract.Schema != "sandprobe.workload-contract/1" || obs.ValidateWorkloadContract(q.Contract) != nil || q.Contract.BoxID != q.Pod.UID ||
+	if q.Contract == nil || (q.Contract.Schema != "sandprobe.workload-contract/1" && q.Contract.Schema != "sandprobe.workload-contract/3") || obs.ValidateWorkloadContract(q.Contract) != nil || q.Contract.BoxID != q.Pod.UID ||
 		q.Contract.ManagedRunID != q.Pod.RunID || q.Contract.Image != q.Pod.Image || q.Contract.ConfigSHA256 != q.Pod.ConfigSHA256 {
 		return errors.New("frozen workload contract mismatch")
 	}

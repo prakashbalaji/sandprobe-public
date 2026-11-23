@@ -708,6 +708,29 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   preserve historical output. Shared summary recomputation and the native Daytona
   runner must use identical score rules. Existing exit/cleanup gates remain.
 
+- **RUN-17 Host-controller workload parity.** Managed Nitro may explicitly select
+  `--controller host --model-python <pinned interpreter>` to match Daytona's
+  `host_controller_no_guest_credentials` deployment pattern. Preserve the legacy
+  guest-controller default and its schema1 identity contract. The host mode uses
+  the same prompt/parser, fixed regional Ministral model, at most two requests and
+  nine sandbox-executed functional cases as Daytona. Generated code never executes
+  on the controller. Perform the pinned model SDK/account preflight before any paid
+  create. Create no model IAM role or Pod Identity association; verify no association,
+  credential environment entry, token projection or extra mount before model release
+  and after the task. Host mode removes the unused Pod Identity metadata egress allowance;
+  it retains only the fixed model IPs on443 and the declared DNS endpoint. Keep the original pod/container ID, image digest, network policy,
+  non-root/capability/seccomp/no-new-privileges guards and independent receiver controls.
+  Root-owned verification tools are built into the pinned read-only image. Only the
+  solution is uploaded, atomically under the agent's workspace; verify its digest
+  inside the same sandbox with the shared worker. Before model requests the worker
+  checks immutable tool metadata and a private writable cache. CI executes it inside
+  a network-disabled, read-only, non-root container. Model/parser children receive no
+  DNS credential or endpoint/retry override. A host-controller contract declares
+  `sandprobe.workload-contract/3`, bound to `aws-nitro`, uid/gid10001, the protected
+  fixture/home and verified image; it contains no guest token fields. Its report
+  declares `sandprobe/3` so older readers refuse the new contract semantics by version.
+  This does not turn provider endpoint exclusions or absent reset evidence into tests.
+
 - **RUN-15 Protected startup configuration, writable project.** Improve the
   configuration shared by the Nitro and Daytona workload runs: HOME points to an
   owner-root0555 directory under the owned /opt/sandprobe fixture, with protected
@@ -1598,7 +1621,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 ### OUT: what it writes
 
 - **OUT-1 JSON.** `schema`, the lowest version whose fields the report needs (AGT-6): `sandprobe/1`; `sandprobe/2`
-  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
+  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `sandprobe/3` for RUN-17's Nitro host-controller contract; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
   UTC)`, duration_ms, mode, provider, box {provider_id, name, created_by_sandprobe}}`; `manifest`; `identity` (SBX-4);
   `toolchain [{name, path, owner, mode, link_target}]` (lstat metadata of box tools, never a hash: only `probe.sha256` is a digest); `overrides []`; `checks [{id, category, kind, result, evidence_class,
   severity, scope {destination, port, route}, evidence, proof {mechanism, result}, clients, fix, duration_ms,
@@ -1712,7 +1735,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   a `sandprobe/1` report carries none of them in any form (JON-1). A reader older than a report refuses
   it as unsupported input; its fix names the versions it reads, and the report's own `schema` says which it is. Versions:
   `sandprobe/1`; `sandprobe/2` adds the manifest's `SkipKinds` (SCR-2), and its `Attested` with a check's
-  `attestation` (PRV-15), both new in one release.
+  `attestation` (PRV-15), both new in one release; `sandprobe/3` adds RUN-17's Nitro host-controller contract semantics. A schema3 contract requires that report version, with or without schema2 fields.
 
 ### PRV: providers
 
@@ -2373,6 +2396,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | PRV-15 (transport) | `internal/host/exec_test.go`: through a real `sh`, nothing runs before the preflight, a refused preflight stops everything, every run is bound with `-expect-uid`, banners outside the markers are ignored, SEC-1's twin is set, a pre-existing scratch path is left alone even when its "already exists" answer is lost, and a path the box swaps in during a run survives the wrapper's own trap (only a path carrying this box's owner token is ever removed, by the trap, the removal invocation or the suggested command), an invocation killed past its limit is cleared by the separate removal invocation, an unreachable box leaves the path and its removal command reported and blocks further runs, a command that fails after running the script counts for nothing, a removal through a failing command or under an unsearchable parent isn't "gone", arguments with shell syntax are refused; `TestExecBoxDocker` (SANDPROBE_FIXTURES=1): the shipped probe through `docker exec -i` as nobody, a switch to root refused with nothing written, no scratch left |
 | PRV-15 (provider endpoints) | `cmd/sandprobe/endpoints_test.go`: `TestProviderEndpointsParse` (the four IDs, each once, trimmed; empty, an empty item, `all`, `*`, lowercase, any other ID, a duplicate, another separator, or a check the run doesn't exclude are refused, and an unknown value is never echoed; the rest stay excluded), `TestProviderEndpointsOnlyWhereTheyApply` (refused on run docker, native adapters, aws-nitro and offline commands, and empty or `all` on exec), `TestProviderEndpointsPlan` (each attested check with its attestation, the metadata address and the API handshake it adds, the checks still off, the residual; AMP-6 still won't run on an existing box; `-allow-local-proxy` only with EGR-3; an unapproved run exits 3 with the attestation in its JSON plan), `TestProviderEndpointsWithExplicitCanary` (endpoint selection survives an explicit no-canary or public-canary choice beside stale environment defaults, with no network calls), `TestProviderEndpointsRecipePlan` (a shipped recipe, through a stub kubectl: the same plan lines under RCP-4, nothing past sp_ready), `TestProviderEndpointsAttestationRecord` (ANL-1: the fixed sentence beside exactly the attested checks; another sentence, a missing one, a non-endpoint, a still-skipped check, an attestation on a native adapter's run, or one in a report that declares `sandprobe/1` is refused), `TestRunExecProviderEndpointsDocker` (`SANDPROBE_FIXTURES=1`: run exec through `docker exec` into a container with no network, so no metadata is reachable: the report declares `sandprobe/2`; SEC-4 and AMP-7 run and end `not_found` or unknown, never a pass or an absence, each with its attestation; EGR-3 and AMP-6 keep `opt_in`; Cloud access is never "not tested" or not applicable, and a green row names its not-proven checks); `internal/host`: `TestPlanAttested` (attested checks selected and recorded sorted in the manifest, never in the probe's input; the rest keep `opt_in`; AMP-6 skipped on an existing box whatever was attested, selected on a throwaway one; EGR-3 attested without a canary is sound, graded but never sent to the probe, and a loopback proxy without `-allow-local-proxy` is skipped with no kind; the grader refuses a non-endpoint, a duplicate or a still-kinded attestation; Execute refuses one that isn't an endpoint, is named twice, or is still excluded); `internal/report`: `TestReportRecordsAttestation` (the sentence beside exactly the attested checks, in the JSON and on the page); `internal/analysis/attested_test.go`, on a Docker fixture run planned with `-provider-endpoints SEC-4,AMP-7`: `TestInvalidRunKeepsAttestedRows` (an invalid run keeps both rows, unknown with "not graded" and the attestation, grades nothing else and lists no unknowns, loads under ANL-1, and its page shows each attestation and the report's real schema; a valid run's page shows each attestation beside its test and in the appendix), `TestAttestedRowsAreRequired` (the code review's reproduction: a report with the attested SEC-4 row deleted is refused, invalid or valid; an invalid report with an unknown row nobody attested, or with unknowns in its grade, is refused) |
 | PRV-15 (command) | `cmd/sandprobe/exec_test.go`: run exec refuses a missing command, a passthrough to another provider, a relative or unsafe `-scratch`, a malformed `-as`, a command not on PATH, and `-canary-url` without a pin; with no canary named, even beside a stray `canary-*.state` file, the plan uses the hosted canary and states its retention, and the shipped URL and pin pass `CheckCanaryURL` (`TestRunExecDefaultsToTheHostedCanary`, HCN-5); a pin without its URL, by flag or environment, is refused rather than set aside (`TestRunExecPinWithoutURLIsRefused`); a URL or pin pasted with a credential (userinfo, query, fragment, path, a bad pin) is refused before the plan exists and never appears in its text or JSON, while a valid one is shown canonical; the plan names the box, the scratch path, the user check, the public canary and HCN-4's retention, the four checks off and PER-5 skipped, and no metadata address; without `-y` nothing runs; `TestExecuteThroughExecBox` (SANDPROBE_FIXTURES=1): Execute drives the shipped probe through `docker exec` as nobody, the base64 upload keeps SBX-5's digest, the run is valid, SEC-4, EGR-3, AMP-6, AMP-7 and PER-5 are skipped with their reasons, and no scratch is left |
+| RUN-17 | host-controller protocol/remote execution/two-attempt/ambiguous-count and identity-absence tests; schema3 contract refusal matrix and report-version selection; original guest-mode regressions |
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |
 | WGR-7 | `TestPortableWorkloadDeclaration`, `TestPortableWorkloadCalibration`; version1 retained Nitro report compatibility test |

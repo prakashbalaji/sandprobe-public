@@ -9,6 +9,37 @@ import (
 func workloadDeclaration() *WorkloadContract {
 	return &WorkloadContract{Schema: "sandprobe.workload-contract/1", Profile: WorkloadProfile, ManagedRunID: strings.Repeat("a", 16), BoxID: "original", Image: "registry.example/agent@sha256:" + strings.Repeat("b", 64), ConfigSHA256: strings.Repeat("c", 64), IdentityPolicySHA256: strings.Repeat("d", 64), TokenCanonical: "/run/secrets/pods.eks.amazonaws.com/serviceaccount/..2026_11_20/eks-pod-identity-token", TokenDevice: 1, TokenInode: 2, ProtectedDevice: 3, ProtectedInode: 4}
 }
+
+func TestNitroHostControllerContract(t *testing.T) {
+	makeContract := func() *WorkloadContract {
+		c := workloadDeclaration()
+		c.Schema, c.Provider, c.IdentityMode = "sandprobe.workload-contract/3", "aws-nitro", "host_controller_no_guest_credentials"
+		c.AgentUID, c.AgentGID = 10001, 10001
+		c.TokenCanonical, c.TokenDevice, c.TokenInode = "", 0, 0
+		c.ImageContentVerified, c.AgentHomeSHA256 = true, strings.Repeat("e", 64)
+		return c
+	}
+	if err := ValidateWorkloadContract(makeContract()); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*WorkloadContract){
+		func(c *WorkloadContract) { c.Schema = "sandprobe.workload-contract/1" },
+		func(c *WorkloadContract) { c.Schema = "sandprobe.workload-contract/2" },
+		func(c *WorkloadContract) { c.Provider = "daytona" },
+		func(c *WorkloadContract) { c.IdentityMode = "guest_credentials" },
+		func(c *WorkloadContract) { c.TokenInode = 1 },
+		func(c *WorkloadContract) { c.TokenCanonical = "/run/secrets/token" },
+		func(c *WorkloadContract) { c.AgentUID = 0 },
+		func(c *WorkloadContract) { c.ImageContentVerified = false },
+		func(c *WorkloadContract) { c.AgentHomeSHA256 = "" },
+	} {
+		c := makeContract()
+		change(c)
+		if ValidateWorkloadContract(c) == nil {
+			t.Fatal("invalid host-controller identity accepted")
+		}
+	}
+}
 func TestWorkloadDeclarationHasFixedPolicyAndBoundContext(t *testing.T) {
 	if ValidateWorkloadContract(nil) != nil {
 		t.Fatal("legacy missing context rejected")
