@@ -143,3 +143,19 @@ func TestModelRequestCountsRetainTransportUncertainty(t *testing.T) {
 		t.Fatal("missing request metadata claimed zero")
 	}
 }
+
+func TestUploadMeasurementUsesFrozenWorkloadPolicy(t *testing.T) {
+	name := "bedrock-runtime.us-west-2.amazonaws.com"
+	addresses, err := workloadUploadAddresses([]string{name}, "1.1.1.1/32,8.8.8.8/32")
+	if err != nil || len(addresses) != 1 || addresses[name] != "1.1.1.1" {
+		t.Fatal("measurement differs from workload policy", err)
+	}
+	for _, bad := range []string{"", "1.1.1.1", "1.1.1.1/24", "169.254.169.254/32", "10.0.0.1/32", "2001:4860:4860::8888/32"} {
+		if _, err := workloadUploadAddresses([]string{name}, bad); err == nil {
+			t.Fatal("unsafe/non-workload binding accepted")
+		}
+	}
+	if addresses, err := workloadUploadAddresses([]string{"github.com"}, ""); err != nil || len(addresses) != 0 {
+		t.Fatal("binding added an unselected model destination")
+	}
+}

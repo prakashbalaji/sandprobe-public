@@ -188,3 +188,26 @@ func TestExplicitAreaCoverage(t *testing.T) {
 		t.Fatal("unmapped catalog accepted")
 	}
 }
+
+func TestFrozenUploadEndpointSavedConsistency(t *testing.T) {
+	d := baseline(t)
+	if _, skipped := d.Manifest.Skipped["EGR-6"]; skipped {
+		d.Manifest.Selected = append(d.Manifest.Selected, "EGR-6")
+	}
+	delete(d.Manifest.Skipped, "EGR-6")
+	delete(d.Manifest.SkipKinds, "EGR-6")
+	for i := range d.Checks {
+		if d.Checks[i].ID == "EGR-6" {
+			d.Checks[i].Result = obs.NotFound
+			d.Checks[i].Reason = ""
+		}
+	}
+	d.Manifest.Targets["EGR-6"] = []string{"github.com=1.1.1.1"}
+	if err := Validate(d); err != nil {
+		t.Fatal("valid bound-target export rejected", err)
+	}
+	d.Manifest.Targets["EGR-6"] = []string{"github.com=169.254.169.254"}
+	if err := Validate(d); err == nil {
+		t.Fatal("saved export accepted infrastructure target")
+	}
+}

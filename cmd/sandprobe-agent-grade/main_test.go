@@ -73,3 +73,14 @@ func TestNitroBridgeRejectsPortableContract(t *testing.T) {
 		t.Fatal("portable contract reached Nitro lifecycle", err)
 	}
 }
+
+func TestUnsafeUploadBindingsRejectedBeforeAttach(t *testing.T) {
+	for _, addresses := range []map[string]string{{"github.com": "169.254.169.254"}, {"pypi.org": "1.1.1.1"}} {
+		raw, _ := json.Marshal(request{UploadHosts: []string{"github.com"}, UploadAddresses: addresses})
+		var out bytes.Buffer
+		err := run(context.Background(), bytes.NewReader(raw), &out)
+		if err == nil || out.Len() != 0 || strings.Contains(err.Error(), "169.254") || strings.Contains(err.Error(), "contract") {
+			t.Fatal("binding rejection was late or disclosed target")
+		}
+	}
+}

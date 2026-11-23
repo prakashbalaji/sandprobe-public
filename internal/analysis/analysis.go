@@ -90,7 +90,7 @@ func Validate(d *report.Doc) error {
 	if c := d.Manifest.WorkloadContract; c != nil && c.Schema == "sandprobe.workload-contract/3" && d.Run.Provider != "aws-nitro" {
 		return ErrInput
 	}
-	if hosts := d.Manifest.Targets["EGR-6"]; len(hosts) > 0 && (!slices.Contains(d.Manifest.Selected, "EGR-6") || catalog.ValidateUploadHosts(hosts) != nil) {
+	if hosts := d.Manifest.Targets["EGR-6"]; len(hosts) > 0 && (!slices.Contains(d.Manifest.Selected, "EGR-6") || catalog.ValidateUploadTargets(hosts) != nil) {
 		return ErrInput
 	}
 	if obs.ValidateWorkloadContract(d.Manifest.WorkloadContract) != nil || (d.Manifest.WorkloadContract != nil && d.Manifest.WorkloadContract.BoxID != d.Manifest.BoxID) {

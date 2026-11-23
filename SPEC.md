@@ -675,6 +675,19 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Its original-ID cleanup remains mandatory. Do not delete the shared hosted service
   or another run's resources. No idle dedicated receiver is retained after a run.
 
+- **MEAS-7 Frozen workload TLS endpoint bindings.** The generic EGR-6 collector may
+  receive a host-frozen address for a selected approved name. In the existing target
+  list, the canonical form is `<approved-name>=<literal-public-IP>`; bare approved
+  names retain MEAS-6's guest resolution. Validate every name/address and duplicate
+  before any DNS lookup or dial. A binding is measurement input, not guest DNS proof.
+  Managed adapters bind the exact model endpoint address already resolved by the host
+  and frozen in the verified workload network configuration; they do not broaden it.
+  Use the same hostname for SNI and WebPKI verification, one literal-address443 dial,
+  the existing shared deadline and no HTTP/upload/proxy. Failed TLS remains unknown.
+  Preserve the binding in the frozen manifest. No report fields or score rules change;
+  readers that do not support bound targets may reject them, never downgrade them into
+  an unbound negative proof. Host-only resolution does not demonstrate guest DNS.
+
 - **MEAS-6 Bounded workload-host TLS measurement.** EGR-6 is implemented generically,
   independent of the provider adapter. An explicit `upload_hosts` request selects
   one to four distinct exact names from the shipped workload/dependency list:
@@ -2477,6 +2490,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-4 | existing managed original-ID cleanup and request-budget tests; retained accuracy-validation provenance |
 | MEAS-1/MEAS-2 | shared frozen binding, receiver lifecycle ordering, replay/identity/control/receipt/stop failures and positive-delivery grading |
 | MEAS-3 | bounded expected-ack/wrong-reply/EOF cases; host receipt requirements unchanged |
+| MEAS-7 | approved binding rejection/public-address/duplicate tests; frozen host-plan and pre-survey refusal tests; no-DNS bound TLS probe tests; native adapter and same-policy Python request tests |
 | MEAS-6 | upload-host catalog, host plan and pre-survey refusal tests; Linux root/nobody `TestUploadHostsRejectUnapprovedAndNonpublic`, `TestUploadHostsBoundedAndPartialEvidence`, `TestUploadHandshakeVerifiesCertificateWithoutHTTP`; shared Python policy and pre-provision refusal tests |
 | MEAS-5 | `TestManagedHostedCanaryLifecycle`, `TestManagedHostedCanaryFailureIsClosedAndSanitized`: local signed-control fixture, shipped trust anchors, reserved slot, release after cancellation, reservation failure, sanitization and unconfirmed-release recovery; CLI and managed collector regressions |
 | MEAS-4 | generic SSM/Docker transport fixtures, Daytona original-ID pre-finalization shutdown and cleanup recovery; fresh managed validation |
