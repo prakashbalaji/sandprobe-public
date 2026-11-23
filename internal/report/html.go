@@ -206,8 +206,8 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	if theme != "mission" {
-		theme = "modern"
+	if theme != "mission" { // UX-8: anything else, the retired "modern" included, is the default
+		theme = "graphite"
 	}
 	when, _ := time.Parse(time.RFC3339, d.Run.StartedAt)
 	v := view{Nonce: base64.RawURLEncoding.EncodeToString(nonce), Theme: theme, Provider: d.Run.Provider, Box: d.Run.Box.Name,
@@ -219,13 +219,15 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 	if v.Box == "" {
 		v.Box = d.Run.Box.ProviderID
 	}
-	switch {
+	switch { // UX-8: an invalid or incomplete grade without a finding reads as unknown, never as a pass or a failure
 	case !d.Grade.Valid:
-		v.Grade, v.GradeClass = "?", "med"
+		v.Grade, v.GradeClass = "?", "unk"
 	case v.Crit+v.High > 0:
 		v.GradeClass = "crit"
-	case v.Med > 0 || !d.Grade.Complete:
+	case v.Med > 0:
 		v.GradeClass = "med"
+	case !d.Grade.Complete:
+		v.GradeClass = "unk"
 	default:
 		v.GradeClass = "pass"
 	}

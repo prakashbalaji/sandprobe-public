@@ -179,8 +179,8 @@ func TestScorePage(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := string(page)
-	s, w, a, l := strings.Index(p, "SANDBOX SCORE"), strings.Index(p, ">What we tested<"), strings.Index(p, ">Technical appendix<"),
-		strings.Index(p, "LETTER GRADE")
+	s, w, a, l := strings.Index(p, "Sandbox score"), strings.Index(p, ">What we tested<"), strings.Index(p, ">Technical appendix<"),
+		strings.Index(p, "Letter grade")
 	if s < 0 || w < s || a < w || l < a || !strings.Contains(p, "<b>5</b><span>/6</span>") {
 		t.Errorf("want the score, what we tested, then the technical appendix with the letter: %d %d %d %d", s, w, a, l)
 	}
@@ -200,7 +200,7 @@ func TestScorePage(t *testing.T) {
 	}
 	d.Grade.Valid = false
 	page, _ = HTML(d, "modern")
-	if !strings.Contains(string(page), "INVALID RUN: NO SCORE") || strings.Contains(string(page), "SANDBOX SCORE") {
+	if !strings.Contains(string(page), "Invalid run: no score") || strings.Contains(string(page), "Sandbox score") {
 		t.Error("an invalid run's page must show no score")
 	}
 }

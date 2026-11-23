@@ -33,6 +33,13 @@ Being validated for 0.3.0.
 - A saved `sandprobe/2` report with a field present but empty or null is refused (AGT-6).
 - An invalid report keeps its attested rows, and they stay not graded (GRD-5, PRV-15).
 
+### Web report
+
+- The HTML report takes the landing page's look: a graphite room, raised panels, Inter Tight headings, and results
+  as keys. A failure is a light key with a red legend; an unknown is a dashed key, never green. `graphite` is the
+  default palette and `mission` the alternative. `-theme modern`, the retired cyan palette, renders `graphite`, and a
+  page that remembered `modern` opens in `graphite` (UX-8). The page still fetches nothing, fonts included (OUT-2).
+
 ### Research harnesses
 
 - The managed Nitro and Daytona coding evaluations moved to `experiments/`, with the TUI prototype. They aren't part
