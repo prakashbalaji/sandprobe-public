@@ -20,7 +20,7 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 	}
 	d, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	card := report.Score(*d)
 	if r.outSet {
@@ -42,6 +42,10 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 	}
 	return exitGraded, nil
 }
+
+// reportInputFix is the fix for a saved report this build refuses (ANL-1): it names the versions this build reads,
+// so a report from a newer sandprobe says what it needs (AGT-6).
+var reportInputFix = "Use a regular, unedited " + strings.Join(report.Schemas, " or ") + " report file under 8 MiB; a report that declares a later schema needs a newer sandprobe."
 
 // A saved report is unauthenticated input (ANL-1): its provider and run ID name the page only when each is a plain
 // name, never a path, and anything else gets a fixed name.

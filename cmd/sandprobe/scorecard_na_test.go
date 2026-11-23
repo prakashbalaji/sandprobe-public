@@ -96,6 +96,7 @@ func skipSaved(t *testing.T, o host.Options) string {
 		d.Contacted = slices.DeleteFunc(d.Contacted, func(c report.Contact) bool { return c.Check == id })
 	}
 	d.Manifest.SkipKinds = plan.SkipKinds
+	d.Schema = report.SchemaFor(d.Manifest) // AGT-6: the version its fields need
 	out, _ := json.Marshal(d)
 	path := filepath.Join(t.TempDir(), "report.json")
 	if err := os.WriteFile(path, out, 0o644); err != nil {
@@ -120,9 +121,9 @@ func TestScorecardNotApplicable(t *testing.T) {
 		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted. Not applicable: " + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + "\n",
 			"N/A    Cloud access"},
 		"exec": {host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
-			"RED    Cloud access  Can it use the box's cloud identity?\n                         Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow\n"},
+			"RED    Cloud access  Can it use the box's cloud identity?\n                         Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
 		"kubernetes": {host.Options{Excluded: recipeExclusions(rc), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
-			"Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow\n"},
+			"Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
 	} {
 		in := skipSaved(t, tc.o)
 		var out, errs bytes.Buffer
@@ -219,6 +220,7 @@ func TestScorecardRefusesForgedKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 		d.Manifest.SkipKinds = kinds
+		d.Schema = report.SchemaFor(d.Manifest) // refused for the kind, never for the version
 		out, _ := json.Marshal(d)
 		in := filepath.Join(t.TempDir(), "report.json")
 		os.WriteFile(in, out, 0o644)
@@ -226,5 +228,42 @@ func TestScorecardRefusesForgedKinds(t *testing.T) {
 		if code := run([]string{"scorecard", in}, &stdout, &stderr); code != exitUsage || strings.Contains(stdout.String(), "Score") {
 			t.Errorf("%s: exit %d, %s", name, code, stdout.String())
 		}
+	}
+}
+
+// AGT-6 at the command line: a sandprobe/1 report still reads; a report with skip kinds declares sandprobe/2 and
+// reads; a sandprobe/1 report carrying skip kinds, a sandprobe/2 one without them, and a version this build doesn't
+// know are refused, with a fix that names the versions it reads.
+func TestReportSchemaVersions(t *testing.T) {
+	v2 := skipSaved(t, host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
+	retag := func(src, schema string) string {
+		b, _ := os.ReadFile(src)
+		var d report.Doc
+		json.Unmarshal(b, &d)
+		d.Schema = schema
+		out, _ := json.Marshal(d)
+		path := filepath.Join(t.TempDir(), "report.json")
+		os.WriteFile(path, out, 0o644)
+		return path
+	}
+	for name, tc := range map[string]struct {
+		path string
+		code int
+	}{
+		"sandprobe/1, as before":            {"../../test/reports/egress-refused.json", exitGraded},
+		"sandprobe/2 with skip kinds":       {v2, exitGraded},
+		"sandprobe/1 carrying skip kinds":   {retag(v2, "sandprobe/1"), exitUsage},
+		"sandprobe/2 without skip kinds":    {retag("../../test/reports/egress-refused.json", "sandprobe/2"), exitUsage},
+		"a version this build doesn't know": {retag(v2, "sandprobe/9"), exitUsage},
+	} {
+		var out, errs bytes.Buffer
+		code := run([]string{"scorecard", tc.path}, &out, &errs)
+		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 report file") {
+			t.Errorf("%s: exit %d, %s", name, code, errs.String())
+		}
+	}
+	b, _ := os.ReadFile(v2)
+	if !bytes.Contains(b, []byte(`"schema":"sandprobe/2"`)) {
+		t.Error("a report with skip kinds doesn't declare sandprobe/2")
 	}
 }

@@ -16,7 +16,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	}
 	a, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	if !compare {
 		p := analysis.Summarize(a)
@@ -38,7 +38,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	}
 	b, err := analysis.Load(args[1])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	c := analysis.Compare(a, b)
 	if o.json() {

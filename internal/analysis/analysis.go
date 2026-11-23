@@ -71,7 +71,7 @@ func Validate(d *report.Doc) error {
 		}
 	}
 
-	if d.Schema != report.Schema || d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
+	if d.Schema != report.SchemaFor(d.Manifest) || d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
 		return ErrInput
 	}
 	if !slices.Contains([]string{"exec", "entrypoint"}, d.Run.Mode) {

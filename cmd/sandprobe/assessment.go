@@ -12,7 +12,7 @@ func assessSaved(o opts, args []string) (int, error) {
 	}
 	d, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	a, err := analysis.Assess(d, args[1])
 	if err != nil {

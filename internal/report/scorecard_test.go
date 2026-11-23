@@ -145,8 +145,8 @@ func TestSixOfSixIsAnA(t *testing.T) {
 			t.Fatal(err)
 		}
 		var d Doc
-		if json.Unmarshal(b, &d) != nil || d.Schema != Schema {
-			continue // not a sandprobe/1 report: summaries, cleanup and provenance records
+		if json.Unmarshal(b, &d) != nil || d.Schema != SchemaFor(d.Manifest) {
+			continue // not a sandprobe report: summaries, cleanup and provenance records
 		}
 		n++
 		if c := Score(d); c.Of != 6 || len(c.NotCounted()) != 0 {

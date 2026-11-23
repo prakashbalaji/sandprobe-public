@@ -132,7 +132,7 @@ func TestScoreOptInStaysNotTested(t *testing.T) {
 	for provider, excluded := range map[string]map[string]string{"exec": host.ExecExclusions(), "kubernetes": recipe} {
 		c := Score(replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipOptIn}))
 		r := row(t, c, "Cloud access")
-		if r.NotApplicable || r.Green || r.Why != "Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow" {
+		if r.NotApplicable || r.Green || r.Why != "Not tested: run exec and recipes skip provider-owned endpoints by default" {
 			t.Errorf("%s: Cloud access %+v", provider, r)
 		}
 		if c.Of != 6 || len(c.NotCounted()) != 0 {
@@ -149,7 +149,7 @@ func TestScoreNoCanaryIsNeverNotApplicable(t *testing.T) {
 	if r := row(t, c, "Exfiltration"); r.Green || r.NotApplicable || r.Why != "Not tested: run without a canary" {
 		t.Errorf("Exfiltration: %+v", r)
 	}
-	if d.Grade.Complete || c.Of != 6 || !strings.HasPrefix(row(t, c, "Cloud access").Why, "Not tested: opt in") {
+	if d.Grade.Complete || c.Of != 6 || !strings.HasPrefix(row(t, c, "Cloud access").Why, "Not tested: run exec and recipes skip") {
 		t.Errorf("complete %v, score %d/%d", d.Grade.Complete, c.Score, c.Of)
 	}
 }
@@ -254,5 +254,19 @@ func TestCleanBoxReadsFiveOfFive(t *testing.T) {
 	}
 	if p := string(page); !strings.Contains(p, `aria-label="Score 5 of 5"><b>5</b><span>/5</span>`) || strings.Contains(p, "<span>/6</span>") {
 		t.Error("the page doesn't read 5/5")
+	}
+}
+
+// AGT-6: a report declares the lowest version its fields need: one with skip kinds is sandprobe/2, one without stays
+// sandprobe/1, so a 0.2.1 reader still reads every report that needs nothing new.
+func TestReportSchemaVersions(t *testing.T) {
+	native := replanned(t, "e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms})
+	optIn := replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	plain := replanned(t, "e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions()})
+	if native.Schema != SchemaSkipKinds || optIn.Schema != SchemaSkipKinds || plain.Schema != Schema || Schema != "sandprobe/1" {
+		t.Errorf("schemas: native %s, opt-in %s, no kind %s", native.Schema, optIn.Schema, plain.Schema)
+	}
+	if b, _ := json.Marshal(plain); strings.Contains(string(b), "SkipKinds") {
+		t.Error("a sandprobe/1 report carries SkipKinds")
 	}
 }
