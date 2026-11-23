@@ -3,6 +3,7 @@
 package probe
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -421,6 +422,55 @@ func TestWalkAgreesWithKernel(t *testing.T) {
 	}
 	if _, _, err := writeHow(nine, nine); err == nil || !strings.Contains(err.Error(), "more than 8") {
 		t.Errorf("the write check followed nine links: %v", err)
+	}
+}
+
+// A path reaches the walk as given (SBX-2): HOME, a PATH entry or a relative path naming link/.. is resolved where the
+// kernel resolves it, from where the link leads, never lexically beside it, where a decoy waits.
+func TestRawPaths(t *testing.T) {
+	d := t.TempDir()
+	os.MkdirAll(filepath.Join(d, "real", "dir"), 0o755)
+	os.Mkdir(filepath.Join(d, "base"), 0o755)
+	os.WriteFile(filepath.Join(d, "real", "target"), []byte("real"), 0o644)
+	os.WriteFile(filepath.Join(d, "base", "target"), []byte("decoy"), 0o644)
+	os.WriteFile(filepath.Join(d, "real", "sudo"), nil, 0o755) // only ever lstat'd
+	os.Symlink(filepath.Join(d, "real", "dir"), filepath.Join(d, "base", "link"))
+	var kst syscall.Stat_t
+	if err := syscall.Stat(d+"/base/link/../target", &kst); err != nil { // the kernel's own, uncleaned
+		t.Fatal(err)
+	}
+	var decoy syscall.Stat_t
+	if syscall.Stat(filepath.Join(d, "base", "target"), &decoy) != nil || decoy.Ino == kst.Ino {
+		t.Fatal("the kernel must reach real/target, not the decoy")
+	}
+	home := d + "/base/link/.."
+	e := &env{home: home}
+	if got := e.expand("~/target"); got != home+"/target" {
+		t.Fatalf("HOME expansion cleaned the path: %s", got)
+	}
+	chdir(t, d)
+	for _, p := range []string{e.expand("~/target"), "base/link/../target", d + "//base/./link/../target"} {
+		w, err := walkPath(p, true)
+		if err != nil {
+			t.Errorf("%s: %v", p, err)
+			continue
+		}
+		if n := w.nodes[w.last()]; n.ino != kst.Ino || n.dev != uint64(kst.Dev) {
+			t.Errorf("%s: want the kernel's inode, in real/, got %s", p, n.path)
+		}
+		w.close()
+		if tg, _, err := readCheck(p, p); err != nil || tg.Inode != kst.Ino {
+			t.Errorf("%s: the read check pinned another inode than the kernel reaches: %+v %v", p, tg, err)
+		}
+	}
+	for _, path := range []string{home, "base/link/.."} { // a sudo in the PATH entry the kernel reaches
+		t.Setenv("PATH", path)
+		if got, err := pathSudo(nil); err != nil || len(got) != 1 {
+			t.Errorf("PATH=%s: want the sudo in real/, got %v %v", path, got, err)
+		}
+	}
+	if _, err := walkPath(d+"/base/missing/../target", true); !errors.Is(err, errUnknowable) {
+		t.Errorf(".. past a missing name: want unknowable, got %v", err)
 	}
 }
 

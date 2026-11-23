@@ -72,7 +72,7 @@ func TestWalk(t *testing.T) {
 	os.Symlink("../d1/f", filepath.Join(dir, "sub", "up")) // .. taken from the directory holding the link
 	for p, wantChain := range map[string][]string{
 		filepath.Join(dir, "l"):         {filepath.Join(dir, "l"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
-		filepath.Join(dir, "sub", "up"): {filepath.Join(dir, "sub", "up"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
+		filepath.Join(dir, "sub", "up"): {filepath.Join(dir, "sub", "up"), dir + "/sub/../d1/f", filepath.Join(dir, "d2", "f")},
 		"/bin/su":                       {"/bin/su", "/usr/bin/su"},
 	} {
 		w, err := walkPath(p, true)

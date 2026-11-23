@@ -77,19 +77,39 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + strings.Join(refused, "; "))
 }
 
-// pathSudo: sudo in any PATH directory other than the fixed ones. Only lstat; nothing found here ever runs.
+// pathSudo: sudo in any PATH directory other than the fixed ones. Each entry is taken as given, never cleaned, an empty
+// or relative one from the working directory (fromPath, SBX-2); it is skipped as a fixed path's directory, or one
+// already looked in, only when the kernel reaches that very directory, never by its spelling. Only lstat; nothing
+// found here ever runs.
 func pathSudo(fixed []string) ([]string, error) {
-	skip := map[string]bool{}
-	for _, p := range fixed {
-		skip[filepath.Dir(p)] = true
+	type dirKey struct{ dev, ino uint64 }
+	seen := map[dirKey]bool{}
+	key := func(d string) (dirKey, bool) {
+		var st syscall.Stat_t
+		if syscall.Stat(d, &st) != nil {
+			return dirKey{}, false
+		}
+		return dirKey{uint64(st.Dev), st.Ino}, true
 	}
+	for _, p := range fixed { // the plan's fixed paths, such as /usr/bin/sudo
+		if k, ok := key(filepath.Dir(p)); ok {
+			seen[k] = true
+		}
+	}
+	wd, _ := os.Getwd()
 	var out []string
 	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
-		if !filepath.IsAbs(d) || skip[filepath.Clean(d)] {
-			continue
+		d, err := fromPath(d, wd)
+		if err != nil {
+			return nil, err
 		}
-		skip[filepath.Clean(d)] = true
-		p := filepath.Join(d, "sudo")
+		if k, ok := key(d); ok {
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
+		p := under(d, "sudo")
 		var st syscall.Stat_t
 		switch err := lstat(p, &st); errnoOf(err) {
 		case 0:

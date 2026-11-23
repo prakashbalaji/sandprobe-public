@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -47,7 +48,7 @@ func walkPath(p string, follow bool) (*pathWalk, error) {
 		if err != nil {
 			return nil, unknowable("%s is relative and the working directory can't be told", p)
 		}
-		p = filepath.Join(wd, p)
+		p = under(wd, p)
 	}
 	root, err := syscall.Open("/", unixOPath|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
 	if err != nil {
@@ -84,6 +85,10 @@ func walkPath(p string, follow bool) (*pathWalk, error) {
 		fd, err := syscall.Openat(w.fds[cur], c, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 		switch e := errnoOf(err); {
 		case e == syscall.ENOENT || e == syscall.ENOTDIR || e == syscall.EACCES:
+			if slices.Contains(rest, "..") { // where .. would lead past a name the walk can't open, it can't tell
+				w.close()
+				return nil, unknowable("%s can't be opened, and %s goes on with ..", next, p)
+			}
 			w.add(inode{path: next, seen: e != syscall.EACCES, parent: cur}, -1, c)
 			for _, r := range rest { // what lies below, missing or unseen alike
 				if r != "" && r != "." {
@@ -123,7 +128,7 @@ func walkPath(p string, follow bool) (*pathWalk, error) {
 			cur = 0
 		} // a relative target resolves from the directory holding the link: cur, still
 		rest = append(strings.Split(t, "/"), rest...)
-		w.steps = append(w.steps, filepath.Join(append([]string{w.nodes[cur].path}, rest...)...))
+		w.steps = append(w.steps, w.step(cur, rest))
 	}
 	if cur != w.last() { // the path ends on a directory a link, "." or ".." led back to: that directory is the target
 		fd, err := unix.FcntlInt(uintptr(w.fds[cur]), unix.F_DUPFD_CLOEXEC, 3)
@@ -135,6 +140,24 @@ func walkPath(p string, follow bool) (*pathWalk, error) {
 	}
 	return w, nil
 }
+
+// step is the path as a followed link leaves it, for reports: the directory reached, then what is left, as given.
+func (w *pathWalk) step(cur int, rest []string) string {
+	s := strings.TrimSuffix(w.nodes[cur].path, "/")
+	for _, r := range rest {
+		if r != "" {
+			s += "/" + r
+		}
+	}
+	if s == "" {
+		return "/"
+	}
+	return s
+}
+
+// under is dir joined to name as the kernel takes it: a plain "/", never cleaned, so "link/.." stays for the walk
+// to resolve from where the link leads (SBX-2). filepath.Join or Clean would collapse it lexically.
+func under(dir, name string) string { return dir + "/" + name }
 
 func (w *pathWalk) add(n inode, fd int, name string) {
 	w.nodes, w.fds, w.names = append(w.nodes, n), append(w.fds, fd), append(w.names, name)

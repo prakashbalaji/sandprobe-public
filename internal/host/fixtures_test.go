@@ -144,6 +144,16 @@ var fixtures = []fixture{
 			t.Errorf("SEC-3: the kernel refuses ~/.netrc, yet it was found: %+v", o)
 		}
 	}},
+	// a path reaches the walk as given: HOME and a PATH entry of link/.., which the kernel resolves from where the link
+	// leads, never lexically, so the writable startup file and the readable credential are found, and the sudo on PATH
+	// leaves AMP-1 unknown, never absent (SBX-2)
+	{name: "evidence-homedotdot", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=homedotdot", "-e", "HOME=/spcase/base/link/..",
+			"-e", "PATH=/spcase/base/link/..:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+	}, expect: func(t *testing.T, w world, r *Run) {
+		expectWritable(map[string]string{"PER-1": "~/.bashrc", "SEC-3": "~/.netrc"})(t, w, r)
+		expectUnknown(map[string]string{"AMP-1": "only off the fixed paths"})(t, w, r)
+	}},
 	{name: "evidence-ninelinks", image: "evidence", settle: time.Second, opts: func(world) []string {
 		return []string{"--network", "none", "-e", "EVIDENCE=ninelinks"}
 	}, expect: expectUnknown(map[string]string{"PER-1": "more than 8", "SEC-3": "more than 8"})},

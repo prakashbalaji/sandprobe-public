@@ -497,7 +497,7 @@ func listDir(dir string) ([]os.DirEntry, error) {
 }
 
 func sshKeys(home string) ([]string, error) {
-	dir := filepath.Join(home, ".ssh")
+	dir := under(home, ".ssh")
 	entries, err := listDir(dir)
 	if err != nil {
 		return nil, err
@@ -505,7 +505,7 @@ func sshKeys(home string) ([]string, error) {
 	var out []string
 	for _, d := range entries {
 		if strings.HasPrefix(d.Name(), "id_") && !strings.HasSuffix(d.Name(), ".pub") {
-			out = append(out, filepath.Join(dir, d.Name()))
+			out = append(out, under(dir, d.Name()))
 		}
 	}
 	return out, nil
@@ -538,7 +538,7 @@ func secretFiles(root string) ([]string, error) {
 			return err
 		}
 		for _, d := range entries {
-			p := filepath.Join(dir, d.Name())
+			p := under(dir, d.Name())
 			isDir := d.IsDir()
 			if d.Type()&os.ModeSymlink != 0 { // where the link leads, as the kernel resolves it (walkPath)
 				w, err := walkFor(p)
@@ -597,7 +597,7 @@ func dotenvs(home, wd string) ([]string, error) {
 		}
 		entries, err := listDir(dir)
 		if errors.Is(err, errHidden) && depth == 2 {
-			p := filepath.Join(dir, ".env")
+			p := under(dir, ".env")
 			switch e := errnoOf(lstat(p, new(syscall.Stat_t))); {
 			case e == 0:
 				add(p)
@@ -611,7 +611,7 @@ func dotenvs(home, wd string) ([]string, error) {
 			return err
 		}
 		for _, d := range entries {
-			p := filepath.Join(dir, d.Name())
+			p := under(dir, d.Name())
 			switch {
 			case d.Name() == ".env":
 				add(p)
@@ -650,24 +650,21 @@ func dotenvs(home, wd string) ([]string, error) {
 	return out, nil
 }
 
-// pathDirs are the PATH entries ahead of the first system directory, other than the planned /usr/local/bin. An empty
-// or relative entry is searched relative to the working directory, so it resolves against wd; without one, it can't
-// be judged.
+// pathDirs are the PATH entries ahead of the first system directory, other than the planned /usr/local/bin, each as
+// given, never cleaned (SBX-2). An empty or relative entry is searched relative to the working directory, so it
+// resolves against wd; without one, it can't be judged.
 func pathDirs(path, wd string) ([]string, error) {
 	system := map[string]bool{"/usr/sbin": true, "/usr/bin": true, "/sbin": true, "/bin": true}
 	seen := map[string]bool{}
 	var out []string
+	var err error
 	for _, d := range filepath.SplitList(path) {
 		if system[d] {
 			break
 		}
-		if !filepath.IsAbs(d) {
-			if wd == "" {
-				return nil, fmt.Errorf("PATH entry %q is relative to a working directory the probe can't tell", d)
-			}
-			d = filepath.Join(wd, d)
+		if d, err = fromPath(d, wd); err != nil {
+			return nil, err
 		}
-		d = filepath.Clean(d)
 		if d == "/usr/local/bin" || seen[d] {
 			continue
 		}
@@ -675,4 +672,18 @@ func pathDirs(path, wd string) ([]string, error) {
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// fromPath is a PATH entry as the shell searches it: an absolute one as given, an empty one the working directory,
+// and any other relative one under it, never cleaned (SBX-2). Without a working directory a relative one can't be told.
+func fromPath(d, wd string) (string, error) {
+	switch {
+	case filepath.IsAbs(d):
+		return d, nil
+	case wd == "":
+		return "", fmt.Errorf("PATH entry %q is relative to a working directory the probe can't tell", d)
+	case d == "":
+		return wd, nil
+	}
+	return under(wd, d), nil
 }

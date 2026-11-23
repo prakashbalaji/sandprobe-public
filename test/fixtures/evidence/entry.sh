@@ -105,6 +105,23 @@ dotdot) # the code review's: the home is root's link to /review/real/dir, root's
   rm -rf /home/agent
   ln -s /review/real/dir /home/agent
   ;;
+homedotdot) # the re-review's: HOME and the first PATH entry are /spcase/base/link/.., where link leads to
+  # /review/real/dir. The kernel follows the link, then takes .. from where it leads: /review/real, whose .bashrc
+  # anyone may write, whose .netrc anyone may read, and which holds a file named sudo (never run). Cleaned
+  # lexically, the path is /spcase/base instead, where a read-only .bashrc, a closed .netrc and no sudo wait
+  mkdir -p /review/real/dir /spcase/base
+  ln -s /review/real/dir /spcase/base/link
+  printf '' > /review/real/.bashrc
+  chmod 0666 /review/real/.bashrc
+  echo sandprobe-fake > /review/real/.netrc
+  chmod 0444 /review/real/.netrc
+  printf '#!/bin/sh\nexit 1\n' > /review/real/sudo
+  chmod 0755 /review/real/sudo
+  printf '' > /spcase/base/.bashrc
+  chmod 0444 /spcase/base/.bashrc
+  echo sandprobe-fake > /spcase/base/.netrc
+  chmod 0000 /spcase/base/.netrc
+  ;;
 ninelinks) # eight directory links lead to the home, and .bashrc and .netrc are links of their own: nine in all, past
   # SBX-2's eight, so neither can be judged
   mkdir -p /review/h

@@ -177,8 +177,11 @@ func chdir(t *testing.T, dir string) {
 }
 
 func TestPathDirs(t *testing.T) {
-	cases := map[string][]string{".:/usr/bin": {"/w"}, ":/usr/bin": {"/w"}, "bin:/usr/bin": {"/w/bin"},
-		"/opt/x:/usr/bin:/evil": {"/opt/x"}, "/usr/local/bin:/usr/bin": nil}
+	cases := map[string][]string{".:/usr/bin": {"/w/."}, ":/usr/bin": {"/w"}, "bin:/usr/bin": {"/w/bin"},
+		"/opt/x:/usr/bin:/evil": {"/opt/x"}, "/usr/local/bin:/usr/bin": nil,
+		// as given, never cleaned: link/.. is for the walk to resolve (SBX-2)
+		"/opt/link/..:/usr/bin": {"/opt/link/.."}, "/usr/local/bin/link/..:/usr/bin": {"/usr/local/bin/link/.."},
+		"l/../x:/usr/bin": {"/w/l/../x"}}
 	for path, want := range cases {
 		got, err := pathDirs(path, "/w")
 		if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
