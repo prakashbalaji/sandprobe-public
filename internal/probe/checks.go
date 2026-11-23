@@ -44,6 +44,7 @@ var checks = map[string]check{
 	"EGR-2":      egrDirect,
 	"EGR-3":      egrProxy,
 	"EGR-4":      egrIntercept,
+	"EGR-6":      egrUploadHosts,
 	"EGR-5.22":   egrDirect,
 	"EGR-5.80":   egrDirect,
 	"EGR-5.8080": egrDirect,

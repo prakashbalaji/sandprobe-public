@@ -109,10 +109,12 @@ def trust_policy(cluster_arn, namespace):
 
 
 class Runner:
-    def __init__(self, journal, profile=PROFILE, commands=None):
+    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
             raise Failure("invalid_profile")
         self.journal, self.profile = journal, profile
+        parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
+        self.upload_hosts = parse_hosts(",".join(upload_hosts or []))
         self.ops = commands or Commands()
         self.run_id = journal.data["run_id"]
         self.name = "sandprobe-agent-" + self.run_id
@@ -774,7 +776,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                    "namespace": self.ns, "name": pod_name, "uid": self.journal.data["context"]["pod_uid"],
                    "job_uid": job_uid, "image": self.image, "container_id": self.journal.data["task_container_id"], "config_sha256": config_sha},
                    "canary_state": str(self.journal.folder / "canary.state"),
-                   "contract": self.journal.data["workload_contract"]}
+                   "contract": self.journal.data["workload_contract"], "upload_hosts": self.upload_hosts}
         # No retries: an ambiguous launch cannot become a second assessment.
         bundle = strict(self.ops.call([str(self.journal.folder / "standard-grade")],
             payload=encoded(request), env=self.env, timeout=500, limit=4 << 20).decode(), 4 << 20)
@@ -1191,9 +1193,12 @@ def main():
     parser.add_argument("--run-id")
     parser.add_argument("--image-run-id")
     parser.add_argument("--profile", default=PROFILE)
+    parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     journal = None
     try:
         args = parser.parse_args()
+        parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
+        approved_hosts = parse_hosts(args.upload_hosts)
         if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not args.profile:
             raise Failure("aws_account_and_profile_required")
         if args.command == "cleanup":
@@ -1206,7 +1211,7 @@ def main():
             if not args.approval_ref:
                 raise Failure("aws_eks_testing_approval_reference_required")
             journal = Journal(STATE_ROOT, secrets.token_hex(8), create=True)
-        runner = Runner(journal, args.profile)
+        runner = Runner(journal, args.profile, upload_hosts=approved_hosts)
         if args.command == "cleanup":
             clean = runner.cleanup()
             print(json.dumps({"run_id": runner.run_id, "cleanup_confirmed": clean}))

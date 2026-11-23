@@ -214,6 +214,9 @@ func manifestSound(m obs.Manifest) error {
 			return fmt.Errorf("skipped %q isn't a Sandprobe check", id)
 		}
 	}
+	if hosts := m.Targets["EGR-6"]; len(hosts) > 0 && (!selected["EGR-6"] || catalog.ValidateUploadHosts(hosts) != nil) {
+		return errors.New("invalid workload-host targets (MEAS-6)")
+	}
 	// GRD-3: every check is graded or skipped for a reason GRD-3 names, so no run can be graded on less than the box.
 	for _, ck := range catalog.Checks {
 		why, skipped := m.Skipped[ck.ID]

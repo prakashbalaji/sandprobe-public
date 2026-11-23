@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
@@ -21,6 +22,7 @@ import (
 )
 
 type request struct {
+	UploadHosts []string              `json:"upload_hosts,omitempty"`
 	Contract    *obs.WorkloadContract `json:"contract"`
 	Pod         host.AgentPodBinding  `json:"pod"`
 	CanaryState string                `json:"canary_state"`
@@ -31,6 +33,9 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	raw, err := io.ReadAll(io.LimitReader(in, 65537))
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
 		return errors.New("invalid grading request")
+	}
+	if err := catalog.ValidateUploadHosts(q.UploadHosts); err != nil {
+		return err
 	}
 	if q.Contract == nil || q.Contract.Schema != "sandprobe.workload-contract/1" || obs.ValidateWorkloadContract(q.Contract) != nil || q.Contract.BoxID != q.Pod.UID ||
 		q.Contract.ManagedRunID != q.Pod.RunID || q.Contract.Image != q.Pod.Image || q.Contract.ConfigSHA256 != q.Pod.ConfigSHA256 {
@@ -65,7 +70,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract})
+	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}

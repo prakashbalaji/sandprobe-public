@@ -60,6 +60,7 @@ type Canary interface {
 }
 
 type Options struct {
+	UploadHosts      []string              // MEAS-6: explicit TLS-only workload destinations; default off
 	WorkloadContract *obs.WorkloadContract // WGR-1: frozen before workload release
 	BoundaryContract *obs.BoundaryContract // BND-1: optional reference-run declaration
 	Mode             string                // exec, workload, self or other (SBX-4)
@@ -118,6 +119,12 @@ func armWants(m obs.Manifest) []canary.Want {
 // Execute runs the probe in a box and grades it. An error means no run happened; a run that happened but can't be
 // graded comes back with an invalid report.
 func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
+	if err := catalog.ValidateUploadHosts(o.UploadHosts); err != nil {
+		return nil, err
+	}
+	if o.NoCanary && len(o.UploadHosts) != 0 {
+		return nil, fmt.Errorf("upload hosts cannot be selected with no-canary")
+	}
 	if err := obs.ValidateWorkloadContract(o.WorkloadContract); err != nil {
 		return nil, err
 	}
@@ -343,6 +350,9 @@ func attested(ids []string) []string {
 // parse leaves EGR-3 unknown.
 func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, pin string) (obs.Manifest, obs.Input) {
 	skip := map[string]string{"EGR-6": "contacting EGR-6's public upload hosts wasn't approved"}
+	if !o.NoCanary && len(o.UploadHosts) > 0 && catalog.ValidateUploadHosts(o.UploadHosts) == nil {
+		delete(skip, "EGR-6") // MEAS-6: only explicit finite workload destinations lift this gate.
+	}
 	var kinds map[string]string // SCR-2: only the host's own exclusions get a kind, never a survey-driven skip
 	for id, why := range o.Excluded {
 		if excludable[id] {
@@ -401,6 +411,9 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		}
 	}
 	targets, discover := catalog.Plan(probeSelected)
+	if skip["EGR-6"] == "" {
+		targets["EGR-6"] = append([]string(nil), o.UploadHosts...)
+	}
 	if o.WorkloadContract != nil {
 		targets["SEC-3"] = append(targets["SEC-3"], obs.ProtectedMarker)
 	}

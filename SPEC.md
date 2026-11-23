@@ -675,6 +675,27 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Its original-ID cleanup remains mandatory. Do not delete the shared hosted service
   or another run's resources. No idle dedicated receiver is retained after a run.
 
+- **MEAS-6 Bounded workload-host TLS measurement.** EGR-6 is implemented generically,
+  independent of the provider adapter. An explicit `upload_hosts` request selects
+  one to four distinct exact names from the shipped workload/dependency list:
+  `github.com`, `raw.githubusercontent.com`, `pypi.org`, `files.pythonhosted.org`,
+  `api.anthropic.com`, `api.openai.com`, `bedrock-runtime.us-west-2.amazonaws.com`.
+  No URLs, arbitrary hosts, IP literals, provider-control endpoints or wildcard
+  selection are accepted. Both managed runners expose the same explicit list.
+  Default remains off; a no-canary run refuses this selection. Validate before surveying or creating a sandbox; the frozen
+  manifest records the selected names in `Targets["EGR-6"]`. The probe independently
+  validates the list, resolves each name once, rejects empty, excessive or non-public
+  answers, and dials at most one of those literal public addresses on TCP443 (preferring IPv4, as the managed workloads do), using
+  the original name for SNI and WebPKI verification. It uses no environment proxy,
+  sends no HTTP request or application data, follows no redirect, and shares one
+  three-second DNS/connect/TLS budget per name. A verified handshake is only the
+  existing Medium indicator of a reachable upload-capable service, never proof that
+  an upload works or an assurance failure for an intended workload dependency.
+  If no verified handshake is observed, the result is unknown with a fixed reason,
+  never a pass, absence or inferred network refusal. A partial finding names only
+  verified hosts and retains the number of unproven destinations. Tests contact
+  only local TLS fixtures; production cannot opt into private destinations.
+
 - **SCR-4 Workload exposure headline.** The six-category scorecard (SCR-1)
   is the common exposure ranking for Nitro and Daytona workload runs. Compute it from
   the same standard observations and proofs using SCR-2, never from a supplied
@@ -2321,6 +2342,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-4 | existing managed original-ID cleanup and request-budget tests; retained accuracy-validation provenance |
 | MEAS-1/MEAS-2 | shared frozen binding, receiver lifecycle ordering, replay/identity/control/receipt/stop failures and positive-delivery grading |
 | MEAS-3 | bounded expected-ack/wrong-reply/EOF cases; host receipt requirements unchanged |
+| MEAS-6 | upload-host catalog, host plan and pre-survey refusal tests; Linux root/nobody `TestUploadHostsRejectUnapprovedAndNonpublic`, `TestUploadHostsBoundedAndPartialEvidence`, `TestUploadHandshakeVerifiesCertificateWithoutHTTP`; shared Python policy and pre-provision refusal tests |
 | MEAS-5 | `TestManagedHostedCanaryLifecycle`, `TestManagedHostedCanaryFailureIsClosedAndSanitized`: local signed-control fixture, shipped trust anchors, reserved slot, release after cancellation, reservation failure, sanitization and unconfirmed-release recovery; CLI and managed collector regressions |
 | MEAS-4 | generic SSM/Docker transport fixtures, Daytona original-ID pre-finalization shutdown and cleanup recovery; fresh managed validation |
 | PRV-15 (identity) | `internal/probe/whoami_test.go` in `test/probe.sh`, as nobody and as root: the four uids from the kernel's Uid line, `-whoami` resolving names and numbers with no check run, and the shipped probe bound to another uid writing nothing and running no survey while bound to its own it runs; `cmd/sandprobe-probe` argument tests (`-expect-uid` binds a run only, never `-whoami` or `-quick`) |

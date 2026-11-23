@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"sandprobe/internal/catalog"
 	"sandprobe/internal/grade"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
@@ -30,7 +31,7 @@ import (
 var sourceCommit string
 var hexRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
 
-type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root string }
+type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts string }
 type taskResult struct {
 	Schema                     string `json:"schema"`
 	Workload                   string `json:"workload"`
@@ -259,6 +260,10 @@ func failureCategory(e error) string {
 	return "managed_step_failed"
 }
 func execute(ctx context.Context, o options) (err error) {
+	uploadHosts, e := catalog.ParseUploadHosts(o.uploadHosts)
+	if e != nil {
+		return e
+	}
 	st, statErr := os.Lstat(o.folder)
 	if statErr != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
 		return errors.New("private output directory required")
@@ -447,7 +452,9 @@ func execute(ctx context.Context, o options) (err error) {
 		return e
 	}
 	stage = "standard-collection"
-	r, e := host.Execute(ctx, b, public, collectionOptions(sha, contract))
+	collection := collectionOptions(sha, contract)
+	collection.UploadHosts = uploadHosts
+	r, e := host.Execute(ctx, b, public, collection)
 	if e != nil {
 		return errors.New("standard configuration collection failed")
 	}
@@ -547,6 +554,7 @@ func main() {
 	flag.StringVar(&o.runID, "run-id", "", "managed run ID")
 	flag.StringVar(&o.snapshot, "snapshot", "", "CPU snapshot UUID")
 	flag.StringVar(&o.network, "network", "", "fixed regional model IPv4 /32 list")
+	flag.StringVar(&o.uploadHosts, "upload-hosts", "", "explicit comma-separated shipped workload names for TLS-only EGR-6")
 	flag.StringVar(&o.root, "source-root", ".", "clean exact-source repository")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
