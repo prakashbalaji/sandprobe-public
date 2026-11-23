@@ -154,8 +154,10 @@ lists each one with your attestation before anything runs, and the report record
     `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No canary traffic, with `-no-canary`** (`run exec` and recipes): the probe sends no test traffic to any canary,
   and no canary is contacted. Exfiltration is then reported as not tested, and the run can't grade above C. Checks you
-  turn on with `-provider-endpoints` still make their named connections, such as SEC-4's requests to cloud metadata
-  and AMP-7's TLS handshake with the Kubernetes API. Your own command, or the provider's API, still reaches the box.
+  turn on with `-provider-endpoints` that don't need a canary still make the connections the plan names: SEC-4's
+  requests to the cloud metadata addresses, AMP-7's TLS handshake with the Kubernetes API, and AMP-6's vsock connects,
+  only on a recipe's throwaway box. EGR-3 doesn't run, since it needs a canary. Your own command, or the provider's
+  API, still reaches the box.
 - **Your reports stay with you.** Sandprobe uploads no report and has no telemetry.
 - **Your provider's own API**, when Sandprobe creates or reaches a box for you, with your own credentials.
 
