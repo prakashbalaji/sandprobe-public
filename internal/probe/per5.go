@@ -139,6 +139,9 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 		return 0, 0, "the root can't be opened: " + errName(errnoOf(err))
 	}
 	defer syscall.Close(dfd)
+	if m.Dev == 0 && m.Ino == 0 {
+		return 0, 0, unlisted(dfd)
+	}
 	var rst syscall.Stat_t
 	if syscall.Fstat(dfd, &rst) != nil || uint64(rst.Dev) != m.Dev || rst.Ino != m.Ino {
 		return 0, 0, "the root isn't the directory the survey saw"
@@ -157,6 +160,22 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 		return 0, 0, "the marker couldn't be checked"
 	}
 	return st.Ino, st.Size, ""
+}
+
+// unlisted says why a planned root the survey didn't list takes no marker (TWN-3). The survey lists only roots the
+// agent can write and search, so the usual answer is that it can't; that refusal says nothing of the rest of the root's
+// storage, so it is never the root's negative. Only faccessat on the opened root: nothing is created.
+func unlisted(dfd int) string {
+	err := syscall.Faccessat(dfd, ".", 2|1 /* W_OK|X_OK */, atEAccess)
+	switch e := errnoOf(err); {
+	case e == syscall.EACCES || e == syscall.EROFS:
+		return "the agent can't write it (" + errName(e) + "), so the survey didn't list it; " +
+			"that doesn't show the agent can't write elsewhere on its storage"
+	case err == nil:
+		return "the survey didn't list it, though the agent can write it now"
+	default:
+		return "the survey didn't list it, and whether the agent can write it can't be told (" + errName(e) + ")"
+	}
 }
 
 // Recheck looks for each placed marker after the reset (TWN-3): pinned with O_PATH|O_NOFOLLOW under the root opened

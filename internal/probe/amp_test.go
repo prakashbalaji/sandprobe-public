@@ -18,43 +18,46 @@ import (
 	"sandprobe/internal/obs"
 )
 
-// Only a regular, root-owned, setuid file out of the agent's reach is pinned; anything else is refused before it runs.
+// Only a regular, root-owned, setuid file out of the agent's reach is pinned, whether at the path or at the end of a
+// chain of links out of its reach (AMP-1); anything else is refused before it runs, and the refusal says what failed.
 func TestPinSudo(t *testing.T) {
 	dir := t.TempDir()
 	own := filepath.Join(dir, "sudo")
 	os.WriteFile(own, []byte("#!/bin/sh\n"), 0o4755)
 	link := filepath.Join(dir, "link")
 	os.Symlink("/usr/bin/su", link)
-	for _, p := range []string{own, link, "/usr/bin/ls"} { // the last is root's, in root's directory, but not setuid
-		if fd, why := pinSudo(p); why == "" {
+	dangling := filepath.Join(dir, "dangling")
+	os.Symlink(filepath.Join(dir, "nowhere"), dangling)
+	want := map[string]string{
+		own:      "the agent can write " + dir + ", so it could replace " + own,
+		link:     "the agent can write " + dir + ", so it could replace " + link, // a link the agent can swap, to root's su
+		dangling: "its links can't be followed to a file",
+		// root's, in root's directories, but not setuid; the second through two links and the /bin directory link
+		"/usr/bin/ls":    "/usr/bin/ls isn't setuid",
+		"/usr/bin/pager": "/bin/more isn't setuid",
+	}
+	if root { // root can write every directory: anything it runs could have been replaced
+		want["/usr/bin/ls"] = "the agent can write /usr/bin, so it could replace /usr/bin/ls"
+		want["/usr/bin/pager"] = "the agent can write /usr/bin, so it could replace /usr/bin/pager"
+	}
+	for p, reason := range want {
+		fd, chain, why := pinSudo(p)
+		if why == "" {
 			syscall.Close(fd)
-			t.Errorf("%s: want it refused", p)
+			t.Errorf("%s: want it refused, got it pinned as %s", p, chain)
+		} else if !strings.Contains(why, reason) {
+			t.Errorf("%s: want the refusal to say %q, got %q", p, reason, why)
 		}
 	}
-	// su is root-owned and setuid in the image, in root-owned directories: pinned as nobody; as root, the agent could
-	// write it, so never.
-	fd, why := pinSudo("/usr/bin/su")
-	if fd >= 0 {
-		syscall.Close(fd)
-	}
-	if root == (why == "") {
-		t.Errorf("/usr/bin/su as uid %d: pinned=%v (%s)", os.Geteuid(), why == "", why)
-	}
-}
-
-func TestSetuidRoot(t *testing.T) {
-	for _, tc := range []struct {
-		mode uint32
-		uid  uint32
-		want bool
-	}{
-		{syscall.S_IFREG | syscall.S_ISUID | 0o755, 0, true},
-		{syscall.S_IFREG | 0o755, 0, false},                      // not setuid
-		{syscall.S_IFREG | syscall.S_ISUID | 0o755, 1000, false}, // setuid, but not root's
-		{syscall.S_IFLNK | syscall.S_ISUID | 0o777, 0, false},    // a symlink pinned as itself
-	} {
-		if got := setuidRoot(syscall.Stat_t{Mode: tc.mode, Uid: tc.uid}); got != tc.want {
-			t.Errorf("mode %o uid %d: want %v", tc.mode, tc.uid, tc.want)
+	// su is root-owned and setuid in the image, in root-owned directories: pinned as nobody, also through the /bin
+	// directory link; as root, the agent could replace it, so never.
+	for p, wantChain := range map[string]string{"/usr/bin/su": "/usr/bin/su", "/bin/su": "/bin/su"} {
+		fd, chain, why := pinSudo(p)
+		if fd >= 0 {
+			syscall.Close(fd)
+		}
+		if root == (why == "") || !root && chain != wantChain {
+			t.Errorf("%s as uid %d: pinned=%v as %q (%s)", p, os.Geteuid(), why == "", chain, why)
 		}
 	}
 }

@@ -5,6 +5,7 @@ package probe
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -170,6 +171,26 @@ func TestMarkRefuses(t *testing.T) {
 	lm.Root, lm.Path = link, filepath.Join(link, obs.MarkerPrefix+run)
 	if p := markOne(t, lm, run); p.Placed {
 		t.Error("a root reached through a symlink: want no marker (O_NOFOLLOW)")
+	}
+}
+
+// A planned root the survey didn't list has no directory identity: it takes no marker, and the mark says why, usually
+// that the agent can't write it, which is never that root's negative (TWN-3). Nothing is created either way.
+func TestMarkUnlisted(t *testing.T) {
+	const run = "r1"
+	cases := map[string]string{t.TempDir(): "the survey didn't list it, though the agent can write it now",
+		"/usr": "the agent can't write it (EACCES), so the survey didn't list it"}
+	if root {
+		cases["/usr"] = "the survey didn't list it, though the agent can write it now"
+	}
+	for dir, want := range cases {
+		m := obs.PlannedMark{Root: dir, Path: filepath.Join(dir, obs.MarkerPrefix+run)}
+		if p := markOne(t, m, run); p.Placed || !strings.Contains(p.Why, want) {
+			t.Errorf("%s, unlisted: want no marker because %q, got %+v", dir, want, p)
+		}
+		if _, err := os.Lstat(m.Path); err == nil {
+			t.Errorf("a marker was created in the unlisted root %s", dir)
+		}
 	}
 }
 

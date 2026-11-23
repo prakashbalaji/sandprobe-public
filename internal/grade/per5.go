@@ -140,6 +140,24 @@ func rootKept(pm obs.PlannedMark, model string, r *obs.ResetEvidence) bool {
 	return false
 }
 
+// notKept says why a root's provider identity can't show it is the same storage after the reset (TWN-3): a restore
+// whose provider gives the root no identity (Sprites gives none of its roots one), or an identity or volume that
+// differs.
+func notKept(pm obs.PlannedMark, model string, r *obs.ResetEvidence) string {
+	if model == "restore" && r.RootIdentity[pm.Root][0] == "" {
+		return pm.Root + " has no identity from the provider, so its marker's absence can't show the reset cleared it"
+	}
+	return pm.Root + " isn't the same storage, by the provider's identity"
+}
+
+// boxText bounds a reason the box wrote before the report repeats it (TWN-3).
+func boxText(s string) string {
+	if len(s) > 256 {
+		return s[:253] + "..."
+	}
+	return s
+}
+
 func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.RecheckDoc) Outcome {
 	switch {
 	case c == nil || c.Reset == nil:
@@ -158,17 +176,17 @@ func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.Rechec
 		changed := named && id[0] != "" && id[1] != "" && id[0] != id[1]
 		switch {
 		case !placed:
-			gaps = append(gaps, pm.Root+" took no marker")
+			gaps = append(gaps, pm.Root+" took no marker: "+boxText(md.Marks[i].Why))
 		case state == "survived" && m.Reset == "restore" && !changed:
 			// TWN-3: state written after the checkpoint was there after the proven restore, whatever its root's
 			// identity (which a clone could share or not); only an absence needs that identity
 			survived = append(survived, pm.Root)
 		case !kept:
-			gaps = append(gaps, pm.Root+" isn't the same storage, by the provider's identity")
+			gaps = append(gaps, notKept(pm, m.Reset, r))
 		case state == "survived":
 			survived = append(survived, pm.Root)
 		case state != "absent":
-			gaps = append(gaps, pm.Root+": "+rd.Marks[i].Why)
+			gaps = append(gaps, pm.Root+": "+boxText(rd.Marks[i].Why))
 		}
 	}
 	switch {

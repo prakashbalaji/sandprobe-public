@@ -220,7 +220,11 @@ func writeCheck(name, path string) (obs.Target, error) {
 // it): writable and searchable, not protected by a sticky bit (which spares entries the agent doesn't own), and not
 // the parent of a mount point. Mount points are told by a device change, which misses a bind mount of the same
 // filesystem; that errs towards a finding, never a pass.
-func replaceable(p string) bool {
+func replaceable(p string) bool { return replacer(p) != "" }
+
+// replacer is replaceable's answer with its reason: the ancestor directory through which the agent could replace p,
+// or "" when there is none.
+func replacer(p string) string {
 	euid := os.Geteuid()
 	child := p
 	for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
@@ -231,12 +235,12 @@ func replaceable(p string) bool {
 				exists := syscall.Lstat(child, &cs) == nil
 				mount := exists && cs.Dev != ds.Dev // a mount point can't be renamed or removed (EBUSY)
 				if !mount && (!sticky || !exists || int(ds.Uid) == euid || int(cs.Uid) == euid) {
-					return true
+					return dir
 				}
 			}
 		}
 		if dir == "/" {
-			return false
+			return ""
 		}
 		child = dir
 	}

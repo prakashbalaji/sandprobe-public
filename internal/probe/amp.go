@@ -21,10 +21,11 @@ import (
 
 var checkLimit = 10 * time.Second // SBX-7: 10 s per check; a variable so tests can shorten it
 
-// AMP-1: `sudo -n -l`, which lists policy and runs no command (SBX-1 (c)), from a sudo at one of the fixed paths that
-// is a regular, root-owned, setuid file the agent can neither write nor replace. The file is pinned with O_PATH,
-// checked on that descriptor, and executed through it, so the inode checked is the inode that runs. A sudo anywhere
-// else, or one that fails the check, is recorded and never run.
+// AMP-1: `sudo -n -l`, which lists policy and runs no command (SBX-1 (c)), from a sudo at one of the fixed paths: a
+// regular, root-owned, setuid file there, or the one a symlink chain from there ends at (as Debian's alternatives and
+// sudo-rs install it), which the agent can neither write nor replace, nor replace any link of the chain. The file is
+// pinned with O_PATH, checked on that descriptor, and executed through it, so the inode checked is the inode that
+// runs. A sudo anywhere else, or one that fails the check, is recorded and never run, and the reason says what failed.
 func amp1(e *env, ck *catalog.Check) obs.Observation {
 	var ts []obs.Target
 	var present []string
@@ -49,17 +50,17 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	}
 	var refused []string
 	for _, p := range present {
-		fd, why := pinSudo(p)
+		fd, chain, why := pinSudo(p)
 		if why != "" {
-			refused = append(refused, p+" "+why)
+			refused = append(refused, p+": "+why)
 			continue
 		}
-		return sudoList(p, fd)
+		return sudoList(chain, fd)
 	}
 	if len(present) == 0 {
 		return unknownObs("sudo is only off the fixed paths (" + strings.Join(elsewhere, ", ") + "): recorded, never run")
 	}
-	return unknownObs("no sudo at a fixed path can be trusted to run: " + strings.Join(refused, "; "))
+	return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + strings.Join(refused, "; "))
 }
 
 // pathSudo: sudo in any PATH directory other than the fixed ones. Only lstat; nothing found here ever runs.
@@ -87,38 +88,63 @@ func pathSudo(fixed []string) ([]string, error) {
 	return out, nil
 }
 
-// pinSudo opens p with O_PATH and O_NOFOLLOW and checks, on that descriptor, that it is the file lstat saw, a regular
-// root-owned setuid file (a symlink pins as itself, and fails), which the agent can't write or replace. It returns the
-// descriptor, or why p can't be trusted.
-func pinSudo(p string) (int, string) {
-	var st syscall.Stat_t
-	if err := lstat(p, &st); err != nil {
-		return -1, "can't be checked"
+// pinSudo follows p's symlink chain hop by hop to the file it ends at (SBX-2) and checks the chain: no link or file in
+// it the agent can replace through a directory it can write, as each hop's path names its directories or as the real
+// directories behind them are; and a file the agent can't write. The file is pinned with O_PATH and O_NOFOLLOW and
+// checked on that descriptor: the inode the chain ended at, the inode the kernel reaches from p, and a regular,
+// root-owned, setuid file. It returns the descriptor and the chain as a report shows it, or why p can't be trusted.
+func pinSudo(p string) (fd int, chain, why string) {
+	n, err := resolve(p)
+	switch {
+	case err != nil:
+		return -1, "", "its links can't be followed to a file (" + err.Error() + ")"
+	case n.errno != 0:
+		return -1, "", "can't be checked: " + errName(n.errno)
+	case n.st.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		return -1, "", n.final + " isn't a regular file"
 	}
-	if t, err := writeCheck(p, p); err != nil || t.State != "refused" {
-		return -1, "can be written or replaced by the agent, or its ancestors can"
+	for _, h := range n.hops {
+		real, err := filepath.EvalSymlinks(filepath.Dir(h))
+		if err != nil {
+			return -1, "", "the directories of " + h + " can't be followed (" + err.Error() + ")"
+		}
+		for _, q := range []string{h, filepath.Join(real, filepath.Base(h))} {
+			if dir := replacer(q); dir != "" {
+				return -1, "", "the agent can write " + dir + ", so it could replace " + q
+			}
+		}
 	}
-	fd, err := syscall.Open(p, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	switch err := syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess); errnoOf(err) {
+	case syscall.EACCES, syscall.EROFS:
+	case 0:
+		return -1, "", "the agent can write " + n.final + " itself"
+	default:
+		return -1, "", "whether the agent can write " + n.final + " can't be told (" + err.Error() + ")"
+	}
+	fd, err = syscall.Open(n.final, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return -1, "can't be pinned"
+		return -1, "", n.final + " can't be pinned (" + err.Error() + ")"
 	}
-	var fst syscall.Stat_t
+	var fst, kst syscall.Stat_t
 	switch {
 	case syscall.Fstat(fd, &fst) != nil:
-		syscall.Close(fd)
-		return -1, "can't be checked on its descriptor"
-	case fst.Dev != st.Dev || fst.Ino != st.Ino:
-		syscall.Close(fd)
-		return -1, "changed between the check and the pin"
-	case !setuidRoot(fst):
-		syscall.Close(fd)
-		return -1, "isn't a regular, root-owned, setuid file"
+		why = n.final + " can't be checked on its descriptor"
+	case fst.Dev != n.st.Dev || fst.Ino != n.st.Ino:
+		why = n.final + " changed between the check and the pin"
+	case syscall.Stat(p, &kst) != nil || kst.Dev != fst.Dev || kst.Ino != fst.Ino:
+		why = "the kernel doesn't reach " + n.final + " from " + p
+	case fst.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		why = n.final + " isn't a regular file"
+	case fst.Uid != 0:
+		why = fmt.Sprintf("%s is owned by uid %d, not root", n.final, fst.Uid)
+	case fst.Mode&syscall.S_ISUID == 0:
+		why = n.final + " isn't setuid"
 	}
-	return fd, ""
-}
-
-func setuidRoot(st syscall.Stat_t) bool {
-	return st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Uid == 0 && st.Mode&syscall.S_ISUID != 0
+	if why != "" {
+		syscall.Close(fd)
+		return -1, "", why
+	}
+	return fd, strings.Join(n.hops, " -> "), ""
 }
 
 const unixOPath = 0x200000 // O_PATH

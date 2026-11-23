@@ -136,7 +136,8 @@ var fixtures = []fixture{
 	{name: "reset-cleaner", image: "reset", volumes: []string{"/home/agent/persist"}, box: hooked(cleaner("/home/agent/persist")),
 		expect: expectPER5(obs.NotFound, "something other than the reset may have removed it"), opts: noNet},
 	{name: "reset-refusing-root", image: "reset", volumes: []string{"/home/agent/persist", "/home/agent/locked"},
-		box: hooked(cleaner("/home/agent/persist")), expect: expectPER5(obs.Unknown, "took no marker"), opts: noNet},
+		box: hooked(cleaner("/home/agent/persist")), opts: noNet,
+		expect: expectPER5(obs.Unknown, "/home/agent/locked took no marker: the agent can't write it (EACCES), so the survey didn't list it")},
 	{name: "reset-substitute", image: "reset", volumes: []string{"/home/agent/persist"}, box: hooked(substitute("/home/agent/persist")),
 		expect: expectSubstitute, opts: noNet},
 	{name: "reset-held-volume", image: "reset", volumes: []string{"/home/agent/persist"}, hold: true, tdErr: "volume",
@@ -164,6 +165,30 @@ var fixtures = []fixture{
 		expect: expectAMP1(obs.NotFound, "")},
 	{name: "policy-truepath", image: "policy", user: "truepath", opts: func(world) []string { return []string{"--network", "none"} },
 		expect: expectAMP1(obs.Finding, "nopasswd_named")},
+	// sudors: sudo-rs as Ubuntu ships it, a chain of links to the setuid file, followed and run through the pinned file;
+	// a chain the agent could redirect, or that ends nowhere, never runs, and AMP-1 says why
+	sudors("nopasswd", "agent", obs.Finding, "nopasswd_all", "run from "+sudoChain),
+	sudors("norule", "plain", obs.NotFound, "", "run from "+sudoChain),
+	// a hardened agent: no capabilities and NoNewPrivs, under which the kernel ignores setuid and sudo-rs stops at once
+	sudors("hardened", "plain", obs.NotFound, "", "run from "+sudoChain, "--cap-drop", "ALL", "--security-opt", "no-new-privileges"),
+	sudors("root", "root", obs.Unknown, "", "the agent can write /usr/bin, so it could replace /usr/bin/sudo"),
+	sudors("writable-link", "agent", obs.Unknown, "", "the agent can write /etc/alternatives, so it could replace /etc/alternatives/sudo"),
+	sudors("writable-real", "agent", obs.Unknown, "", "the agent can write /opt/alt, so it could replace /opt/alt/alternatives/sudo"),
+	sudors("dangling", "agent", obs.Unknown, "", "its links can't be followed to a file"),
+}
+
+const sudoChain = "/usr/bin/sudo -> /etc/alternatives/sudo -> /usr/lib/cargo/bin/sudo"
+
+// sudors is a case of the sudors fixture: SUDORS sets it up, and AMP-1 must end as result and variant, saying says.
+// The agent user has NOPASSWD for every command, so a refused case that ran sudo would show as a finding.
+func sudors(mode, user, result, variant, says string, opts ...string) fixture {
+	return fixture{name: "sudors-" + mode, image: "sudors", user: user, settle: time.Second,
+		opts: func(world) []string { return append([]string{"--network", "none", "-e", "SUDORS=" + mode}, opts...) },
+		expect: func(t *testing.T, w world, r *Run) {
+			if o := outcome(r.Report, "AMP-1"); o.Result != result || o.Variant != variant || !strings.Contains(o.Evidence+o.Reason, says) {
+				t.Errorf("AMP-1: want %s %s saying %q, got %+v", result, variant, says, o)
+			}
+		}}
 }
 
 // TestFixtures runs each fixture box beside a local canary, through the whole host path, and checks it gives its
