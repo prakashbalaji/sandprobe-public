@@ -1,0 +1,295 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"math/big"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"sandprobe/internal/canary"
+	"sandprobe/internal/canarycontrol"
+	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
+)
+
+// strayIP is the address a stray operator state file records: it must never reach a plan, a readiness line or a run.
+const strayIP = "198.51.100.77"
+
+// isolateCanary gives a test its own HOME and clears every canary variable, so nothing of the person's own canary
+// setup reaches it.
+func isolateCanary(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SANDPROBE_CANARY", "")
+	t.Setenv("SANDPROBE_CANARY_URL", "")
+	t.Setenv("SANDPROBE_CANARY_PIN", "")
+}
+
+// strayState isolates the test and leaves exactly one whole operator canary state file where deploy/canary.sh writes
+// it: the case that once sent run exec to a dead operator canary. It returns the file's path.
+func strayState(t *testing.T) string {
+	t.Helper()
+	isolateCanary(t)
+	if err := os.MkdirAll(configDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(configDir(), "canary-stray-us-west-2.state")
+	body := "profile=stray\nregion=us-west-2\ninstance=i-0123456789abcdef0\nip=" + strayIP + "\ndomain=stray.example\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// hostedChoice is the canary a run uses with nothing named: the hosted one.
+func hostedChoice(t *testing.T) canaryChoice {
+	t.Helper()
+	c, err := runFlags{}.chooseCanary()
+	if err != nil || c.url != hostedCanaryURL {
+		t.Fatalf("no canary named: %+v %v", c, err)
+	}
+	return c
+}
+
+// HCN-5's precedence, with no network call: -canary (flag or SANDPROBE_CANARY) first, then -canary-url with its pin,
+// then the hosted canary. A stray canary-*.state file is never chosen, and a pin without its URL is refused.
+func TestCanaryPrecedence(t *testing.T) {
+	stray := strayState(t)
+	named := filepath.Join(t.TempDir(), "canary-named.state")
+	for _, tc := range []struct {
+		name          string
+		r             runFlags
+		state, url    string
+		retains, says string
+	}{
+		{"nothing named: the hosted canary, never the stray file", runFlags{}, "", hostedCanaryURL, "30 minutes", "run by Summation"},
+		{"-canary-url with its pin", runFlags{canaryURL: "https://control.sandprobe.test", canaryPin: testPin}, "", "https://control.sandprobe.test", "30 minutes", "the public canary you named"},
+		{"-canary, named", runFlags{canary: named}, named, "", "", "which you run"},
+		{"-canary over -canary-url", runFlags{canary: named, canaryURL: "https://control.sandprobe.test", canaryPin: testPin}, named, "", "", "which you run"},
+		{"the stray file, only when named", runFlags{canary: stray}, stray, "", "", "the operator canary in " + stray},
+	} {
+		c, err := tc.r.chooseCanary()
+		if err != nil || c.none || c.state != tc.state || c.url != tc.url || !strings.Contains(c.retainNote, tc.retains) || !strings.Contains(c.describe, tc.says) {
+			t.Errorf("%s: %+v %v", tc.name, c, err)
+		}
+		if tc.r.canary == "" && strings.Contains(c.describe, stray) {
+			t.Errorf("%s: the stray state file was chosen", tc.name)
+		}
+	}
+	// SANDPROBE_CANARY names one as explicitly as the flag does.
+	t.Setenv("SANDPROBE_CANARY", named)
+	var r runFlags
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	r.register(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := r.chooseCanary(); err != nil || c.state != named {
+		t.Errorf("SANDPROBE_CANARY: %+v %v", c, err)
+	}
+	if _, err := (runFlags{canaryPin: testPin}).chooseCanary(); err == nil {
+		t.Error("a pin without its URL was set aside")
+	}
+}
+
+// HCN-5: with one stray canary-*.state file and nothing named, every plan names the hosted canary, who runs it and
+// HCN-4's retention, and never the stray file or its address: run exec and each native adapter, and providers too.
+func TestStrayCanaryStateIsIgnored(t *testing.T) {
+	stray := strayState(t)
+	check := func(name, text string) {
+		t.Helper()
+		for _, want := range []string{"hosted canary at " + hostedCanaryURL, "run by Summation", "at most 30 minutes"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s doesn't say %q", name, want)
+			}
+		}
+		for _, bad := range []string{strayIP, stray, "stray.example", "SSM"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("%s names %q", name, bad)
+			}
+		}
+	}
+	for _, args := range [][]string{
+		{"plan", "exec", "-o", "json", "--", "sh"},
+		{"plan", "baseten", "-o", "json"}, {"plan", "e2b", "-o", "json"}, {"plan", "vercel", "-o", "json"},
+		{"plan", "cloudflare", "-o", "json"}, {"plan", "boat", "-o", "json"}, {"plan", "daytona", "-o", "json"},
+		{"plan", "exe.dev", "-o", "json"},
+	} {
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 {
+			t.Fatalf("%q: exit %d, %s", args, code, out.String()+errs.String())
+		}
+		var p planDoc
+		if err := json.Unmarshal(out.Bytes(), &p); err != nil {
+			t.Fatalf("%q: %v", args, err)
+		}
+		check(args[1], strings.Join(p.Contacts, " ")+" "+p.Residual)
+	}
+	// Sprites and AWS Nitro need a provider login before their plan, so their plans are built from the chooser.
+	var r runFlags
+	choice, err := r.chooseCanary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, p := range map[string]planDoc{
+		"sprites":   sprPlan("example-org", choice, r, ""),
+		"aws-nitro": nitroPlan("/k", choice, runFlags{variant: "isolated"}, host.PodSpec{Image: "i", RuntimeClass: "isolated-sandbox"}),
+	} {
+		check(name, strings.Join(p.Contacts, " ")+" "+p.Residual)
+	}
+	at, ok, fix := r.canaryReadiness()
+	if !ok || fix != "" || !strings.Contains(at, hostedCanaryURL) || strings.Contains(at, strayIP) {
+		t.Errorf("providers' canary: %q %v %q", at, ok, fix)
+	}
+	// Named, the same file is the operator canary, in the plan and in providers.
+	var out, errs bytes.Buffer
+	if code := run([]string{"plan", "e2b", "-canary", stray}, &out, &errs); code != 0 || !strings.Contains(out.String(), "the operator canary in "+stray) ||
+		strings.Contains(out.String(), "hosted canary") {
+		t.Errorf("-canary %s: exit %d, %s", stray, code, out.String()+errs.String())
+	}
+	if at, ok, _ := (runFlags{canary: stray}).canaryReadiness(); !ok || !strings.Contains(at, strayIP) {
+		t.Errorf("providers with -canary: %q %v", at, ok)
+	}
+	if _, ok, fix := (runFlags{canary: filepath.Join(t.TempDir(), "missing.state")}).canaryReadiness(); ok || fix == "" {
+		t.Error("providers called a missing operator canary ready")
+	}
+}
+
+// standInHosted runs a real canary with the public control path on a local port and makes it the hosted canary for
+// this test only: its URL, its pin, and a control client that trusts its certificate and dials it. No test reaches
+// the real hosted canary.
+func standInHosted(t *testing.T) *canary.Canary {
+	t.Helper()
+	const name = "control.sandprobe.test"
+	c, err := canary.New("sandprobe.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.PublicAddr = "127.0.0.1"
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name}, DNSNames: []string{name},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	leaf, _ := x509.ParseCertificate(der)
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	controlKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pin, _ := canarycontrol.PinOf(&controlKey.PublicKey)
+	stop := canarycontrol.Attach(c, name, &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}},
+		NextProtos: []string{"http/1.1"}}, controlKey)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go c.ServeTLS(ln, 443)
+	addr := ln.Addr().String()
+	client := &http.Client{Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: name},
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			}}}
+	url, pins, open := hostedCanaryURL, hostedCanaryPins, newPublicCanary
+	hostedCanaryURL, hostedCanaryPins = "https://"+name, []string{pin}
+	newPublicCanary = func(ctx context.Context, control string, pins []string) (*host.HTTPSCanary, error) {
+		return host.NewHTTPSCanaryWithClient(ctx, control, pins, client)
+	}
+	t.Cleanup(func() {
+		hostedCanaryURL, hostedCanaryPins, newPublicCanary = url, pins, open
+		ln.Close()
+		stop()
+	})
+	return c
+}
+
+// steadyHealth is a public canary whose health connects are taken as confirmed, so the test never dials ports on this
+// machine; every control answer is still the real, signed one.
+type steadyHealth struct{ *host.HTTPSCanary }
+
+func (steadyHealth) Health(context.Context, int, canary.Key) bool { return true }
+
+// surveyOnly answers the survey; its main run fails, which still leaves the canary's evidence gathered.
+type surveyOnly struct{}
+
+func (surveyOnly) ID() string { return "box-1" }
+func (surveyOnly) Probe(_ context.Context, args []string, _ []byte) ([]byte, error) {
+	if slices.Equal(args, []string{"-survey"}) {
+		return json.Marshal(obs.Survey{Schema: obs.SurveySchema})
+	}
+	return nil, errors.New("no probe here")
+}
+
+// slotsFree: the canary holds nothing for this host, which can still reserve every slot one source may hold at once.
+func slotsFree(t *testing.T, c *canary.Canary) {
+	t.Helper()
+	for i := 0; i < 4; i++ {
+		q := canary.Request{Op: "reserve", TTL: 60, SecretSHA256: fmt.Sprintf("%064x", i+1), Challenge: strings.Repeat("ab", 32)}
+		if a := c.HandlePublic(q, "127.0.0.1"); !a.OK {
+			t.Fatalf("slot %d is held: %s", i, a.Error)
+		}
+	}
+}
+
+// HCN-5 for a native adapter, at the seam every one of them shares: with a stray operator state file and nothing
+// named, the run's canary is the hosted one, proven by its signed status and holding the run's slot before any box
+// exists (HCN-1, HCN-3); Execute arms, queries and disarms through it with the receipts read (SBX-11); and closeCanary
+// gives everything back. A named operator canary that can't be loaded stops the run before anything.
+func TestNativeRunOnTheHostedCanary(t *testing.T) {
+	strayState(t)
+	pub := standInHosted(t)
+	var r runFlags
+	choice, err := r.chooseCanary()
+	if err != nil || choice.url != hostedCanaryURL {
+		t.Fatalf("chose %+v %v", choice, err)
+	}
+	ctx := context.Background()
+	var steps []string
+	c, public, err := r.openCanary(ctx, choice, func(f string, a ...any) { steps = append(steps, fmt.Sprintf(f, a...)) })
+	if err != nil || public == nil || c != host.Canary(public) || public.IP() != "127.0.0.1" || public.Domain() != "sandprobe.test" {
+		t.Fatalf("open: %v %+v", err, public)
+	}
+	if len(steps) != 1 || !strings.Contains(steps[0], "signed status") {
+		t.Errorf("steps %q", steps)
+	}
+	run, err := host.Execute(ctx, surveyOnly{}, steadyHealth{public}, host.Options{Mode: "exec", Excluded: host.E2BExclusions()})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// Overloaded follows the kernel's drop counters, which only Linux exposes, so it isn't asserted here.
+	if ev := run.Evidence; !ev.Live || !ev.ReceiptsRead {
+		t.Fatalf("live %v, read %v", ev.Live, ev.ReceiptsRead)
+	}
+	var errs bytes.Buffer
+	closeCanary(public, &errs)
+	if errs.Len() != 0 {
+		t.Fatalf("close: %s", errs.String())
+	}
+	slotsFree(t, pub)
+
+	// The stray file, named but broken, is refused before any box: never a silent fallback to another canary.
+	broken := filepath.Join(t.TempDir(), "canary-broken.state")
+	os.WriteFile(broken, []byte("profile=p\n"), 0o600)
+	r = runFlags{canary: broken}
+	choice, _ = r.chooseCanary()
+	if _, public, err := r.openCanary(ctx, choice, func(string, ...any) {}); err == nil || public != nil {
+		t.Fatalf("a broken operator canary opened: %v", err)
+	}
+}

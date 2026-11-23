@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
@@ -85,7 +84,7 @@ func nitroSpec(variant string) (host.PodSpec, error) {
 	return host.PodSpec{}, fail("usage", "-variant takes isolated, network-isolated, reference-open or reference-network-isolated", "sandprobe run aws-nitro -variant isolated -y", exitUsage)
 }
 
-func nitroPlan(kc string, c *host.SSMCanary, r runFlags, spec host.PodSpec) planDoc {
+func nitroPlan(kc string, c canaryChoice, r runFlags, spec host.PodSpec) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	pod := "a pod sandprobe-<12 hex> in Sandprobe's own EKS Auto Mode cluster: " + spec.Image + ", runtimeClassName " + spec.RuntimeClass
 	if spec.NetworkIsolated {
@@ -108,8 +107,8 @@ func nitroPlan(kc string, c *host.SSMCanary, r runFlags, spec host.PodSpec) plan
 		Probe:      "uploaded to /tmp/sandprobe-<12 hex>/probe in the pod, with its scratch directory; both go with the pod",
 		Markers:    "none: the pod has no persistent volume, so PER-5 is skipped",
 		Contacts: []string{
-			"our canary " + c.Addr + " (" + c.Dom + "): TCP 443 (TLS), 22, 80 and 8080, UDP 53, each carrying only this run's nonces",
-			"a name under dns." + c.Dom + ", looked up through the pod's own resolver",
+			c.describe,
+			"its DNS names, looked up through the pod's own resolver",
 			"169.254.169.254:80, cloud metadata (AWS and GCP); 169.254.170.2:80 and 169.254.170.23:80 only if the pod's environment names them",
 		},
 		BoxNamed: []string{"the proxy the agent's environment names, for EGR-3 only", "the Kubernetes API the agent's environment names, for AMP-7 only: a TLS handshake, no request"},
@@ -120,7 +119,7 @@ func nitroPlan(kc string, c *host.SSMCanary, r runFlags, spec host.PodSpec) plan
 		Deletes:    "the pod, by name once its UID is checked; the cluster stays until deploy/eks.sh down",
 		LocalProxy: proxy,
 		Time:       "a few minutes when Auto Mode has to start a node for the pod; under a minute when one is free",
-		Residual:   nitroResidual,
+		Residual:   withRetention(nitroResidual, c),
 	}
 }
 
@@ -129,7 +128,7 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	c, err := r.liveCanary()
+	choice, err := r.chooseCanary()
 	if err != nil {
 		return 0, err
 	}
@@ -137,7 +136,7 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	p := nitroPlan(kc+" (context "+kctx+")", c, r, spec)
+	p := nitroPlan(kc+" (context "+kctx+")", choice, r, spec)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -177,9 +176,11 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	if a, err := c.Ask(ctx, canary.Request{Op: "status"}); err != nil || !a.OK {
-		return 0, fail("provider_error", "the canary didn't answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, step) // HCN-5: proven, and its slot reserved, before the pod exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	start := time.Now()
 	step("creating the pod (Auto Mode may start a node for it)")
 	pod, err := host.CreatePod(ctx, kc, kctx, spec)

@@ -226,8 +226,9 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
 -min <letter> to exit 6 below a grade; -theme modern|mission; -allow-local-proxy.
-run exec and recipes use the hosted canary by default; -canary-url <url> -canary-pin <pin> names your own, and
--no-canary sends no test traffic at all, leaving Exfiltration untested (HCN-5).
+Runs use the hosted canary by default (run docker starts its own); -canary-url <url> -canary-pin <pin> names a
+public canary you run, and -canary <state file> an operator canary from deploy/canary.sh, used only when named.
+run exec and recipes also take -no-canary, which sends no test traffic at all, leaving Exfiltration untested (HCN-5).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....

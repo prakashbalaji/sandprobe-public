@@ -7,11 +7,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
@@ -28,9 +28,13 @@ var (
 	hostedCanaryPins = []string{"37b7b9ffebd2a547d10eeaf75f791d78a28973c5498d8c6ce2aa521369f620d0"}
 )
 
-// execCanary is the canary a run exec uses (HCN-5): an operator canary from deploy/canary.sh, a public one named by
-// -canary-url and pinned by -canary-pin, or the hosted canary.
-type execCanary struct {
+// newPublicCanary asks a public canary for its signed status (HCN-1). Tests replace it, so no test reaches the real
+// hosted canary.
+var newPublicCanary = host.NewHTTPSCanary
+
+// canaryChoice is the canary a run uses (HCN-5): none (-no-canary), an operator canary from deploy/canary.sh that
+// -canary names, a public one named by -canary-url and pinned by -canary-pin, or the hosted canary.
+type canaryChoice struct {
 	none       bool     // -no-canary (HCN-5)
 	state      string   // an operator canary's state file
 	url        string   // a public canary's control
@@ -39,19 +43,21 @@ type execCanary struct {
 	retainNote string   // HCN-4's retention, for a public canary
 }
 
-func (r runFlags) execCanaryChoice() (execCanary, error) {
+// chooseCanary is HCN-5's precedence, with no network call: -canary, -canary-url, then the hosted canary (run docker
+// starts its own instead, PRV-14). A canary-*.state file is used only when -canary names it, never found on its own.
+func (r runFlags) chooseCanary() (canaryChoice, error) {
 	retain := "That canary sees the box's public address and this run's random nonces, keeps them in memory for at most 30 minutes, and stores nothing (HCN-4)."
 	if r.noCanary { // HCN-5: the person's own choice, never combined with naming a canary
 		if r.canary != "" || r.canaryURL != "" || r.canaryPin != "" {
-			return execCanary{}, fail("usage", "-no-canary can't be combined with -canary, -canary-url or -canary-pin", "pick one", exitUsage)
+			return canaryChoice{}, fail("usage", "-no-canary can't be combined with -canary, -canary-url or -canary-pin", "pick one", exitUsage)
 		}
-		return execCanary{none: true, describe: "none: you chose -no-canary, so no test traffic leaves the box and the exfiltration checks aren't tested (the run can't grade above C)"}, nil
+		return canaryChoice{none: true, describe: "none: you chose -no-canary, so no test traffic leaves the box and the exfiltration checks aren't tested (the run can't grade above C)"}, nil
 	}
 	if r.canaryPin != "" && r.canaryURL == "" { // a pin names a canary the person trusts: never quietly use another one
-		return execCanary{}, fail("usage", "-canary-pin (or SANDPROBE_CANARY_PIN) needs -canary-url: the canary that pin is for", "-canary-url https://control.<domain> -canary-pin <pin>", exitUsage)
+		return canaryChoice{}, fail("usage", "-canary-pin (or SANDPROBE_CANARY_PIN) needs -canary-url: the canary that pin is for", "-canary-url https://control.<domain> -canary-pin <pin>", exitUsage)
 	}
 	if r.canary != "" {
-		return execCanary{state: r.canary, describe: "the operator canary in " + r.canary + " (deploy/canary.sh)"}, nil
+		return canaryChoice{state: r.canary, describe: "the operator canary in " + r.canary + ", which you run (deploy/canary.sh), reached over SSM: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces"}, nil
 	}
 	if r.canaryURL != "" {
 		var pins []string
@@ -61,26 +67,23 @@ func (r runFlags) execCanaryChoice() (execCanary, error) {
 			}
 		}
 		if len(pins) == 0 {
-			return execCanary{}, fail("usage", "-canary-url needs -canary-pin: the control key the canary signs with (HCN-1)", "sandprobe-canary -make-control-key prints it", exitUsage)
+			return canaryChoice{}, fail("usage", "-canary-url needs -canary-pin: the control key the canary signs with (HCN-1)", "sandprobe-canary -make-control-key prints it", exitUsage)
 		}
 		// Checked before anything is shown: the plan may be shared, so it carries only the canonical, validated values.
 		origin, _, pins, err := host.CheckCanaryURL(r.canaryURL, pins)
 		if err != nil {
-			return execCanary{}, fail("usage", err.Error(), "-canary-url https://control.<domain> -canary-pin <64 hex digits>", exitUsage)
+			return canaryChoice{}, fail("usage", err.Error(), "-canary-url https://control.<domain> -canary-pin <64 hex digits>", exitUsage)
 		}
-		return execCanary{url: origin, pins: pins,
-			describe:   "the public canary at " + origin + ", trusted only under control key " + pins[0][:12] + "…: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces",
+		return canaryChoice{url: origin, pins: pins,
+			describe:   "the public canary you named at " + origin + ", trusted only under control key " + pins[0][:12] + "…: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces",
 			retainNote: retain}, nil
 	}
-	if found, _ := filepath.Glob(filepath.Join(configDir(), "canary-*.state")); len(found) == 1 {
-		return execCanary{state: found[0], describe: "the operator canary in " + found[0] + " (deploy/canary.sh)"}, nil
-	}
-	return execCanary{url: hostedCanaryURL, pins: hostedCanaryPins,
+	return canaryChoice{url: hostedCanaryURL, pins: hostedCanaryPins,
 		describe:   "the hosted canary at " + hostedCanaryURL + ", run by Summation and trusted only under the control key this release pins: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces",
 		retainNote: retain}, nil
 }
 
-func execPlan(box *host.ExecBox, as string, c execCanary) planDoc {
+func execPlan(box *host.ExecBox, as string, c canaryChoice) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	user := "whoever it runs as, which the report calls unconfirmed as the agent's user"
 	if as != "" {
@@ -108,17 +111,19 @@ func execPlan(box *host.ExecBox, as string, c execCanary) planDoc {
 	}
 }
 
-// openCanary sets up the canary a run exec or recipe run chose (HCN-5): none, a public one (reserved before anything
-// runs in the box, HCN-3), or an operator canary. A public one is returned too, for its Close after the run.
-func (r *runFlags) openCanary(ctx context.Context, choice execCanary, step func(string, ...any)) (host.Canary, *host.HTTPSCanary, error) {
+// openCanary sets up the canary a run chose (HCN-5), after approval and before the box is created (for run exec,
+// before anything runs in it): none; a public one, proven by its signed status and with the run's slot reserved
+// (HCN-1, HCN-3); or an operator canary, which must answer its status over SSM. A public one is returned too, for
+// closeCanary after the run.
+func (r *runFlags) openCanary(ctx context.Context, choice canaryChoice, step func(string, ...any)) (host.Canary, *host.HTTPSCanary, error) {
 	switch {
 	case choice.none: // HCN-5: Execute asks no canary anything
 		return nil, nil, nil
 	case choice.url != "":
 		step("asking the public canary for its signed status")
-		public, err := host.NewHTTPSCanary(ctx, choice.url, choice.pins)
+		public, err := newPublicCanary(ctx, choice.url, choice.pins)
 		if err != nil {
-			return nil, nil, fail("needs_login", "the public canary isn't answering under its pin: "+err.Error(), "check -canary-url and -canary-pin, try again, or run with -no-canary (Exfiltration is then not tested)", exitLogin)
+			return nil, nil, fail("needs_login", "the public canary isn't answering under its pin: "+err.Error(), "check -canary-url and -canary-pin, or try again; run exec and recipes can also run with -no-canary (Exfiltration is then not tested)", exitLogin)
 		}
 		if err = public.Reserve(ctx, 1); err != nil { // HCN-3: before anything runs in the box
 			public.Close(context.WithoutCancel(ctx))
@@ -131,7 +136,33 @@ func (r *runFlags) openCanary(ctx context.Context, choice execCanary, step func(
 	if err != nil {
 		return nil, nil, err
 	}
+	step("asking the operator canary for its status over SSM")
+	if a, err := ssm.Ask(ctx, canary.Request{Op: "status"}); err != nil || !a.OK {
+		return nil, nil, fail("provider_error", "the operator canary didn't answer over SSM", "deploy/canary.sh status", exitPartial)
+	}
 	return ssm, nil, nil
+}
+
+// progress is a run's step line on stderr; with -o json, stderr carries errors only.
+func progress(o opts, stderr io.Writer) func(string, ...any) {
+	return func(f string, a ...any) {
+		if !o.json() {
+			fmt.Fprintf(stderr, "· "+f+"\n", a...)
+		}
+	}
+}
+
+// closeCanary gives back a public canary's slots (HCN-3) under its own budget, even after Ctrl-C or a run that used
+// all of its own. A slot it can't confirm released lapses on its lifetime, and the person is told.
+func closeCanary(public *host.HTTPSCanary, stderr io.Writer) {
+	if public == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := public.Close(ctx); err != nil {
+		fmt.Fprintf(stderr, "sandprobe: %s\n", err)
+	}
 }
 
 func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
@@ -145,7 +176,7 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, fail("usage", err.Error(), "sandprobe run exec -y -- docker exec -i mybox sh", exitUsage)
 	}
-	choice, err := r.execCanaryChoice()
+	choice, err := r.chooseCanary()
 	if err != nil {
 		return 0, err
 	}

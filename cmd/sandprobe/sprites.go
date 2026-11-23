@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
@@ -64,7 +63,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.basetenTeam, "baseten-team", os.Getenv("BASETEN_TEAM_ID"), "Baseten team ID, required when the key can access several teams")
 	fs.StringVar(&r.basetenRegion, "baseten-region", os.Getenv("BASETEN_REGION"), "Baseten region; empty uses the provider default")
 	fs.StringVar(&r.org, "org", os.Getenv("SANDPROBE_SPRITES_ORG"), "the Sprites org for the throwaway sprite")
-	fs.StringVar(&r.canary, "canary", os.Getenv("SANDPROBE_CANARY"), "the live canary's state file (deploy/canary.sh)")
+	fs.StringVar(&r.canary, "canary", os.Getenv("SANDPROBE_CANARY"), "an operator canary's state file (deploy/canary.sh), used only when named; the hosted canary otherwise (HCN-5)")
 	fs.StringVar(&r.outDir, "out", "sandprobe-reports", "where the JSON and web reports go")
 	fs.StringVar(&r.min, "min", "", "exit 6 when the grade is below this letter")
 	fs.StringVar(&r.theme, "theme", "modern", "the web report's palette: modern or mission")
@@ -72,10 +71,10 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.setup, "setup", "", "sprites: your sandbox's setup script, run once in the new sprite before the checkpoint (SPR-1)")
 	fs.StringVar(&r.as, "as", "", "docker and exec: the agent's user in the box (docker default: the image's own user, else root)")
 	fs.StringVar(&r.scratch, "scratch", "", "exec: an absolute directory in the box for the probe's scratch (default /tmp)")
-	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "exec: a public canary's control, https://control.<domain> (HCN-5)")
+	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "a public canary you run, https://control.<domain>, instead of the hosted one (HCN-5)")
 	fs.BoolVar(&r.noCanary, "no-canary", false, "exec: run without a canary; the exfiltration checks aren't tested, so the run can't grade above C (HCN-5)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
-	fs.StringVar(&r.canaryPin, "canary-pin", os.Getenv("SANDPROBE_CANARY_PIN"), "exec: that canary's control-key pin, or two comma-separated during a rotation (HCN-1)")
+	fs.StringVar(&r.canaryPin, "canary-pin", os.Getenv("SANDPROBE_CANARY_PIN"), "that canary's control-key pin, or two comma-separated during a rotation (HCN-1)")
 	fs.StringVar(&r.variant, "variant", "isolated", "aws-nitro: isolated, network-isolated, reference-open or reference-network-isolated")
 }
 
@@ -115,38 +114,35 @@ func spriteOrgs() ([]string, error) {
 	return orgs, nil
 }
 
-// resolve settles the org and the canary a run uses, or says how to get them.
-func (r *runFlags) resolve() (string, *host.SSMCanary, error) {
+// resolve settles the org and the canary a run uses (HCN-5), or says how to get them.
+func (r *runFlags) resolve() (string, canaryChoice, error) {
 	if r.allowLocalProxy { // EGR-3 is always excluded for Sprites (PRV-5), so the flag would ask for a check that never runs
-		return "", nil, fail("usage", "-allow-local-proxy has no effect on Sprites: EGR-3 is excluded there (PRV-5)", "sandprobe run sprites -y", exitUsage)
+		return "", canaryChoice{}, fail("usage", "-allow-local-proxy has no effect on Sprites: EGR-3 is excluded there (PRV-5)", "sandprobe run sprites -y", exitUsage)
+	}
+	choice, err := r.chooseCanary()
+	if err != nil {
+		return "", canaryChoice{}, err
 	}
 	orgs, err := spriteOrgs()
 	if err != nil {
-		return "", nil, err
+		return "", canaryChoice{}, err
 	}
 	org := r.org
 	switch {
 	case org == "" && len(orgs) == 1:
 		org = orgs[0]
 	case org == "":
-		return "", nil, fail("usage", "Sandprobe's Sprites login holds several orgs: "+strings.Join(orgs, ", "), "add -org <one of them>", exitUsage)
+		return "", canaryChoice{}, fail("usage", "Sandprobe's Sprites login holds several orgs: "+strings.Join(orgs, ", "), "add -org <one of them>", exitUsage)
 	}
-	c, err := r.liveCanary()
-	if err != nil {
-		return "", nil, err
-	}
-	return org, c, nil
+	return org, choice, nil
 }
 
-// liveCanary is the canary deployment a run uses: -canary, or the only one deploy/canary.sh recorded.
+// liveCanary loads the operator canary -canary names (deploy/canary.sh), with no network call. A canary-*.state file
+// is never found on its own: a forgotten one would send a run to a canary that may be gone (HCN-5).
 func (r *runFlags) liveCanary() (*host.SSMCanary, error) {
 	state := r.canary
 	if state == "" {
-		found, _ := filepath.Glob(filepath.Join(configDir(), "canary-*.state"))
-		if len(found) != 1 {
-			return nil, fail("not_logged_in", "no single live canary deployment found", "deploy/canary.sh up, or -canary <state file>", exitLogin)
-		}
-		state = found[0]
+		return nil, fail("usage", "no operator canary is named", "-canary <state file> (deploy/canary.sh)", exitUsage)
 	}
 	c, err := host.LoadSSMCanary(state)
 	if err != nil {
@@ -177,26 +173,21 @@ func providers(o opts, r runFlags) error {
 		}
 		return err.Error()
 	}
-	canaryAt, canaryFix := "", ""
-	if c, err := r.liveCanary(); err == nil { // every provider's runs share the canary; it needs no provider login
-		canaryAt = c.Addr + " (" + c.Dom + ")"
-	} else {
-		canaryFix = fixOf(err)
-	}
-	sp.Canary, sp.CanaryOK = canaryAt, canaryAt != ""
+	canaryAt, canaryOK, canaryFix := r.canaryReadiness() // every provider's runs share the canary; it needs no provider login
+	sp.Canary, sp.CanaryOK = canaryAt, canaryOK
 	if sp.Fix == "" {
 		sp.Fix = canaryFix
 	}
 	sp.Ready = len(sp.Orgs) > 0 && sp.CanaryOK
 	list := []provider{sp}
-	nitro := provider{Name: "aws-nitro", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	nitro := provider{Name: "aws-nitro", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if _, _, err := eksTarget(); err != nil {
 		nitro.Fix = fixOf(err)
 	} else {
 		nitro.Ready = nitro.CanaryOK
 	}
 	list = append(list, nitro)
-	bt := provider{Name: "baseten", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	bt := provider{Name: "baseten", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if client, err := basetenClient(r); err != nil {
 		bt.Fix = fixOf(err)
 	} else {
@@ -210,7 +201,7 @@ func providers(o opts, r runFlags) error {
 		}
 	}
 	list = append(list, bt)
-	ep := provider{Name: "e2b", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	ep := provider{Name: "e2b", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if client, err := e2bClient(r); err != nil {
 		ep.Fix = fixOf(err)
 	} else {
@@ -227,7 +218,7 @@ func providers(o opts, r runFlags) error {
 		}
 	}
 	list = append(list, ep)
-	vp := provider{Name: "vercel", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	vp := provider{Name: "vercel", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if client, err := vercelClient(r); err != nil {
 		vp.Fix = fixOf(err)
 	} else {
@@ -241,35 +232,35 @@ func providers(o opts, r runFlags) error {
 		}
 	}
 	list = append(list, vp)
-	cp := provider{Name: "cloudflare", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	cp := provider{Name: "cloudflare", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if _, err := host.NewCloudflareBox(r.cloudflareSetup); err != nil {
 		cp.Fix = err.Error()
 	} else {
 		cp.Ready = cp.CanaryOK
 	}
 	list = append(list, cp)
-	bp := provider{Name: "boat", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	bp := provider{Name: "boat", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if _, e := boatClient(r); e != nil {
 		bp.Fix = e.Error()
 	} else {
 		bp.Ready = bp.CanaryOK
 	}
 	list = append(list, bp)
-	dp := provider{Name: "daytona", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	dp := provider{Name: "daytona", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if _, e := daytonaClient(r); e != nil {
 		dp.Fix = e.Error()
 	} else {
 		dp.Ready = dp.CanaryOK
 	}
 	list = append(list, dp)
-	xp := provider{Name: "exe.dev", Canary: canaryAt, CanaryOK: canaryAt != "", Fix: canaryFix}
+	xp := provider{Name: "exe.dev", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if _, e := exedevClient(r); e != nil {
 		xp.Fix = e.Error()
 	} else {
 		xp.Ready = xp.CanaryOK
 	}
 	list = append(list, xp)
-	kp := provider{Name: "kubernetes", Canary: hostedCanaryURL + " by default, asked only by a run"}
+	kp := provider{Name: "kubernetes", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
 	if rc, err := shippedRecipe("kubernetes"); err != nil {
 		kp.Fix = fixOf(err)
 	} else {
@@ -279,7 +270,7 @@ func providers(o opts, r runFlags) error {
 		if err != nil {
 			kp.Fix = err.Error()
 		} else {
-			kp.Ready = true
+			kp.Ready = kp.CanaryOK
 		}
 	}
 	list = append(list, kp)
@@ -298,6 +289,33 @@ func providers(o opts, r runFlags) error {
 		fmt.Fprintf(o.stdout, "%-10s %s\n", p.Name, state)
 	}
 	return nil
+}
+
+// canaryReadiness is what providers says of the canary the runs would use (HCN-5), with no network call: the hosted
+// canary or the one -canary-url names, each asked only by a run, or the operator canary -canary names, once its state
+// file loads.
+func (r runFlags) canaryReadiness() (at string, ok bool, fix string) {
+	fixOf := func(err error) string {
+		if ce, ok := err.(*cliError); ok {
+			return ce.Message + "; " + ce.Fix
+		}
+		return err.Error()
+	}
+	choice, err := r.chooseCanary()
+	if err != nil {
+		return "", false, fixOf(err)
+	}
+	if choice.state != "" {
+		c, err := r.liveCanary()
+		if err != nil {
+			return "", false, fixOf(err)
+		}
+		return c.Addr + " (" + c.Dom + "), the operator canary in " + choice.state, true, ""
+	}
+	if choice.url == hostedCanaryURL {
+		return choice.url + ", the hosted canary run by Summation, asked only by a run", true, ""
+	}
+	return choice.url + ", the public canary you named, asked only by a run", true, ""
 }
 
 // planDoc is UX-4's plan for a Sprites run: everything that will be created, contacted, marked and deleted.
@@ -342,7 +360,7 @@ func readSetup(path string) ([]byte, string, error) {
 }
 
 // sprPlan is the Sprites plan; setupSum is SPR-1's script's SHA-256, or empty with no -setup.
-func sprPlan(org string, c *host.SSMCanary, r runFlags, setupSum string) planDoc {
+func sprPlan(org string, c canaryChoice, r runFlags, setupSum string) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	creates := []string{"a sprite named sandprobe-<12 hex> in org " + org + ", default settings", "one checkpoint of it, before the probe runs"}
 	launch := "sprite exec, as the sprite's default user"
@@ -359,11 +377,8 @@ func sprPlan(org string, c *host.SSMCanary, r runFlags, setupSum string) planDoc
 		LaunchPath: launch,
 		Probe:      "uploaded to /var/tmp/sandprobe-<12 hex>/probe in the sprite, with its scratch directory; both go with the sprite",
 		Markers:    "a file .sandprobe-<run id> in the agent's home, its working directory, /, /tmp and /var/lib/docker; they go with the sprite",
-		Contacts: []string{
-			"our canary " + c.Addr + " (" + c.Dom + "): TCP 443 (TLS), 22, 80 and 8080, UDP 53, each carrying only this run's nonces",
-			"a name under dns." + c.Dom + ", looked up through the box's own resolver",
-		},
-		BoxNamed: []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are excluded, since they'd contact a Fly-owned endpoint (PRV-5)"},
+		Contacts:   []string{c.describe, "its DNS names, looked up through the box's own resolver"},
+		BoxNamed:   []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are excluded, since they'd contact a Fly-owned endpoint (PRV-5)"},
 		OpensReadOnly: append(append([]string{}, sec3.Targets...),
 			"private SSH keys, /run/secrets (four levels deep) and .env files it finds", "/proc/<pid>/environ and /proc/<pid>/mem of other processes"),
 		Runs:       runs,
@@ -371,8 +386,16 @@ func sprPlan(org string, c *host.SSMCanary, r runFlags, setupSum string) planDoc
 		Deletes:    "the sprite, by name once its ID is checked (Sprites can't delete by ID), and everything in it",
 		LocalProxy: "excluded even with -allow-local-proxy",
 		Time:       "about 30 seconds (15 to 21 s measured, create to delete, on 10 Nov 2026)",
-		Residual:   residual,
+		Residual:   withRetention(residual, c),
 	}
+}
+
+// withRetention adds HCN-4's retention to a plan's residual when the run's canary is a public one (HCN-5).
+func withRetention(residual string, c canaryChoice) string {
+	if c.retainNote == "" {
+		return residual
+	}
+	return residual + " " + c.retainNote
 }
 
 func printPlan(w io.Writer, p planDoc) {
@@ -446,7 +469,7 @@ func plan(o opts, r runFlags, args []string) error {
 	if len(args) != 1 || args[0] != "sprites" {
 		return fail("usage", "plan takes one provider: sprites, aws-nitro, baseten, e2b, vercel or cloudflare (the others aren't built yet)", "sandprobe plan sprites", exitUsage)
 	}
-	org, c, err := r.resolve()
+	org, choice, err := r.resolve()
 	if err != nil {
 		return err
 	}
@@ -456,7 +479,7 @@ func plan(o opts, r runFlags, args []string) error {
 			return err
 		}
 	}
-	p := sprPlan(org, c, r, setupSum)
+	p := sprPlan(org, choice, r, setupSum)
 	if o.json() {
 		o.emit(p)
 	} else {
@@ -505,7 +528,7 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	if len(args) != 1 || args[0] != "sprites" {
 		return 0, fail("usage", "run takes one provider: sprites, aws-nitro, baseten, e2b, vercel or cloudflare (the others aren't built yet)", "sandprobe run sprites -y", exitUsage)
 	}
-	org, c, err := r.resolve()
+	org, choice, err := r.resolve()
 	if err != nil {
 		return 0, err
 	}
@@ -516,7 +539,7 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 			return 0, err
 		}
 	}
-	p := sprPlan(org, c, r, setupSum)
+	p := sprPlan(org, choice, r, setupSum)
 	switch {
 	case o.yes:
 	case o.tty():
@@ -550,9 +573,11 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	if a, err := c.Ask(ctx, canary.Request{Op: "status"}); err != nil || !a.OK {
-		return 0, fail("provider_error", "the canary didn't answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, step) // HCN-5: proven, and its slot reserved, before the sprite exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	start := time.Now()
 	step("creating a sprite in %s", org)
 	s, err := host.CreateSprite(ctx, spritesHome(), org)

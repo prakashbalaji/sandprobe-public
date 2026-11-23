@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
@@ -32,15 +31,15 @@ func boatClient(r runFlags) (*host.BoatClient, error) {
 	}
 	return host.NewBoatClient(key)
 }
-func boatPlan(c *host.SSMCanary, r runFlags) planDoc {
-	return planDoc{Provider: "boat", Creates: []string{"one small CPU base VM; noEnv=true, snapshots=false, monitoring=false; run label; ttlSeconds=900 (archive, not deletion)"}, LaunchPath: "native Boat API command transport, fixed origin; no credentials in guest", Probe: "static probe, gzip upload under 5MiB, original SHA-256 verified", Contacts: []string{"our canary " + c.Addr + " (" + c.Dom + ") only"}, BoxNamed: []string{"metadata/proxy/vsock/Kubernetes excluded"}, Reset: "none; PER-5 skipped", Deletes: "original-ID permanent delete; completed original-target deletion operation plus sandbox404", Time: "one fresh CPU sandbox per invocation; bounded attempt budget recorded in PRV-11; no automatic retry", Residual: host.BoatResidual}
+func boatPlan(c canaryChoice, r runFlags) planDoc {
+	return planDoc{Provider: "boat", Creates: []string{"one small CPU base VM; noEnv=true, snapshots=false, monitoring=false; run label; ttlSeconds=900 (archive, not deletion)"}, LaunchPath: "native Boat API command transport, fixed origin; no credentials in guest", Probe: "static probe, gzip upload under 5MiB, original SHA-256 verified", Contacts: []string{c.describe}, BoxNamed: []string{"metadata/proxy/vsock/Kubernetes excluded"}, Reset: "none; PER-5 skipped", Deletes: "original-ID permanent delete; completed original-target deletion operation plus sandbox404", Time: "one fresh CPU sandbox per invocation; bounded attempt budget recorded in PRV-11; no automatic retry", Residual: withRetention(host.BoatResidual, c)}
 }
 func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := boatPlan(c, r)
+	p := boatPlan(choice, r)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -60,9 +59,6 @@ func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		return exitApproval, nil
 	}
-	if canaryErr != nil {
-		return 0, canaryErr
-	}
 	client, err := boatClient(r)
 	if err != nil {
 		return 0, err
@@ -79,9 +75,11 @@ func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Boat team/project access and token", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the VM exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

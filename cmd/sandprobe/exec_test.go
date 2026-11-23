@@ -134,13 +134,10 @@ func TestCanaryCheckRefusals(t *testing.T) {
 	}
 }
 
-// HCN-5: with no canary named and no operator state, run exec uses the hosted canary under the pinned key, and says
-// who runs it and what it keeps.
+// HCN-5: with no canary named, even beside a stray operator state file, run exec uses the hosted canary under the
+// pinned key, and says who runs it and what it keeps.
 func TestRunExecDefaultsToTheHostedCanary(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("SANDPROBE_CANARY", "")
-	t.Setenv("SANDPROBE_CANARY_URL", "")
-	t.Setenv("SANDPROBE_CANARY_PIN", "")
+	stray := strayState(t)
 	var out, errs bytes.Buffer
 	if code := run([]string{"plan", "exec", "--", "sh"}, &out, &errs); code != 0 {
 		t.Fatalf("exit %d: %s", code, errs.String())
@@ -149,6 +146,9 @@ func TestRunExecDefaultsToTheHostedCanary(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the plan doesn't say %q", want)
 		}
+	}
+	if strings.Contains(out.String(), stray) || strings.Contains(out.String(), strayIP) {
+		t.Errorf("the plan names the stray state file: %s", out.String())
 	}
 	if _, _, pins, err := host.CheckCanaryURL(hostedCanaryURL, hostedCanaryPins); err != nil || len(pins) != 1 {
 		t.Fatalf("the hosted canary's URL or pin isn't valid: %v", err)
@@ -162,7 +162,7 @@ func TestRunExecPinWithoutURLIsRefused(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("SANDPROBE_CANARY", "")
 	t.Setenv("SANDPROBE_CANARY_URL", "")
-	if c, err := (runFlags{canaryPin: testPin}).execCanaryChoice(); err == nil {
+	if c, err := (runFlags{canaryPin: testPin}).chooseCanary(); err == nil {
 		t.Fatalf("the chooser set the pin aside for %q", c.url)
 	}
 	for _, viaEnv := range []bool{false, true} {
@@ -188,7 +188,7 @@ func TestNoCanaryFlag(t *testing.T) {
 	t.Setenv("SANDPROBE_CANARY", "")
 	t.Setenv("SANDPROBE_CANARY_URL", "")
 	t.Setenv("SANDPROBE_CANARY_PIN", "")
-	if c, err := (runFlags{noCanary: true}).execCanaryChoice(); err != nil || !c.none || c.url != "" || c.state != "" {
+	if c, err := (runFlags{noCanary: true}).chooseCanary(); err != nil || !c.none || c.url != "" || c.state != "" {
 		t.Fatalf("the chooser: %+v %v", c, err)
 	}
 	var out, errs bytes.Buffer

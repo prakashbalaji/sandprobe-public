@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
@@ -28,15 +27,15 @@ func deleteCloudflare(box cloudflareLifecycle) error {
 func cloudflareClient(r runFlags) (*host.CloudflareBox, error) {
 	return host.NewCloudflareBox(r.cloudflareSetup)
 }
-func cloudflarePlan(c *host.SSMCanary, r runFlags) planDoc {
-	return planDoc{Provider: "cloudflare", Creates: []string{"one fresh native container through a dedicated authenticated Sandprobe Worker; built-in cloudflare/debian-trixie; lite CPU instance; no guest service credentials", "persisted 15-minute deadline and 2-minute inactivity backstop; exclusive private intent before create"}, LaunchPath: "native Durable Object Container API exec; image default identity, inherited PATH only", Probe: "static Go probe, private mktemp directory and SHA-256 verification", Contacts: []string{"our canary " + c.Addr + " (" + c.Dom + ") only; TCP 443/22/80/8080, UDP53 and DNS markers"}, BoxNamed: []string{"metadata, proxy, vsock and Kubernetes API excluded (PRV-10)"}, Reset: "none; PER-5 skipped", Deletes: "destroy immutable DO-owned container, verify fenced/stopped; additionally remove recorded controller resources with manage.py down", Time: "one CPU container; 15-minute hard expiry; no create retries", Residual: host.CloudflareResidual}
+func cloudflarePlan(c canaryChoice, r runFlags) planDoc {
+	return planDoc{Provider: "cloudflare", Creates: []string{"one fresh native container through a dedicated authenticated Sandprobe Worker; built-in cloudflare/debian-trixie; lite CPU instance; no guest service credentials", "persisted 15-minute deadline and 2-minute inactivity backstop; exclusive private intent before create"}, LaunchPath: "native Durable Object Container API exec; image default identity, inherited PATH only", Probe: "static Go probe, private mktemp directory and SHA-256 verification", Contacts: []string{c.describe}, BoxNamed: []string{"metadata, proxy, vsock and Kubernetes API excluded (PRV-10)"}, Reset: "none; PER-5 skipped", Deletes: "destroy immutable DO-owned container, verify fenced/stopped; additionally remove recorded controller resources with manage.py down", Time: "one CPU container; 15-minute hard expiry; no create retries", Residual: withRetention(host.CloudflareResidual, c)}
 }
 func runCloudflare(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := cloudflarePlan(c, r)
+	p := cloudflarePlan(choice, r)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -56,9 +55,6 @@ func runCloudflare(o opts, r runFlags, plan bool, stderr io.Writer) (int, error)
 		}
 		return exitApproval, nil
 	}
-	if canaryErr != nil {
-		return 0, canaryErr
-	}
 	client, err := cloudflareClient(r)
 	if err != nil {
 		return 0, err
@@ -75,9 +71,11 @@ func runCloudflare(o opts, r runFlags, plan bool, stderr io.Writer) (int, error)
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check dedicated Cloudflare controller setup and capability", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the container exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

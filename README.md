@@ -68,13 +68,15 @@ the box's proxy) are off by default. The native adapters' rules for each provide
 - **Test traffic, to a canary.** The probe sends DNS lookups and HTTPS, TCP and UDP attempts that carry only this
   run's random nonces. A way out counts only when the canary logs the nonce, and the host gets that receipt from the
   canary directly, never through the box.
-  - `run exec` and recipes use the hosted canary at `control.pub.probe.ac0.dev`, run by Summation and trusted only
-    under the control key this release pins. It sees two addresses. The box's public address, with the nonces its
-    test traffic carries, is kept only for the run's lifetime, at most 30 minutes. The public address of the machine
-    running Sandprobe, which reserves and arms the run, is kept in a rate counter for at most an hour. Both stay in
-    memory: the canary writes no access log and stores nothing.
+  - Every run but `run docker` uses the hosted canary at `control.pub.probe.ac0.dev` by default: `run exec`, recipes
+    and the native provider adapters. It is run by Summation and trusted only under the control key this release
+    pins. It sees two addresses. The box's public address, with the nonces its test traffic carries, is kept only for
+    the run's lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and
+    arms the run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log
+    and stores nothing.
   - `run docker` starts its own canary container on your machine.
-  - The native provider adapters use a canary you deploy yourself (`deploy/canary.sh`).
+  - To use a canary you run yourself instead, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
+    `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No test traffic, with `-no-canary`** (`run exec` and recipes): the probe sends nothing out of the box, and no
   canary is contacted. Your own command, or the provider's API, is still used to reach the box. Exfiltration is then
   reported as not tested, and the run can't grade above C.

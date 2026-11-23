@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
@@ -33,28 +32,28 @@ func e2bClient(r runFlags) (*host.E2BClient, error) {
 	}
 	return host.NewE2BClient(key, r.e2bPython)
 }
-func e2bPlan(c *host.SSMCanary) planDoc {
+func e2bPlan(c canaryChoice) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	return planDoc{Provider: "e2b",
 		Creates:       []string{"one E2B default base CPU sandbox; secure access, no injected secrets, volumes or previews", "900-second timeout, autoPause=false; private lifecycle journal before one create request"},
 		LaunchPath:    "official e2b==2.63.0 Python SDK runtime; explicit user; exec mode, 95-second command timeout",
 		Probe:         "existing static Go probe in private random scratch directory, SHA-256 verified before execution",
 		Markers:       "none: PER-5 skipped without resettable run-owned persistent storage",
-		Contacts:      []string{"our canary " + c.Addr + " (" + c.Dom + "): TCP 443, 22, 80, 8080; UDP 53; DNS test markers only"},
+		Contacts:      []string{c.describe},
 		BoxNamed:      []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 excluded by E2B approved scope (PRV-8)"},
 		OpensReadOnly: append(append([]string{}, sec3.Targets...), "credential-shaped files and other-process accessibility; never read secret values"),
 		Runs:          []string{"sudo policy listing only; architecture, private-directory, upload checksum helpers", "host Python interpreter with preinstalled e2b==2.63.0; no implicit installation"},
 		Reset:         "none: pause/resume is not a reset; PER-5 skipped",
 		Deletes:       "delete only create-returned immutable ID after matching run metadata; confirm GET 404; unresolved cleanup exits 7",
 		LocalProxy:    "excluded even with -allow-local-proxy", Time: "one CPU sandbox; ten-minute run deadline; independent three-minute cleanup; fifteen-minute automatic timeout",
-		Residual: host.E2BResidual}
+		Residual: withRetention(host.E2BResidual, c)}
 }
 func runE2B(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := e2bPlan(c)
+	p := e2bPlan(choice)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -73,9 +72,6 @@ func runE2B(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 			fmt.Fprintln(stderr, "Review the plan, then run sandprobe run e2b -y.")
 		}
 		return exitApproval, nil
-	}
-	if canaryErr != nil {
-		return 0, canaryErr
 	}
 	client, err := e2bClient(r)
 	if err != nil {
@@ -96,9 +92,11 @@ func runE2B(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check E2B account and key", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)
