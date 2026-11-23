@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,7 +32,7 @@ func (e *env) ms() int64 { return time.Since(e.start).Milliseconds() }
 
 func (e *env) expand(name string) string {
 	if strings.HasPrefix(name, "~/") {
-		return filepath.Join(e.home, name[2:])
+		return under(e.home, name[2:])
 	}
 	return name
 }

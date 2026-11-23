@@ -66,6 +66,78 @@ drs) # the agent holding CAP_DAC_READ_SEARCH permitted, not effective (a copy of
   cp /opt/sandprobe/sandprobe-probe /opt/caps/probe
   setcap cap_dac_read_search+p /opt/caps/probe
   ;;
+stickylink) # the agent's home reached through its own link in root's sticky directory: /home/agent is root's link
+  # to /review-sticky/home, the agent's link to /review-home, root's at mode 0555 above root's read-only startup
+  # files. The kernel lets the agent rename its own entry in a sticky directory, so it can redirect the path (TWN-4)
+  mkdir -m 1777 /review-sticky
+  mkdir /review-home
+  printf '' > /review-home/.bashrc
+  printf '' > /review-home/.profile
+  chmod 0444 /review-home/.bashrc /review-home/.profile
+  chmod 0555 /review-home
+  ln -s /review-home /review-sticky/home
+  chown -h agent:agent /review-sticky/home
+  rm -rf /home/agent
+  ln -s /review-sticky/home /home/agent
+  ;;
+dotdot) # the code review's: the home is root's link to /review/real/dir, root's at 0555, whose startup and credential
+  # files are root's links to ../ names. The kernel resolves each from the real directory, /review/real, never from
+  # /home beside the home's link, where a decoy of the opposite access waits: .bashrc reaches a file anyone may write
+  # (the decoy is read-only); .netrc one no one may read (the decoy is readable); .git-credentials one anyone may read
+  # (the decoy is closed)
+  mkdir -p /review/real/dir
+  printf '' > /review/real/target
+  chmod 0666 /review/real/target
+  printf '' > /home/target
+  chmod 0444 /home/target
+  echo sandprobe-fake > /review/real/netrc-real
+  chmod 0000 /review/real/netrc-real
+  echo sandprobe-fake > /home/netrc-real
+  chmod 0444 /home/netrc-real
+  echo sandprobe-fake > /review/real/gitcred-real
+  chmod 0444 /review/real/gitcred-real
+  echo sandprobe-fake > /home/gitcred-real
+  chmod 0000 /home/gitcred-real
+  ln -s ../target /review/real/dir/.bashrc
+  ln -s ../netrc-real /review/real/dir/.netrc
+  ln -s ../gitcred-real /review/real/dir/.git-credentials
+  chmod 0555 /review/real/dir
+  rm -rf /home/agent
+  ln -s /review/real/dir /home/agent
+  ;;
+homedotdot) # the re-review's: HOME and the first PATH entry are /spcase/base/link/.., where link leads to
+  # /review/real/dir. The kernel follows the link, then takes .. from where it leads: /review/real, whose .bashrc
+  # anyone may write, whose .netrc anyone may read, and which holds a file named sudo (never run). Cleaned
+  # lexically, the path is /spcase/base instead, where a read-only .bashrc, a closed .netrc and no sudo wait
+  mkdir -p /review/real/dir /spcase/base
+  ln -s /review/real/dir /spcase/base/link
+  printf '' > /review/real/.bashrc
+  chmod 0666 /review/real/.bashrc
+  echo sandprobe-fake > /review/real/.netrc
+  chmod 0444 /review/real/.netrc
+  printf '#!/bin/sh\nexit 1\n' > /review/real/sudo
+  chmod 0755 /review/real/sudo
+  printf '' > /spcase/base/.bashrc
+  chmod 0444 /spcase/base/.bashrc
+  echo sandprobe-fake > /spcase/base/.netrc
+  chmod 0000 /spcase/base/.netrc
+  ;;
+ninelinks) # eight directory links lead to the home, and .bashrc and .netrc are links of their own: nine in all, past
+  # SBX-2's eight, so neither can be judged
+  mkdir -p /review/h
+  printf '' > /review/rc-real
+  chmod 0444 /review/rc-real
+  echo sandprobe-fake > /review/netrc-real
+  chmod 0444 /review/netrc-real
+  ln -s /review/rc-real /review/h/.bashrc
+  ln -s /review/netrc-real /review/h/.netrc
+  chmod 0555 /review/h
+  i=1
+  while [ $i -lt 7 ]; do ln -s /hop$((i + 1)) /hop$i; i=$((i + 1)); done
+  ln -s /review/h /hop7
+  rm -rf /home/agent
+  ln -s /hop1 /home/agent
+  ;;
 filecaps) # AMP-3: no setuid-root file left in the system binary directories, and outside them a copy of cat whose
   # file capabilities are cap_dac_override+ep. An agent holding no capability, with NoNewPrivs 0 and a bounding set
   # that keeps CAP_DAC_OVERRIDE, gains it by running the copy: the kernel grants the file's permitted set ANDed with

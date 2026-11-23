@@ -33,14 +33,19 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	var ts []obs.Target
 	var present []string
 	for _, p := range e.in.Targets[ck.ID] {
-		var st syscall.Stat_t
-		switch err := lstat(p, &st); errnoOf(err) {
+		w, err := walkPath(p, false) // as the kernel resolves it; the name's own link isn't followed here
+		if err != nil {
+			return unknownObs(fmt.Sprintf("checking %s: %v", p, err))
+		}
+		errno := w.errno
+		w.close()
+		switch errno {
 		case 0:
 			present = append(present, p)
 		case syscall.ENOENT, syscall.ENOTDIR:
-			ts = append(ts, obs.Target{Name: p, State: "absent", Errno: "ENOENT", ParentSearchable: searchable(p)})
+			ts = append(ts, obs.Target{Name: p, State: "absent", Errno: "ENOENT", ParentSearchable: errno == syscall.ENOENT})
 		default:
-			return unknownObs(fmt.Sprintf("checking %s: %v", p, err))
+			return unknownObs(fmt.Sprintf("checking %s: %v", p, errno))
 		}
 	}
 	elsewhere, err := pathSudo(e.in.Targets[ck.ID])
@@ -50,6 +55,9 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	if len(present) == 0 && len(elsewhere) == 0 {
 		if why := reachPast(); why != "" { // a mount can hide a sudo (TWN-4)
 			return unknownObs(why)
+		}
+		if _, ok := pathEntries(); !ok { // the launcher may look where the probe didn't
+			return unknownObs(pathUnset)
 		}
 		return obs.Observation{Result: obs.Absent, Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root,
 			Discovered: map[string]int{"path_sudo": 0}, Targets: ts}}
@@ -72,19 +80,40 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + strings.Join(refused, "; "))
 }
 
-// pathSudo: sudo in any PATH directory other than the fixed ones. Only lstat; nothing found here ever runs.
+// pathSudo: sudo in any PATH directory other than the fixed ones. PATH is split as execvp splits it (pathEntries), each
+// entry taken as given, never cleaned, an empty or relative one from the working directory (fromPath, SBX-2); it is skipped as a fixed path's directory, or one
+// already looked in, only when the kernel reaches that very directory, never by its spelling. Only lstat; nothing
+// found here ever runs.
 func pathSudo(fixed []string) ([]string, error) {
-	skip := map[string]bool{}
-	for _, p := range fixed {
-		skip[filepath.Dir(p)] = true
-	}
-	var out []string
-	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
-		if !filepath.IsAbs(d) || skip[filepath.Clean(d)] {
-			continue
+	type dirKey struct{ dev, ino uint64 }
+	seen := map[dirKey]bool{}
+	key := func(d string) (dirKey, bool) {
+		var st syscall.Stat_t
+		if syscall.Stat(d, &st) != nil {
+			return dirKey{}, false
 		}
-		skip[filepath.Clean(d)] = true
-		p := filepath.Join(d, "sudo")
+		return dirKey{uint64(st.Dev), st.Ino}, true
+	}
+	for _, p := range fixed { // the plan's fixed paths, such as /usr/bin/sudo
+		if k, ok := key(filepath.Dir(p)); ok {
+			seen[k] = true
+		}
+	}
+	wd, _ := os.Getwd()
+	entries, _ := pathEntries() // unset: none here, and amp1 says why it can't be absent
+	var out []string
+	for _, d := range entries {
+		d, err := fromPath(d, wd)
+		if err != nil {
+			return nil, err
+		}
+		if k, ok := key(d); ok {
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
+		p := under(d, "sudo")
 		var st syscall.Stat_t
 		switch err := lstat(p, &st); errnoOf(err) {
 		case 0:
@@ -97,45 +126,57 @@ func pathSudo(fixed []string) ([]string, error) {
 	return out, nil
 }
 
-// pinSudo walks p to the file it names (walk) and trusts the chain only by AMP-1's allow-list: every link on it owned by
+// pinSudo walks p as the kernel resolves it (walkPath) and trusts the chain only by AMP-1's allow-list: every link on it owned by
 // root, and every directory on the real path to each link and to the file owned by root, not world-writable, and not
 // writable by the agent (rootDir); the file a regular, root-owned, setuid file the agent can't write, named sudo or
 // sudo.ws. The file is pinned with O_PATH and O_NOFOLLOW and checked on that descriptor: the inode the walk ended at,
 // and the inode the kernel reaches from p. It returns the descriptor and the chain as a report shows it, or why p can't
 // be trusted. It assumes an agent that isn't root and holds no capability (privileged).
 func pinSudo(p string) (fd int, chain, why string) {
-	links, steps, real, st, err := walk(p)
-	switch {
-	case err != nil && len(links) == 0:
-		return -1, "", "can't be checked (" + err.Error() + ")"
-	case err != nil:
+	w, err := walkPath(p, true)
+	if err != nil {
 		return -1, "", "its links can't be followed to a file (" + err.Error() + ")"
 	}
-	seen := map[string]bool{}
-	for _, q := range append(links, real) {
-		var ls syscall.Stat_t
-		if q != real && (syscall.Lstat(q, &ls) != nil || ls.Uid != 0) {
-			return -1, "", fmt.Sprintf("the link %s isn't root's (uid %d)", q, ls.Uid)
+	defer w.close()
+	last := w.last()
+	if w.errno != 0 {
+		at := w.nodes[last].path
+		for k := 1; k <= last; k++ {
+			if !w.nodes[k].exists || !w.nodes[k].seen {
+				at = w.nodes[k].path
+				break
+			}
 		}
-		for d := filepath.Dir(q); !seen[d]; d = filepath.Dir(d) {
+		if len(w.steps) == 1 {
+			return -1, "", "can't be checked (" + at + ": " + errName(w.errno) + ")"
+		}
+		return -1, "", "its links can't be followed to a file (" + at + ": " + errName(w.errno) + ")"
+	}
+	seen := map[int]bool{}
+	for k := last; k >= 1; k-- { // deepest first: every link root's, every directory looked in root's and out of reach
+		n := w.nodes[k]
+		if n.link && n.uid != 0 {
+			return -1, "", fmt.Sprintf("the link %s isn't root's (uid %d)", n.path, n.uid)
+		}
+		if d := n.parent; d >= 0 && !seen[d] {
 			seen[d] = true
-			if why := rootDir(d); why != "" {
+			if why := rootDir(w, d); why != "" {
 				return -1, "", why
 			}
 		}
 	}
-	switch {
-	case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
+	real := w.nodes[last].path
+	if w.nodes[last].ftype != syscall.S_IFREG {
 		return -1, "", real + " isn't a regular file"
 	}
-	switch err := syscall.Faccessat(unixAtFDCWD, real, 2 /* W_OK */, atEAccess); errnoOf(err) {
+	switch err := w.canAt(last, 2 /* W_OK */); errnoOf(err) {
 	case syscall.EACCES, syscall.EROFS:
 	case 0:
 		return -1, "", "the agent can write " + real + " itself"
 	default:
 		return -1, "", "whether the agent can write " + real + " can't be told (" + err.Error() + ")"
 	}
-	fd, err = syscall.Open(real, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	fd, err = unix.FcntlInt(uintptr(w.fds[last]), unix.F_DUPFD_CLOEXEC, 3) // the inode the walk resolved, pinned
 	if err != nil {
 		return -1, "", real + " can't be pinned (" + err.Error() + ")"
 	}
@@ -143,7 +184,7 @@ func pinSudo(p string) (fd int, chain, why string) {
 	switch {
 	case syscall.Fstat(fd, &fst) != nil:
 		why = real + " can't be checked on its descriptor"
-	case fst.Dev != st.Dev || fst.Ino != st.Ino:
+	case fst.Ino != w.nodes[last].ino || uint64(fst.Dev) != w.nodes[last].dev:
 		why = real + " changed between the check and the pin"
 	case syscall.Stat(p, &kst) != nil || kst.Dev != fst.Dev || kst.Ino != fst.Ino:
 		why = "the kernel doesn't reach " + real + " from " + p
@@ -160,7 +201,7 @@ func pinSudo(p string) (fd int, chain, why string) {
 		syscall.Close(fd)
 		return -1, "", why
 	}
-	return fd, strings.Join(steps, " -> "), ""
+	return fd, strings.Join(w.steps, " -> "), ""
 }
 
 // sudoNames are the files a sudo chain may end at: sudo itself (sudo-rs's included) and Debian's sudo.ws.
@@ -169,70 +210,24 @@ var sudoNames = map[string]bool{"sudo": true, "sudo.ws": true}
 // rootDir says why a directory on sudo's chain fails AMP-1's allow-list, or "": owned by root (an owner can make its
 // own directory writable at any time, whatever its mode now), not world-writable, sticky or not, and not writable by
 // the agent.
-func rootDir(d string) string {
-	var st syscall.Stat_t
+func rootDir(w *pathWalk, i int) string {
+	d := w.nodes[i]
 	switch {
-	case syscall.Lstat(d, &st) != nil:
-		return "the directory " + d + " can't be checked"
-	case st.Uid != 0:
-		return fmt.Sprintf("%s is owned by uid %d, not root", d, st.Uid)
-	case st.Mode&0o002 != 0:
-		return d + " is writable by anyone"
+	case !d.seen || !d.exists:
+		return "the directory " + d.path + " can't be checked"
+	case d.uid != 0:
+		return fmt.Sprintf("%s is owned by uid %d, not root", d.path, d.uid)
+	case d.mode&0o002 != 0:
+		return d.path + " is writable by anyone"
 	}
-	switch err := syscall.Faccessat(unixAtFDCWD, d, 2 /* W_OK */, atEAccess); errnoOf(err) {
+	switch err := w.canAt(i, 2 /* W_OK */); errnoOf(err) {
 	case syscall.EACCES, syscall.EROFS:
 		return ""
 	case 0:
-		return "the agent can write " + d
+		return "the agent can write " + d.path
 	default:
-		return "whether the agent can write " + d + " can't be told (" + err.Error() + ")"
+		return "whether the agent can write " + d.path + " can't be told (" + err.Error() + ")"
 	}
-}
-
-// walk follows p one path component at a time (AMP-1): every symlink on the way, a directory's as well as the last
-// name's, counts against SBX-2's eight hops. It returns each link it followed (a path with no link in it), the whole
-// path after each one, starting with p, as a report shows the chain, and the link-free path it ends at with lstat's
-// answer for it. ".." is taken against that link-free path, as the kernel takes it.
-func walk(p string) (links, steps []string, real string, st syscall.Stat_t, err error) {
-	steps = []string{p}
-	rest := strings.Split(p, "/")
-	cur := "/"
-	for len(rest) > 0 {
-		c := rest[0]
-		rest = rest[1:]
-		switch c {
-		case "", ".":
-			continue
-		case "..":
-			cur = filepath.Dir(cur)
-			continue
-		}
-		next := filepath.Join(cur, c)
-		if err := syscall.Lstat(next, &st); err != nil {
-			return links, steps, "", st, fmt.Errorf("%s: %s", next, errName(errnoOf(err)))
-		}
-		if st.Mode&syscall.S_IFMT != syscall.S_IFLNK {
-			cur = next
-			continue
-		}
-		if len(links) == maxHops {
-			return links, steps, "", st, fmt.Errorf("more than %d links on the way", maxHops)
-		}
-		t, err := os.Readlink(next)
-		if err != nil {
-			return links, steps, "", st, fmt.Errorf("%s: %s", next, errName(errnoOf(err)))
-		}
-		links = append(links, next)
-		if filepath.IsAbs(t) {
-			cur = "/"
-		}
-		steps = append(steps, filepath.Join(append([]string{cur, t}, rest...)...))
-		rest = append(strings.Split(t, "/"), rest...)
-	}
-	if err := syscall.Lstat(cur, &st); err != nil {
-		return links, steps, "", st, fmt.Errorf("%s: %s", cur, errName(errnoOf(err)))
-	}
-	return links, steps, cur, st, nil
 }
 
 // privileged says why no sudo chain can be trusted to this agent, or "": AMP-1's allow-list binds only an agent that
