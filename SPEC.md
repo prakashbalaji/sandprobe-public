@@ -1872,8 +1872,15 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **UX-7 The explorer.** Two panes: findings by severity, then unknowns, then not proven, then verified passes. The
   detail pane gives what a hijacked agent gets, proof or indicator, the evidence, how we checked (the negative proof)
   and the fix. Keys: arrows, `c` copy the fix, `o` open the web report, `/` filter, `esc` back, `q` quit.
-- **UX-8 Two palettes.** `modern` (cyan and white, red for breaches) and `mission` (amber on black, a light CRT feel),
-  chosen with `-theme` and remembered locally.
+- **UX-8 Two palettes.** The web report's default, `graphite`, is the landing page's world: a graphite room under one
+  soft top light, raised panels with hairline edges, Inter Tight headings over Inter text, JetBrains Mono only for what
+  the tool reports, and red and green only for results. Results are keys: a failure is a light key with a red legend; a
+  pass, Info, No finding, Not run and N/A are dark keys, with a green legend on a pass alone; an unknown is a dashed
+  dark key, never green. `mission` (amber on black, a light CRT feel) is the alternative. `-theme` chooses one; any
+  other value renders `graphite`, as an unknown value always rendered the default, and that includes `modern`, the
+  cyan palette `graphite` replaced. The page remembers a palette chosen with its own button locally, reads a remembered
+  `modern` as `graphite`, and ignores any other value it doesn't know. The page loads no font (OUT-2): it names Inter
+  Tight, Inter and JetBrains Mono first, then system fonts. The TUI prototype keeps its own `modern` and `mission`.
 - **UX-9 Accessibility.** Severity always shows as a symbol and a word, never color alone. `NO_COLOR` is honoured.
   Reduced motion (`SANDPROBE_REDUCED_MOTION=1` or `-still`) shows static frames. Everything fits 80 columns. Nothing
   flashes more than three times a second.
@@ -1882,11 +1889,11 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   deleting an EKS cluster; its adapter's step bounds are raised to match (cluster create 25 min, delete 20 min), and
   the plan says so.
 - **UX-11 The web report is the final report.** Every run writes OUT-2's page next to its JSON, and the grade screen
-  offers `o` to open it. The page leads with the stamped grade and one sentence saying what a hijacked agent can do,
-  then the containment map (each mark links to its evidence), the findings with a copy button on each fix, the
-  unknowns, the not-proven list, every verified pass with its proof, and how the probe ran (identity, every host
-  contacted, every marker and its fate, the reset's evidence). It carries both palettes, honours reduced motion, fits
-  a phone, and prints on white.
+  offers `o` to open it. The page leads with the letter grade, shown as a key, and one sentence saying what a hijacked
+  agent can do, then the containment map (each mark links to its evidence), the findings with a copy button on each
+  fix, the unknowns, the not-proven list, every verified pass with its proof, and how the probe ran (identity, every
+  host contacted, every marker and its fate, the reset's evidence). It carries both palettes, honours reduced motion,
+  fits a phone, and prints on white.
 
 ### AGT: the agent contract
 
@@ -2565,6 +2572,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | SEC, EGR, PER, AMP | `holes` (found), `clean` (verified or scoped out), `deceptive` and `network` (never pass), `policy` and `sudors` (AMP-1), `evidence` (class right) |
 | OUT, AGT | contract tests; schema validation; the grader's injection cases |
 | UX | golden frames |
+| UX-8, OUT-2 (palettes, nothing loaded) | `internal/report/report_test.go`: `TestThemes` (no theme, `graphite`, `modern` and any unknown value render `graphite`, `mission` renders `mission`; the button cycles exactly the two, and a remembered `modern` reads as `graphite`), `TestHTMLLoadsNothing` (every saved report in `demo/reports` and `test/reports`, in both palettes and as a saved re-render: no `<link`, `@import` or `@font-face`, every `src`, `href`, `srcset`, `xlink:href`, `action` or `poster` attribute and every CSS `url(` is a fragment, and the CSP is unchanged) |
 | UX-4 (SEC-4's addresses) | `cmd/sandprobe/sec4_plan_test.go`: `TestPlansNameEverySEC4Address` (docker, aws-nitro, and run exec and run kubernetes with `-provider-endpoints SEC-4` each name 169.254.169.254:80, 169.254.170.2:80 and 169.254.170.23:80 word for word, with each one's condition and what is sent; sprites, e2b, daytona and run exec without SEC-4 name none), `TestProbeDialsTheCatalogMetadata` (the probe's address constants are `catalog.Metadata`'s, and no other metadata address is written in the probe, so a probe address the plans don't name fails) |
 | PRV | fake provider tests; then one live run per provider |
 | RUN-12 | manager readiness/admin separation and pinned host-model shape/account/retry tests |
