@@ -443,3 +443,22 @@ func TestExchangeDeadline(t *testing.T) {
 		t.Errorf("silent for one attempt, well before the deadline: want errNoAnswer, got %v", err)
 	}
 }
+
+// AMP-1's allow-list refuses the post-merge review's shape too: a link on sudo's chain the agent owns, in root's sticky
+// /tmp, which it could replace; every link must be root's, and no directory on the way writable by anyone.
+func TestPinSudoStickyLink(t *testing.T) {
+	link := filepath.Join("/tmp", fmt.Sprintf("sp-sudolink-%d", os.Getpid()))
+	os.Remove(link)
+	if err := os.Symlink("/usr/bin", link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	fd, chain, why := pinSudo(filepath.Join(link, "su"))
+	if why == "" {
+		syscall.Close(fd)
+		t.Fatalf("a chain through a link in a sticky directory: want refused, got pinned as %s", chain)
+	}
+	if !strings.Contains(why, "isn't root's") && !strings.Contains(why, "/tmp is writable by anyone") {
+		t.Errorf("want the refusal to name the link or /tmp, got %q", why)
+	}
+}

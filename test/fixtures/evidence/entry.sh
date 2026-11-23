@@ -66,5 +66,19 @@ drs) # the agent holding CAP_DAC_READ_SEARCH permitted, not effective (a copy of
   cp /opt/sandprobe/sandprobe-probe /opt/caps/probe
   setcap cap_dac_read_search+p /opt/caps/probe
   ;;
+stickylink) # the agent's home reached through its own link in root's sticky directory: /home/agent is root's link
+  # to /review-sticky/home, the agent's link to /review-home, root's at mode 0555 above root's read-only startup
+  # files. The kernel lets the agent rename its own entry in a sticky directory, so it can redirect the path (TWN-4)
+  mkdir -m 1777 /review-sticky
+  mkdir /review-home
+  printf '' > /review-home/.bashrc
+  printf '' > /review-home/.profile
+  chmod 0444 /review-home/.bashrc /review-home/.profile
+  chmod 0555 /review-home
+  ln -s /review-home /review-sticky/home
+  chown -h agent:agent /review-sticky/home
+  rm -rf /home/agent
+  ln -s /review-sticky/home /home/agent
+  ;;
 esac
 exec sleep infinity

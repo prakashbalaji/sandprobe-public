@@ -308,11 +308,11 @@ func capList(caps uint64) string {
 	return strings.Join(held, ", ")
 }
 
-// replacer: some real directory on the way to p lets the agent as it is create, rename or remove p (or the directory
-// leading to it): writable and searchable, by the kernel's own check; not protected by a sticky bit, which spares
-// entries the agent doesn't own unless it holds CAP_FOWNER; not procfs or sysfs, where nothing is created; and not the
-// parent of a mount point. Every link on the way is followed first, so each directory judged is the one the kernel
-// traverses (TWN-4). It returns that directory, or "".
+// replacer: some entry on the way to p, a symlink's included, lets the agent as it is create, rename or remove it in
+// the real directory it is looked up in: that directory writable and searchable, by the kernel's own check; not
+// protected by a sticky bit, which spares entries the agent doesn't own unless it holds CAP_FOWNER; not procfs or
+// sysfs, where nothing is created; and the entry not a mount point. Every link on the way is kept and followed, so each
+// directory judged is one the kernel looks in (TWN-4). It returns that directory, or "".
 func replacer(p string) (string, error) {
 	ns, err := pathNodes(p, false)
 	if err != nil {
@@ -320,8 +320,8 @@ func replacer(p string) (string, error) {
 	}
 	euid := uint32(os.Geteuid())
 	fowner := theAgent().eff&capFowner != 0
-	for j := len(ns) - 2; j >= 0; j-- {
-		d, c := ns[j], ns[j+1]
+	for k := len(ns) - 1; k >= 1; k-- { // every entry on the way, a symlink's included, in its own directory
+		d, c := ns[ns[k].parent], ns[k]
 		if !d.seen || !d.exists || d.noEntries ||
 			syscall.Faccessat(unixAtFDCWD, d.path, 3 /* W_OK|X_OK */, atEAccess) != nil {
 			continue

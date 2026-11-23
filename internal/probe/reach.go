@@ -19,8 +19,10 @@ import (
 // agent as it is (faccessat, the open); the model answers only for what a change could gain. It reads stat
 // information alone: nothing is opened, read or changed.
 
-// inode is one inode on a path as the kernel traverses it: a real directory, or the target.
+// inode is one inode on a path as the kernel traverses it: a real directory, a symlink entry on the way, or the
+// target. parent is the directory it was looked up in (-1 for "/").
 type inode struct {
+	parent     int
 	path       string
 	seen       bool // stat could see it; past a directory the agent can't search, nothing can be
 	exists     bool
@@ -81,14 +83,23 @@ func theAgent() agentID {
 	return a
 }
 
-// pathNodes are the inodes the kernel traverses for p: "/", every real directory below it, each symlink on the way
-// followed (a directory's as well as the last name's when follow is set) within SBX-2's eight hops, and the target
-// last. A missing component, and everything after it, doesn't exist; past a directory the agent can't search,
-// nothing is seen.
+// pathNodes are the inodes the kernel looks up for p, in order: "/", then every entry, each in the real directory it is
+// looked up in: every real directory, every symlink entry on the way (kept as a node, then followed: a directory's as
+// well as the last name's when follow is set, within SBX-2's eight hops), and the target last. A missing component, and
+// everything after it, doesn't exist; past a directory the agent can't search, nothing is seen.
 func pathNodes(p string, follow bool) ([]inode, error) {
-	ns := []inode{stat("/")}
+	root := stat("/")
+	root.parent = -1
+	ns := []inode{root}
+	cur, hops := 0, 0 // cur: the directory the next lookup happens in
 	rest := strings.Split(p, "/")
-	cur, hops := "/", 0
+	tail := func(seen bool) { // what lies below a missing or unsearchable entry
+		for _, r := range rest {
+			if r != "" && r != "." {
+				ns = append(ns, inode{path: filepath.Join(ns[len(ns)-1].path, r), seen: seen, parent: len(ns) - 1})
+			}
+		}
+	}
 	for len(rest) > 0 {
 		c := rest[0]
 		rest = rest[1:]
@@ -96,12 +107,12 @@ func pathNodes(p string, follow bool) ([]inode, error) {
 		case "", ".":
 			continue
 		case "..":
-			if cur != "/" {
-				cur, ns = filepath.Dir(cur), ns[:len(ns)-1]
+			if ns[cur].parent >= 0 {
+				cur = ns[cur].parent
 			}
 			continue
 		}
-		next := filepath.Join(cur, c)
+		next := filepath.Join(ns[cur].path, c)
 		last := true
 		for _, r := range rest {
 			last = last && (r == "" || r == ".")
@@ -110,27 +121,21 @@ func pathNodes(p string, follow bool) ([]inode, error) {
 		err := syscall.Lstat(next, &st)
 		switch e := errnoOf(err); {
 		case e == syscall.ENOENT || e == syscall.ENOTDIR:
-			ns = append(ns, inode{path: next, seen: true})
-			for _, r := range rest {
-				if r != "" && r != "." {
-					next = filepath.Join(next, r)
-					ns = append(ns, inode{path: next, seen: true})
-				}
-			}
+			ns = append(ns, inode{path: next, seen: true, parent: cur})
+			tail(true)
 			return ns, nil
 		case e == syscall.EACCES:
-			ns = append(ns, inode{path: next})
-			for _, r := range rest {
-				if r != "" && r != "." {
-					next = filepath.Join(next, r)
-					ns = append(ns, inode{path: next})
-				}
-			}
+			ns = append(ns, inode{path: next, parent: cur})
+			tail(false)
 			return ns, nil
 		case err != nil:
 			return nil, fmt.Errorf("%w: %s: %v", errModel, next, err)
 		}
-		if st.Mode&syscall.S_IFMT == syscall.S_IFLNK && (!last || follow) {
+		n := stat(next)
+		n.parent = cur
+		n.mountPoint = !n.link && uint64(st.Dev) != ns[cur].dev
+		ns = append(ns, n) // a symlink stays a node: an entry the agent might replace in its parent (TWN-4)
+		if n.link && (!last || follow) {
 			if hops++; hops > maxHops {
 				return nil, fmt.Errorf("%w: more than %d links on the way to %s", errModel, maxHops, p)
 			}
@@ -139,15 +144,12 @@ func pathNodes(p string, follow bool) ([]inode, error) {
 				return nil, fmt.Errorf("%w: %s: %v", errModel, next, err)
 			}
 			if filepath.IsAbs(t) {
-				cur, ns = "/", ns[:1]
-			}
+				cur = 0
+			} // a relative target is looked up from the link's own directory, cur still
 			rest = append(strings.Split(t, "/"), rest...)
 			continue
 		}
-		n := stat(next)
-		n.mountPoint = uint64(st.Dev) != ns[len(ns)-1].dev
-		ns = append(ns, n)
-		cur = next
+		cur = len(ns) - 1
 	}
 	return ns, nil
 }
@@ -269,16 +271,19 @@ func identities(a agentID, ns []inode) ([]identity, bool) {
 	return ids, complete
 }
 
-// reach: can identity id resolve the path to ns[i], every directory before it searchable (as it is, or opened)?
+// reach: can identity id make every lookup up to ns[i], each directory it looks in searchable (as it is, or opened)?
 func reach(ns []inode, i int, id identity, opened []bool) verdict {
-	for j := 0; j < i; j++ {
+	for k := 1; k <= i; k++ {
+		d := ns[k].parent
 		switch {
-		case !ns[j].seen:
+		case !ns[d].seen:
 			return cantTell
-		case !ns[j].exists:
+		case !ns[d].exists:
 			return cannot
-		case !allows(&ns[j], id, 1, opened[j]):
+		case !allows(&ns[d], id, 1, opened[d]):
 			return cannot
+		case k < i && ns[k].seen && !ns[k].exists:
+			return cannot // the path breaks at a missing entry
 		}
 	}
 	return can
@@ -335,9 +340,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 	result, how := cannot, ""
 	last := len(ns) - 1
 	for _, id := range ids {
-		v, at := goal(ns, id, opened, want, onlyOpen)
+		v, at, replace := goal(ns, id, opened, want, onlyOpen)
 		if v == can {
-			return can, describe(a, ns, id, opened, why, at, want)
+			return can, describe(a, ns, id, opened, why, at, replace, want)
 		}
 		if v == cantTell {
 			via := "a change of mode"
@@ -353,9 +358,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 	return result, how
 }
 
-// goal is one identity's answer, and the inode whose access gives it: the target, or the directory whose entry it
-// can create or replace.
-func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (verdict, int) {
+// goal is one identity's answer, and the node whose access gives it: the target, or (replace) the entry it can create
+// or replace in the directory it was looked up in.
+func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (verdict, int, bool) {
 	last := len(ns) - 1
 	t := ns[last]
 	result := cannot
@@ -363,20 +368,21 @@ func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (v
 		r := reach(ns, last, id, opened)
 		switch {
 		case r == can && t.seen && t.exists && !(want == 2 && t.ro) && allows(&t, id, want, opened[last]):
-			return can, last
+			return can, last, false
 		case r == cantTell || r == can && !t.seen:
 			result = cantTell
 		}
 	}
 	if want != 2 || onlyOpen {
-		return result, -1
+		return result, -1, false
 	}
-	for j := last - 1; j >= 0; j-- {
-		p, c := ns[j], ns[j+1]
-		if !p.seen || !p.exists || !p.dir || p.ro || p.noEntries || !allows(&p, id, 3, opened[j]) {
+	for k := last; k >= 1; k-- { // every entry on the way, a symlink's included, in the directory it was looked up in
+		d := ns[k].parent
+		p, c := ns[d], ns[k]
+		if !p.seen || !p.exists || !p.dir || p.ro || p.noEntries || !allows(&p, id, 3, opened[d]) {
 			continue
 		}
-		r := reach(ns, j, id, opened)
+		r := reach(ns, k, id, opened)
 		if r == cannot {
 			continue
 		}
@@ -387,23 +393,23 @@ func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (v
 		case !c.exists:
 		case c.mountPoint:
 			child = cannot
-		case p.mode&syscall.S_ISVTX != 0 && !opened[j] && id.uid != p.uid && id.uid != c.uid &&
+		case p.mode&syscall.S_ISVTX != 0 && !opened[d] && id.uid != p.uid && id.uid != c.uid &&
 			id.caps&capFowner == 0 && !(id.caps&capChown != 0 && !c.ro && !c.procfs):
 			child = cannot
 		}
 		switch {
 		case r == can && child == can:
-			return can, j
+			return can, k, true
 		case child != cannot:
 			result = cantTell
 		}
 	}
-	return result, -1
+	return result, -1, false
 }
 
 // describe says how an identity gets the access: the change of uid or groups, the capabilities it raises, and the
 // modes it changes on the way.
-func describe(a agentID, ns []inode, id identity, opened []bool, why []string, at int, want uint32) string {
+func describe(a agentID, ns []inode, id identity, opened []bool, why []string, at int, replace bool, want uint32) string {
 	var parts []string
 	if id.uid != a.uid {
 		parts = append(parts, fmt.Sprintf("as uid %d (CAP_SETUID)", id.uid))
@@ -427,15 +433,17 @@ func describe(a agentID, ns []inode, id identity, opened []bool, why []string, a
 	} else if dac := id.caps & (capDacOverride | capDacReadSearch); dac != 0 {
 		parts = append(parts, "with "+capList(dac))
 	}
-	for i := 0; i <= at && i < len(ns); i++ {
-		need := uint32(1) // search, on the way
-		switch {
-		case i == at && at == len(ns)-1:
-			need = want
-		case i == at:
-			need = 3 // write and search the directory whose entry changes
-		}
-		if opened[i] && !allows(&ns[i], id, need, false) {
+	need := map[int]uint32{} // the access each node gives the goal: search for every lookup, then the goal's own
+	for m := 1; m <= at; m++ {
+		need[ns[m].parent] |= 1
+	}
+	if replace {
+		need[ns[at].parent] |= 3 // write and search the directory whose entry changes
+	} else {
+		need[at] |= want
+	}
+	for i := range ns {
+		if w, ok := need[i]; ok && opened[i] && !allows(&ns[i], id, w, false) {
 			parts = append(parts, "changing the mode of "+ns[i].path+", "+why[i])
 		}
 	}

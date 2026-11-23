@@ -121,6 +121,11 @@ var fixtures = []fixture{
 			return []string{"--network", "none", "--cap-add", "DAC_READ_SEARCH", "-e", "EVIDENCE=drs"}
 		},
 		expect: expectUnknown(map[string]string{"PER-1": "CAP_DAC_READ_SEARCH"})},
+	// TWN-4 for every entry on the way: the agent's own link in root's sticky directory, which the kernel lets it
+	// rename, leads its home to root's read-only files; replacing the link redirects them, so PER-1 can't pass
+	{name: "evidence-stickylink", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=stickylink"}
+	}, expect: expectWritable(map[string]string{"PER-1": "~/.bashrc"})},
 	{name: "evidence-sockets", image: "evidence", settle: time.Second, expect: expectSockets, opts: func(world) []string {
 		return []string{"--network", "none", "--cap-add", "NET_ADMIN", "-e", "EVIDENCE=sockets"}
 	}},

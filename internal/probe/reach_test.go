@@ -20,13 +20,23 @@ import (
 type kNode struct {
 	uid, gid, mode                          uint32
 	dir, exists, ro, procfs, noEntries, mnt bool
+	link                                    bool // a symlink entry: looked up in its directory, then followed
+	in                                      int  // 1 + the index of the directory it is looked up in; 0: the node before it
+}
+
+// up is the index of the directory node i is looked up in.
+func up(ns []kNode, i int) int {
+	if ns[i].in == 0 {
+		return i - 1
+	}
+	return ns[i].in - 1
 }
 
 type kState struct {
 	uid    uint32
 	groups uint32 // a bit per candidate gid
 	opened uint32 // a bit per node made 0777
-	owners [4]uint32
+	owners [8]uint32
 }
 
 // kPerm is generic_permission, without ACLs: the owner's, the group's or the others' bits, CAP_DAC_OVERRIDE and
@@ -91,9 +101,10 @@ func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, wan
 	perm := func(s kState, i int, want uint32) bool {
 		return kPerm(ns[i], mode(s, i), s.owners[i], s.uid, inGroup(s, ns[i].gid), caps, want)
 	}
-	resolves := func(s kState, i int) bool { // every directory before node i exists and is searchable
-		for j := 0; j < i; j++ {
-			if !ns[j].exists || !perm(s, j, 1) {
+	resolves := func(s kState, i int) bool { // every lookup up to node i: its directory exists and is searchable
+		for k := 1; k <= i; k++ {
+			d := up(ns, k)
+			if !ns[d].exists || !perm(s, d, 1) || k < i && !ns[k].exists {
 				return false
 			}
 		}
@@ -101,15 +112,17 @@ func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, wan
 	}
 	last := len(ns) - 1
 	done := func(s kState) bool {
-		if resolves(s, last) && ns[last].exists && !(want == 2 && ns[last].ro) && perm(s, last, want) {
+		t := ns[last]
+		if !(want == 2 && t.link) && resolves(s, last) && t.exists && !(want == 2 && t.ro) && perm(s, last, want) {
 			return true
 		}
 		if want != 2 {
 			return false
 		}
-		for j := last - 1; j >= 0; j-- {
-			p, c := ns[j], ns[j+1]
-			if !p.exists || !p.dir || p.ro || p.noEntries || !resolves(s, j) || !perm(s, j, 3) { // one mask, as the kernel asks
+		for k := last; k >= 1; k-- { // replace any entry, a link's included, in the directory it is looked up in
+			d := up(ns, k)
+			p, c := ns[d], ns[k]
+			if !p.exists || !p.dir || p.ro || p.noEntries || !resolves(s, k) || !perm(s, d, 3) { // one mask, as the kernel asks
 				continue
 			}
 			if !c.exists {
@@ -118,7 +131,7 @@ func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, wan
 			if c.mnt {
 				continue
 			}
-			if mode(s, j)&0o1000 != 0 && s.uid != s.owners[j] && s.uid != s.owners[j+1] && caps&capFowner == 0 {
+			if mode(s, d)&0o1000 != 0 && s.uid != s.owners[d] && s.uid != s.owners[k] && caps&capFowner == 0 {
 				continue
 			}
 			return true
@@ -152,7 +165,7 @@ func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, wan
 			if !n.exists || n.ro || n.procfs || !resolves(s, i) {
 				continue
 			}
-			if s.uid == s.owners[i] || caps&capFowner != 0 {
+			if !n.link && (s.uid == s.owners[i] || caps&capFowner != 0) { // a link's own mode never changes
 				t := s
 				t.opened |= 1 << i
 				next = append(next, t)
@@ -173,16 +186,18 @@ func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, wan
 	return false
 }
 
-// toInodes turns a case into the model's inodes: "/", "/a", ... and the target last, all seen.
+// toInodes turns a case into the model's inodes, in lookup order, each named under the directory it is looked up in,
+// all seen.
 func toInodes(ns []kNode) []inode {
 	out := make([]inode, len(ns))
-	p := "/"
 	for i, n := range ns {
+		p, parent := "/", -1
 		if i > 0 {
-			p = filepath.Join(p, fmt.Sprintf("n%d", i))
+			parent = up(ns, i)
+			p = filepath.Join(out[parent].path, fmt.Sprintf("n%d", i))
 		}
-		out[i] = inode{path: p, seen: true, exists: n.exists, dir: n.dir, uid: n.uid, gid: n.gid, mode: n.mode, ro: n.ro,
-			procfs: n.procfs, noEntries: n.noEntries, mountPoint: n.mnt}
+		out[i] = inode{path: p, parent: parent, seen: true, exists: n.exists, dir: n.dir, link: n.link, uid: n.uid,
+			gid: n.gid, mode: n.mode, ro: n.ro, procfs: n.procfs, noEntries: n.noEntries, mountPoint: n.mnt}
 	}
 	return out
 }
@@ -238,13 +253,19 @@ func TestModelAgainstKernel(t *testing.T) {
 			{uid: me, gid: me, mode: 0o444, exists: true, ro: true}}, me, []uint32{me}, capFowner | capSetuid},
 		// an owner bits of 0 under group-writable: being the owner can lock one out
 		{"owner locked out", []kNode{root, dir(0, 0, 0o755), file(me, 4000, 0o070)}, me, []uint32{me, 4000}, 0},
+		// the post-merge review's: root's sticky directory holding my link to root's 0555 directory and its 0444 file
+		{"my link in a sticky directory", []kNode{root, dir(0, 0, 0o1777), {uid: me, gid: me, mode: 0o777, exists: true, link: true},
+			{uid: 0, gid: 0, mode: 0o555, dir: true, exists: true, in: 1}, file(0, 0, 0o444)}, me, []uint32{me}, 0},
+		{"root's link in a sticky directory", []kNode{root, dir(0, 0, 0o1777), {uid: 0, gid: 0, mode: 0o777, exists: true, link: true},
+			{uid: 0, gid: 0, mode: 0o555, dir: true, exists: true, in: 1}, file(0, 0, 0o444)}, me, []uint32{me}, 0},
 	}
 	for _, c := range curated {
 		checkCase(t, c)
 	}
-	// a seeded table: two or three components below "/", each owned by me, root or another, in my group, root's or
-	// another's, with modes drawn from the ones that matter, sometimes read-only, missing or a mount point, and every
-	// combination of the capabilities the model weighs
+	// a seeded table: two or three components below "/", or a directory holding a link (absolute, to a directory in
+	// "/", or relative, in its own directory), each owned by me, root or another, in my group, root's or another's, with
+	// modes drawn from the ones that matter, sometimes read-only, missing or a mount point, and every combination of the
+	// capabilities the model weighs
 	rng := rand.New(rand.NewSource(24))
 	modes := []uint32{0, 0o010, 0o020, 0o030, 0o040, 0o070, 0o100, 0o200, 0o300, 0o400, 0o444, 0o500, 0o555, 0o600,
 		0o644, 0o666, 0o700, 0o701, 0o705, 0o711, 0o750, 0o755, 0o770, 0o777, 0o1777, 0o1770, 0o1733}
@@ -259,15 +280,29 @@ func TestModelAgainstKernel(t *testing.T) {
 		}
 		return n
 	}
-	for i := 0; i < 6000; i++ {
-		depth := 2 + rng.Intn(2)
+	for i := 0; i < 9000; i++ {
 		ns := []kNode{dir(0, 0, modes[rng.Intn(len(modes))])}
-		for d := 1; d < depth; d++ {
-			ns = append(ns, pick(true))
+		switch rng.Intn(3) {
+		case 0: // two or three components, each in the one before
+			for d := 1 + rng.Intn(2); d > 0; d-- {
+				ns = append(ns, pick(true))
+			}
+		case 1: // a directory holding an absolute link to a directory in "/": /a/link -> /b
+			l := pick(false)
+			l.link, l.mode, l.ro, l.procfs, l.mnt = true, 0o777, false, false, false
+			b := pick(true)
+			b.in = 1
+			ns = append(ns, pick(true), l, b)
+		case 2: // a relative link, resolved in its own directory: /a/link -> b, that is /a/b
+			l := pick(false)
+			l.link, l.mode, l.ro, l.procfs, l.mnt = true, 0o777, false, false, false
+			b := pick(true)
+			b.in = 2
+			ns = append(ns, pick(true), l, b)
 		}
 		ns = append(ns, pick(rng.Intn(4) == 0))
-		for j := 1; j < len(ns); j++ { // nothing exists below what doesn't
-			if !ns[j-1].exists {
+		for j := 1; j < len(ns); j++ { // nothing exists below what doesn't, nor past a missing link
+			if !ns[up(ns, j)].exists || ns[j-1].link && !ns[j-1].exists {
 				ns[j].exists = false
 			}
 		}
@@ -285,8 +320,9 @@ func TestModelAgainstKernel(t *testing.T) {
 	}
 }
 
-// pathNodes judges the directories the kernel traverses: every link on the way is followed, a directory's link
-// included, and counted against SBX-2's eight; past a directory the probe can't search, nothing is seen.
+// pathNodes keeps every lookup the kernel makes: a link on the way stays an entry of its own directory, then is
+// followed to the real directories it leads to, and counted against SBX-2's eight; past a directory the probe can't
+// search, nothing is seen.
 func TestPathNodes(t *testing.T) {
 	d := t.TempDir()
 	os.MkdirAll(filepath.Join(d, "real", "sub"), 0o755)
@@ -300,8 +336,17 @@ func TestPathNodes(t *testing.T) {
 	for _, n := range ns {
 		paths = append(paths, n.path)
 	}
-	if got := strings.Join(paths, " "); !strings.Contains(got, filepath.Join(d, "real", "sub")) || strings.Contains(got, filepath.Join(d, "link")) {
-		t.Errorf("want the real directories, not the link: %s", got)
+	link := -1
+	for i, n := range ns {
+		if n.path == filepath.Join(d, "link") && n.link {
+			link = i
+		}
+	}
+	switch got := strings.Join(paths, " "); {
+	case !strings.Contains(got, filepath.Join(d, "real", "sub")):
+		t.Errorf("want the real directories the link leads to: %s", got)
+	case link < 0 || ns[ns[link].parent].path != d:
+		t.Errorf("want the link kept as an entry of its own directory, %s: %s", d, got)
 	}
 	for i := 1; i <= 9; i++ {
 		os.Symlink(fmt.Sprintf("h%d", i+1), filepath.Join(d, fmt.Sprintf("h%d", i)))
@@ -355,5 +400,24 @@ func TestIdentitySearchCompleteness(t *testing.T) {
 	ns[len(ns)-1].gid = 0
 	if got, _ := gains(a, ns, 2, false, true); got != can {
 		t.Fatal("bounded search discarded a witnessed access")
+	}
+}
+
+// The post-merge review's case, at the end observation: the agent's own link in root's sticky /tmp, leading to root's
+// directories. The agent can replace the link (the kernel lets an entry's owner rename it in a sticky directory), so
+// a write check through it finds the path; then the test makes that rename itself, which the kernel must allow.
+func TestStickyLinkReplaceable(t *testing.T) {
+	link := filepath.Join("/tmp", fmt.Sprintf("sp-stickylink-%d", os.Getpid()))
+	os.Remove(link)
+	if err := os.Symlink("/usr/bin", link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link); os.Remove(link + ".moved") })
+	tg, _, err := writeHow("ls", filepath.Join(link, "ls"))
+	if err != nil || tg.State != "found" {
+		t.Fatalf("a path through the agent's own link in a sticky directory: want found, got %+v %v", tg, err)
+	}
+	if err := os.Rename(link, link+".moved"); err != nil {
+		t.Errorf("the kernel refused the rename the finding rests on: %v", err)
 	}
 }
