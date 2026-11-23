@@ -842,6 +842,25 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   or security intent. Do not clone runtime environment values from the API.
   The artifact profile binds the separate artifacts claim and `/persist` mount;
   readbacks reject redirected claims, subpaths, propagation and extra mounts.
+  Managed Nitro selects `persistent-artifacts` only with the host controller.
+  Use the documented ReadWriteOncePod mode. Bind the explicit encrypted EBS
+  volume to the recorded receiver node's zone before scheduling, retain local
+  workspace/cache, and run the same bounded artifact program as Daytona before
+  model release and after the nine-case workload. The child reset journal is
+  exclusive, private, durable and bound to a parent nonce and original identities.
+  Delete the original Job with its UID precondition and confirm its Job/Pod gone
+  before creating exactly one replacement from the hash-bound host manifest.
+  Record the replacement Job UID before discovery; an unknown create is retained
+  as unknown. The replacement must pass image, principal, configuration and same
+  storage readbacks before PER-5 recheck. Read the replacement's actual security
+  context as well: non-root UID/GID10001, read-only root, no privilege escalation,
+  no capabilities, RuntimeDefault seccomp, no host namespaces/sidecars and no
+  service-account token mount. The environment hash alone is not that readback.
+  Never repeat the model workload during
+  reset. Import child reset state in finally, including failed/timed-out grading,
+  and stop both known Jobs before the final receiver control. Dedicated cluster
+  deletion covers unknown Kubernetes children; independently delete the original
+  EBS ID only after confirmed original-cluster absence and no attachments.
 
 - **RUN-15 Protected startup configuration, writable project.** Improve the
   configuration shared by the Nitro and Daytona workload runs: HOME points to an
@@ -2563,7 +2582,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-19 | controller failure-step sanitization and unchanged model budget; contract mismatch metadata and refusal; setgid-workspace Linux smoke with unsafe-existing-cache refusal and nine cases; EGR-6 stage-count sanitization tests |
 | RUN-18 | actual environment-clearing subprocess and original-command/probe binding tests; legacy contract cannot select cleared observations; shared-policy Python workload checks; network-disabled/read-only Linux container with inherited synthetic authority and nine functional cases |
 | RUN-17 | host-controller protocol/remote execution/two-attempt/ambiguous-count and identity-absence tests; schema3 contract refusal matrix and report-version selection; original guest-mode regressions |
-| RUN-23 | `internal/host/agent_workspace_test.go`: creator identity, both static storage profiles and actual pod volume/mount drift; `agent_reset_job_test.go`: original-manifest tampering and cross-language hashes from the real Python renderer; `deploy/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls and artifact storage leaves coding/cache paths local; `test_persistent_storage.py`: EBS ownership, metadata/attachment guards and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, same-volume recreation, context guards, unknown-create recovery and terminal tombstone identity; `daytona_artifact_test.go`: exact bounded agent readback and failure metadata; managed Daytona runner tests cover profile forwarding and cleanup outcomes; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
+| RUN-23 | `internal/host/agent_persistent_test.go`: durable deletion/create ordering, UID preconditions, lost-create uncertainty and replacement guards; `deploy/eks-agent/test_persistent_assessment.py`: profile intent, native artifact proof, recovery import, failed-child paths and independent cleanup; `internal/host/agent_workspace_test.go`: creator identity, both static storage profiles and actual pod volume/mount drift; `agent_reset_job_test.go`: original-manifest tampering and cross-language hashes from the real Python renderer; `deploy/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls and artifact storage leaves coding/cache paths local; `test_persistent_storage.py`: EBS ownership, metadata/attachment guards and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, same-volume recreation, context guards, unknown-create recovery and terminal tombstone identity; `daytona_artifact_test.go`: exact bounded agent readback and failure metadata; managed Daytona runner tests cover profile forwarding and cleanup outcomes; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |
 | WGR-7 | `TestPortableWorkloadDeclaration`, `TestPortableWorkloadCalibration`; version1 retained Nitro report compatibility test |

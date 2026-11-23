@@ -20,16 +20,27 @@ def controller_environment(runner):
     return env
 
 
-def valid_storage(volumes, mounts):
-    if (not isinstance(volumes, list) or not isinstance(mounts, list) or len(volumes) != 2 or len(mounts) != 2
-            or any(not isinstance(v, dict) or v.get("name") not in ("workspace", "scratch") for v in volumes + mounts)):
+def valid_storage(volumes, mounts, artifacts=False):
+    names = {"workspace", "scratch", "artifacts"} if artifacts else {"workspace", "scratch"}
+    if (not isinstance(volumes, list) or not isinstance(mounts, list) or len(volumes) != len(names) or len(mounts) != len(names)
+            or any(not isinstance(v, dict) or not isinstance(v.get("name"), str) or v["name"] not in names for v in volumes + mounts)):
         return False
-    normalized = [dict(m) for m in mounts]
-    for mount in normalized:
+    expected_volumes = {key: {"name": key, "emptyDir": {"sizeLimit": "64Mi"}} for key in ["workspace", "scratch"]}
+    expected_mounts = {"workspace": {"name": "workspace", "mountPath": "/workspace"}, "scratch": {"name": "scratch", "mountPath": "/tmp"}}
+    if artifacts:
+        expected_volumes["artifacts"] = {"name": "artifacts", "persistentVolumeClaim": {"claimName": "artifacts"}}
+        expected_mounts["artifacts"] = {"name": "artifacts", "mountPath": "/persist"}
+    normalized_volumes = json.loads(json.dumps(volumes))
+    normalized_mounts = json.loads(json.dumps(mounts))
+    for volume in normalized_volumes:
+        pvc = volume.get("persistentVolumeClaim")
+        if isinstance(pvc, dict) and pvc.get("readOnly") is False:
+            pvc.pop("readOnly")
+    for mount in normalized_mounts:
         if mount.get("readOnly") is False:
             mount.pop("readOnly")
-    return ({v.get("name"): v for v in volumes} == {key: {"name": key, "emptyDir": {"sizeLimit": "64Mi"}} for key in ["workspace", "scratch"]}
-            and {m.get("name"): m for m in normalized} == {"workspace": {"name": "workspace", "mountPath": "/workspace"}, "scratch": {"name": "scratch", "mountPath": "/tmp"}})
+    return ({v.get("name"): v for v in normalized_volumes} == expected_volumes
+            and {m.get("name"): m for m in normalized_mounts} == expected_mounts)
 
 
 def model_preflight(runner):

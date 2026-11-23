@@ -22,11 +22,12 @@ import (
 )
 
 type request struct {
-	UploadAddresses map[string]string     `json:"upload_addresses,omitempty"`
-	UploadHosts     []string              `json:"upload_hosts,omitempty"`
-	Contract        *obs.WorkloadContract `json:"contract"`
-	Pod             host.AgentPodBinding  `json:"pod"`
-	CanaryState     string                `json:"canary_state"`
+	UploadAddresses map[string]string         `json:"upload_addresses,omitempty"`
+	UploadHosts     []string                  `json:"upload_hosts,omitempty"`
+	Contract        *obs.WorkloadContract     `json:"contract"`
+	Pod             host.AgentPodBinding      `json:"pod"`
+	CanaryState     string                    `json:"canary_state"`
+	Persistent      *host.AgentPersistentSpec `json:"persistent,omitempty"`
 }
 
 func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
@@ -34,6 +35,9 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	raw, err := io.ReadAll(io.LimitReader(in, 65537))
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
 		return errors.New("invalid grading request")
+	}
+	if (q.Pod.Workspace != nil) != (q.Persistent != nil) {
+		return errors.New("persistent storage and lifecycle must be declared together")
 	}
 	if _, err := catalog.BindUploadHosts(q.UploadHosts, q.UploadAddresses); err != nil {
 		return err
@@ -69,21 +73,40 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if err = p.Upload(ctx, b); err != nil {
 		return errors.New("standard probe upload failed")
 	}
+	var box host.Box = p
+	var persistent *host.AgentPersistentBox
+	if q.Persistent != nil {
+		persistent, err = host.NewAgentPersistentBox(ctx, p, q.Pod, b, *q.Persistent)
+		if err != nil {
+			return errors.New("persistent workload reset binding rejected")
+		}
+		box = persistent
+	}
 	start := time.Now()
 	excluded := map[string]string{}
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses})
+	r, err := host.Execute(ctx, box, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}
+	if persistent != nil && persistent.VerifyOriginalAfterCollection(ctx) != nil {
+		return errors.New("original persistent workload collection unverified")
+	}
+	residual := "RUN-8: workload configuration only; no reset or provider-endpoint assessment. "
+	if persistent != nil {
+		residual = "RUN-23: workload configuration and supported owned-storage recreation assessment; provider endpoints excluded. "
+	}
 	// RUN-8: invalid runs preserve grading semantics without SDK/exec stderr.
 	sanitizeInvalid(r)
+	calls := p.Calls
+	if persistent != nil {
+		calls = persistent.Calls()
+	}
 	doc := report.Build(r, report.Meta{Version: "0.1.0", Provider: "aws-nitro", BoxName: q.Pod.Name,
-		CreatedBySandprobe: true, StartedAt: start, Duration: time.Since(start), Calls: p.Calls, Cleanup: "pending",
-		Residual: "RUN-8: workload configuration only; no reset or provider-endpoint assessment. UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
-	doc.Statement = "Legacy generic diagnostic grade. The primary conditional workload configuration assessment is in workload-report.html; it is not a security-assurance verdict."
+		CreatedBySandprobe: true, StartedAt: start, Duration: time.Since(start), Calls: calls, Cleanup: "pending",
+		Residual: residual + "UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	html, err := report.HTML(doc, "dark")
 	if err != nil {
 		return errors.New("standard report rendering failed")
@@ -118,7 +141,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 18*time.Minute)
 	defer cancel()
 	if err := run(ctx, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -16,6 +16,8 @@ import time
 
 from assessment import evaluate, guest_document
 import host_workload
+import persistent_assessment
+from persistent_storage import EBSWorkspace
 from coding import strict
 from lifecycle import Commands, Failure, Journal, directory
 from render_profile import HOSTNAME, REGION, FixedErrorParser, render
@@ -111,15 +113,24 @@ def trust_policy(cluster_arn, namespace):
 
 
 class Runner:
-    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python=""):
+    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
             raise Failure("invalid_profile")
         if controller not in {"guest", "host"}:
             raise Failure("invalid_controller_pattern")
-        self.controller, self.model_python, self.source_root = controller, model_python, ROOT
-        self.journal, self.profile = journal, profile
         parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
         self.upload_hosts = parse_hosts(",".join(upload_hosts or []))
+        storage_profile = storage_profile or journal.data.get("storage_profile", "ephemeral")
+        if storage_profile not in {"ephemeral", "persistent-artifacts"} or (storage_profile != "ephemeral" and controller != "host"):
+            raise Failure("invalid_managed_storage_profile")
+        if journal.data.get("storage_profile", storage_profile) != storage_profile:
+            raise Failure("storage_profile_changed")
+        self.storage_profile, self.account_id = storage_profile, ACCOUNT
+        if storage_profile != "ephemeral":
+            journal.data["storage_profile"] = storage_profile
+            journal.save()
+        self.controller, self.model_python, self.source_root = controller, model_python, ROOT
+        self.journal, self.profile = journal, profile
         self.ops = commands or Commands()
         self.run_id = journal.data["run_id"]
         self.name = "sandprobe-agent-" + self.run_id
@@ -142,7 +153,10 @@ class Runner:
 
     def task_node_selector(self):
         # GAT-2: explicitly request the RuntimeClass's exact Nitro capability.
-        return {"karpenter.sh/nodepool": self.name, "eks.amazonaws.com/nitro-sandbox": "true"}
+        selector = {"karpenter.sh/nodepool": self.name, "eks.amazonaws.com/nitro-sandbox": "true"}
+        if persistent_assessment.enabled(self) and "workspace_volume" in self.journal.data["resources"]:
+            selector["topology.kubernetes.io/zone"] = self.journal.data["resources"]["workspace_volume"]["zone"]
+        return selector
 
     def guard_read(self, operation, *args, **kwargs):
         # GAT-1: used only for idempotent config reads, never release/model calls.
@@ -465,21 +479,32 @@ class Runner:
             time.sleep(1)
         raise Failure("positive_control_failed")
 
-    def delete_job(self):
-        key = f"kube:Job:{self.ns}:model-task"
-        record = self.journal.data["resources"][key]
-        uid = self.scalar("job", "model-task", "{.metadata.uid}", self.ns)
-        if not uid:
+    def delete_job(self, name="model-task"):
+        if name not in {"model-task", "model-task-reset"}:
+            raise Failure("invalid_task_job_name")
+        key = f"kube:Job:{self.ns}:{name}"
+        record = self.journal.data["resources"].get(key)
+        if record is None:
             return
-        if uid != record["uid"]:
+        if not re.fullmatch(r"[a-f0-9-]{16,64}", record.get("uid", "")):
+            raise Failure("task_job_create_unresolved")
+        uid = self.scalar("job", name, "{.metadata.uid}", self.ns)
+        if uid and uid != record["uid"]:
             raise Failure("job_identity_changed")
-        self.kube("delete", "--raw", f"/apis/batch/v1/namespaces/{self.ns}/jobs/model-task", "-f", "-",
-            payload=encoded({"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}, "propagationPolicy": "Foreground"}))
-        self.kube("wait", "--for=delete", "job/model-task", "-n", self.ns, "--timeout=5m", timeout=330)
-        if self.kube("get", "pods", "-n", self.ns, "-l", "job-name=model-task", "-o", "jsonpath={.items[*].metadata.uid}").strip():
+        if uid:
+            self.kube("delete", "--raw", f"/apis/batch/v1/namespaces/{self.ns}/jobs/{name}", "-f", "-",
+                payload=encoded({"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}, "propagationPolicy": "Foreground"}))
+            self.kube("wait", "--for=delete", "job/" + name, "-n", self.ns, "--timeout=5m", timeout=330)
+        if self.kube("get", "pods", "-n", self.ns, "-l", "job-name=" + name, "-o", "jsonpath={.items[*].metadata.uid}").strip():
             raise Failure("task_pods_not_confirmed_gone")
         record["status"] = "deleted"
         self.journal.save()
+
+    def stop_task_jobs(self):
+        if persistent_assessment.enabled(self):
+            persistent_assessment.import_reset(self)
+        self.delete_job()
+        self.delete_job("model-task-reset")
 
     def execute(self):
         if self.journal.data.get("image_run_id"):
@@ -529,6 +554,10 @@ class Runner:
         self.journal.save()
         if not ipaddress.ip_address(receiver_ip).is_private:
             raise Failure("receiver_address_not_private")
+        if persistent_assessment.enabled(self):
+            self.stage("persistent_storage_creation")
+            plan = persistent_assessment.install(self, receiver_ns, receiver_uid)
+            items = plan["kubernetes"]["items"]
         # Control has a distinct label and only receiver access; the agent policy
         # cannot select it. No model identity is associated with the default SA.
         self.create({"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
@@ -555,6 +584,8 @@ class Runner:
         job["spec"]["activeDeadlineSeconds"] = 2700
         config_sha = hashlib.sha256(encoded(job)).hexdigest()
         container["env"].append({"name": "SANDPROBE_CONFIG_SHA256", "value": config_sha})
+        if persistent_assessment.enabled(self):
+            self.journal.data["persistent_reset"] = {"authority": secrets.token_hex(24), "original_job": job}
         self.journal.data["context"] = {"run_id": self.run_id, "receiver_uid": receiver_uid,
             "image": self.image, "config_sha256": config_sha, "pod_uid": "pending"}
         self.journal.save()
@@ -573,6 +604,9 @@ class Runner:
         if not pod_name or not re.fullmatch(r"model-task-[a-z0-9-]+", pod_name):
             raise Failure("task_pod_not_created")
         self.verify_task_pod(pod_name, job_uid)
+        if persistent_assessment.enabled(self):
+            persistent_assessment.binding(self)
+            persistent_assessment.artifact(self, pod_name, "preflight", b'{"purpose":"agent_storage_preflight","synthetic":true}')
         self.stage("workload_contract_freeze")
         self.freeze_workload_contract(pod_name)
         self.stage("task_execution")
@@ -580,7 +614,7 @@ class Runner:
             self.kube("exec", pod_name, "-n", self.ns, "--", "python", "-I", "-c",
                 "import os;f=os.open('/workspace/.host-release',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600);os.write(f,b'" + self.run_id + "');os.close(f)")
         raw = self.collect_task_and_grade(pod_name, job_uid, config_sha)
-        self.delete_job()
+        self.stop_task_jobs()
         self.control(receiver_ip, nonces[2])
         if self.scalar("pod", "receiver", "{.metadata.uid}", receiver_ns) != receiver_uid:
             raise Failure("receiver_identity_changed")
@@ -603,6 +637,10 @@ class Runner:
         self.journal.save()
         self.verify_task_pod(pod_name, job_uid)
         self.verify_frozen_workload_contract(pod_name)
+        if persistent_assessment.enabled(self):
+            task = (strict(raw, 65536) if isinstance(raw, str) else strict(raw.decode(), 65536))["task"]
+            summary = {key: task.get(key) for key in ["functional_tests", "independent_verification", "artifact_sha256", "model_requests"]}
+            persistent_assessment.artifact(self, pod_name, "workload-result", encoded(summary))
         self.stage("standard_grading")
         self.standard_grade(pod_name, job_uid, config_sha)
         return raw
@@ -819,8 +857,15 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         if self.controller == "host":
             request["pod"]["clean_environment"] = True
         # No retries: an ambiguous launch cannot become a second assessment.
-        bundle = strict(self.ops.call([str(self.journal.folder / "standard-grade")],
-            payload=encoded(request), env=self.env, timeout=500, limit=4 << 20).decode(), 4 << 20)
+        if persistent_assessment.enabled(self):
+            request["pod"]["workspace"] = persistent_assessment.binding(self)
+            request["persistent"] = persistent_assessment.reset_request(self, request["pod"])
+        try:
+            bundle = strict(self.ops.call([str(self.journal.folder / "standard-grade")],
+                payload=encoded(request), env=self.env, timeout=1200 if persistent_assessment.enabled(self) else 500, limit=4 << 20).decode(), 4 << 20)
+        finally:
+            if persistent_assessment.enabled(self):
+                persistent_assessment.import_reset(self)
         report = bundle["report"]
         expected_schema = "sandprobe/3" if self.controller == "host" else "sandprobe/1"
         if (report["schema"] != expected_schema or report["run"]["box"]["provider_id"] != request["pod"]["uid"]
@@ -868,7 +913,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         if self.controller == "host":
             volumes = self.projection("pod", name, "{.spec.volumes}", self.ns)
             mounts = self.projection("pod", name, "{.spec.containers[0].volumeMounts}", self.ns)
-            if not host_workload.valid_storage(volumes, mounts):
+            if not host_workload.valid_storage(volumes, mounts, persistent_assessment.enabled(self)):
                 raise Failure("unexpected_host_controller_storage")
         else:
             volumes = self.projection("pod", name, "{.spec.volumes}", self.ns)
@@ -1061,9 +1106,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
             for stage in ("before_stop", "after_stop"):
                 try:
                     if stage == "after_stop":
-                        job = resources.get(f"kube:Job:{self.ns}:model-task", {})
-                        if job.get("status") == "created":
-                            self.delete_job()
+                        self.stop_task_jobs()
                         receiver_ip = self.journal.data.get("receiver_ip")
                         if receiver_ip and self.journal.data.get("nonces"):
                             self.control(receiver_ip, self.journal.data["nonces"][2])
@@ -1123,6 +1166,11 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
             except Failure:
                 failures.append("cluster_cleanup_unconfirmed")
             self.journal.save()
+        if "workspace_volume" in resources:
+            try:
+                EBSWorkspace(self).delete()
+            except Exception:
+                failures.append("workspace_volume_cleanup_unconfirmed")
         if unresolved_association:
             try:
                 cluster = resources.get("cluster", {})
@@ -1251,6 +1299,7 @@ def main():
     parser.add_argument("--profile", default=PROFILE)
     parser.add_argument("--controller", choices=["guest", "host"], default="guest")
     parser.add_argument("--model-python", default="")
+    parser.add_argument("--storage-profile", choices=["ephemeral", "persistent-artifacts"], default=None)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     journal = None
     try:
@@ -1269,7 +1318,8 @@ def main():
             if not args.approval_ref:
                 raise Failure("aws_eks_testing_approval_reference_required")
             journal = Journal(STATE_ROOT, secrets.token_hex(8), create=True)
-        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=args.controller, model_python=args.model_python)
+        selected_controller = journal.data.get("controller", args.controller) if args.command == "cleanup" else args.controller
+        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=selected_controller, model_python=args.model_python, storage_profile=args.storage_profile)
         if args.command == "cleanup":
             clean = runner.cleanup()
             print(json.dumps({"run_id": runner.run_id, "cleanup_confirmed": clean}))

@@ -7,6 +7,10 @@ on:
       - deploy/canary-health/**
       - cmd/sandprobe-agent-grade/**
       - internal/host/agent_nitro*
+      - internal/host/agent_persistent*
+      - internal/host/agent_workspace*
+      - internal/host/agent_reset_job*
+      - internal/host/workload_artifact.py
       - internal/host/workload_environment*
       - deploy/workload_environment.py
       - deploy/eks.sh
