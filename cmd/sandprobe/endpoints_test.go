@@ -83,7 +83,8 @@ func TestProviderEndpointsPlan(t *testing.T) {
 		}
 	}
 	out.Reset()
-	run([]string{"plan", "exec", "-no-canary", "-provider-endpoints", "AMP-6,EGR-3", "-allow-local-proxy", "--", "sh"}, &out, &errs)
+	// On the default canary: under -no-canary, EGR-3 never runs (HCN-5, TestNoCanaryPlanWording). A plan asks no canary.
+	run([]string{"plan", "exec", "-provider-endpoints", "AMP-6,EGR-3", "-allow-local-proxy", "--", "sh"}, &out, &errs)
 	if s := out.String(); !strings.Contains(s, "it still won't run, since an existing box gets no vsock connects (PRV-1)") ||
 		!strings.Contains(s, "yes: you approved -allow-local-proxy") || strings.Contains(s, "169.254.169.254") {
 		t.Errorf("AMP-6 and EGR-3:\n%s", s)

@@ -238,7 +238,9 @@ Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the re
 Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names a public canary you run, and
 -canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
 SANDPROBE_CANARY* variable aside. run docker always starts its own canary and takes no canary flag.
-run exec and recipes also take -no-canary, which sends no test traffic at all, leaving Exfiltration untested (HCN-5).
+run exec and recipes also take -no-canary: no test traffic goes to any canary, so Exfiltration isn't tested.
+Attested SEC-4 metadata requests and AMP-7's Kubernetes API handshake still happen, and the plan names them;
+EGR-3 doesn't run (HCN-5).
 run exec and recipes keep SEC-4, EGR-3, AMP-6 and AMP-7 off, since they contact your provider's own endpoints;
 -provider-endpoints <IDs> turns named ones on, each one you attest your provider's terms allow on your account (PRV-15).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
