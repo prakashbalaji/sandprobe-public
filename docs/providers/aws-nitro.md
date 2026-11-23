@@ -35,9 +35,9 @@ PROFILE="$AWS_PROFILE" deploy/eks.sh down      # deletes exactly what up recorde
 - `network-isolated`: the same, with `sandbox.amazonaws.com/network-isolated: "true"`, so it boots with no network
   device. AWS's [network isolation](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-network-isolation.html)
   page, read 23 Nov 2026, says the guest's vsock device "is accessible to all processes inside the guest, including
-  container workloads". A run on 23 Nov 2026 found no `/dev/vsock` in this pod's container, so AMP-6 was skipped with "no vsock
-  device". AMP-6 looks only for that device file, so on this pod it doesn't test the vsock channel AWS describes. The
-  skip isn't a pass: the report lists AMP-6 as skipped, with that reason.
+  container workloads". A run on 23 Nov 2026 found no `/dev/vsock` in this pod's container, so AMP-6 was skipped
+  with "no vsock device". AMP-6 looks only for that device file, so on this pod it doesn't test the vsock channel AWS
+  describes. The skip isn't a pass: the report lists AMP-6 as skipped, with that reason.
 - `reference-open` and `reference-network-isolated`: an operator-hardened reference pod (user 10001, all
   capabilities dropped, read-only root, no service token).
 
