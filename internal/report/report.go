@@ -149,6 +149,10 @@ type Check struct {
 	Attestation   string `json:"attestation,omitempty"` // PRV-15: the person's attestation, for a check they turned on
 }
 
+// NotGraded is the reason an attested check's row gives when the run is invalid and graded nothing (GRD-5): the row
+// stays, so its attestation does, since the check may already have contacted its endpoint (PRV-15).
+const NotGraded = "not graded: the run is invalid, so this says nothing about the box (GRD-5)"
+
 // Attestation is what a report says beside a check PRV-15's -provider-endpoints turned on: a fixed sentence, never
 // text from the command line.
 const Attestation = "You attested that your provider's terms allow this check on your own account (-provider-endpoints, PRV-15)."
@@ -275,7 +279,11 @@ func Build(r *host.Run, m Meta) Doc {
 		}
 		o, ok := outcome[ck.ID]
 		if !ok {
-			continue // not in this run's manifest at all
+			if c.Attestation != "" && !rep.Valid { // PRV-15: the consent record outlives an invalid run, graded or not
+				c.Result, c.Reason = obs.Unknown, NotGraded
+				d.Checks = append(d.Checks, c)
+			}
+			continue // not in this run's manifest at all, or an invalid run graded nothing
 		}
 		graded++
 		c.Result, c.Evidence, c.Reason = o.Result, o.Evidence, o.Reason

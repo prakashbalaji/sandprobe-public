@@ -329,7 +329,7 @@ func TestReportRecordsAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(page), template.HTMLEscapeString(Attestation)); n != 2 {
-		t.Errorf("the page shows the attestation %d times, want 2", n)
+	if n := strings.Count(string(page), template.HTMLEscapeString(Attestation)); n != 4 { // beside each test, and in the appendix
+		t.Errorf("the page shows the attestation %d times, want 4", n)
 	}
 }

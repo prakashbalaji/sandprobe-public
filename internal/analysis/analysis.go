@@ -188,8 +188,23 @@ func Validate(d *report.Doc) error {
 			return ErrInput
 		}
 	}
-	if !reflect.DeepEqual(actualUnknown, unknown) {
+	if d.Grade.Valid && !reflect.DeepEqual(actualUnknown, unknown) {
 		return ErrInput
+	}
+	if !d.Grade.Valid { // GRD-5: an invalid run grades nothing; its only unknown rows are attested checks (PRV-15)
+		if len(unknown) != 0 {
+			return ErrInput
+		}
+		for id := range actualUnknown {
+			if !slices.Contains(d.Manifest.Attested, id) {
+				return ErrInput
+			}
+		}
+	}
+	for _, id := range d.Manifest.Attested { // PRV-15: every attested check keeps its row, valid run or not
+		if rows[id].ID == "" {
+			return ErrInput
+		}
 	}
 	if d.Grade.Valid {
 		for id := range selected {
