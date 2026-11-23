@@ -129,3 +129,19 @@ func TestUploadHandshakeCancellation(t *testing.T) {
 		t.Fatal("TLS handshake ignored its cancellation budget")
 	}
 }
+
+func TestUploadFailureStagesRemainUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{errUploadConnect, "connect=1"}, {errUploadTLS, "TLS=1"}, {errors.New("synthetic credential diagnostic"), "transport=1"},
+	} {
+		got := uploadExposure([]string{"github.com"}, func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("1.1.1.1")}, nil
+		}, func(context.Context, string, netip.Addr) error { return tc.err })
+		if got.Result != obs.Unknown || !strings.Contains(got.Reason, tc.want) || strings.Contains(got.Reason, "credential") {
+			t.Fatalf("unsafe stage diagnostic: %+v", got)
+		}
+	}
+}

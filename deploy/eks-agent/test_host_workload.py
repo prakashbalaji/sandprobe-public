@@ -134,6 +134,24 @@ class HostWorkloadTests(unittest.TestCase):
             self.assertEqual(result["workload"], "reported_failed")
             self.assertEqual(r.models, 0)
 
+    def test_setup_transport_failure_is_sanitized_and_distinguished(self):
+        for step in ["prepare", "network"]:
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as folder:
+                r = self.fixture(folder)
+                original = r.kube
+                def kube(*args, **kwargs):
+                    if step in args:
+                        raise RuntimeError("synthetic credential-shaped diagnostic")
+                    return original(*args, **kwargs)
+                r.kube = kube
+                host_workload.perform(r, "original-pod", "c" * 64)
+                raw = (Path(folder) / "host-controller-status.json").read_text()
+                status = json.loads(raw)
+                self.assertEqual(status["failure_code"], ("worker_prepare" if step == "prepare" else "intended_model_tls") + "_failed")
+                self.assertEqual(r.models, 0)
+                self.assertFalse(status["model_request_count_uncertain"])
+                self.assertNotIn("synthetic credential-shaped diagnostic", raw)
+
     def test_model_child_environment_drops_dns_authority_and_overrides(self):
         r = types.SimpleNamespace(env={"SANDPROBE_CF_TOKEN": "synthetic-not-secret", "AWS_ENDPOINT_URL_STS": "https://fixture.invalid",
                                        "AWS_MAX_ATTEMPTS": "9", "SANDPROBE_AWS_PROFILE": "fixed-profile"})

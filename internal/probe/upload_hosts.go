@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -14,6 +15,10 @@ import (
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
 )
+
+// RUN-19: source-defined stages only; never return network/certificate error text.
+var errUploadConnect = errors.New("approved workload TCP connection unproven")
+var errUploadTLS = errors.New("approved workload TLS verification unproven")
 
 func egrUploadHosts(e *env, _ *catalog.Check) obs.Observation {
 	return uploadExposure(e.in.Targets["EGR-6"], net.DefaultResolver.LookupNetIP,
@@ -29,12 +34,18 @@ func uploadExposure(hosts []string, lookup func(context.Context, string, string)
 		return unknownObs("no valid approved workload-host list")
 	}
 	var verified []string
+	failures := map[string]int{"dns": 0, "answer": 0, "connect": 0, "tls": 0, "transport": 0}
 	for _, host := range hosts {
 		ctx, cancel := context.WithTimeout(context.Background(), attemptTimeout)
 		ips, err := lookup(ctx, "ip", host)
 		valid := err == nil && len(ips) > 0 && len(ips) <= 16
 		for _, ip := range ips {
 			valid = valid && uploadPublicIP(ip)
+		}
+		if err != nil || ctx.Err() != nil {
+			failures["dns"]++
+		} else if !valid {
+			failures["answer"]++
 		}
 		if valid && ctx.Err() == nil {
 			chosen := ips[0].Unmap()
@@ -44,14 +55,21 @@ func uploadExposure(hosts []string, lookup func(context.Context, string, string)
 					break
 				}
 			}
-			if handshake(ctx, host, chosen) == nil {
+			err := handshake(ctx, host, chosen)
+			if err == nil {
 				verified = append(verified, host)
+			} else if errors.Is(err, errUploadConnect) {
+				failures["connect"]++
+			} else if errors.Is(err, errUploadTLS) {
+				failures["tls"]++
+			} else {
+				failures["transport"]++
 			}
 		}
 		cancel()
 	}
 	if len(verified) == 0 {
-		return unknownObs("no certificate-verified TLS handshake to the approved workload hosts; DNS or transport failures prove no refusal")
+		return unknownObs(fmt.Sprintf("no certificate-verified TLS handshake to the approved workload hosts; unproven DNS=%d, answer=%d, connect=%d, TLS=%d, transport=%d; failures prove no refusal", failures["dns"], failures["answer"], failures["connect"], failures["tls"], failures["transport"]))
 	}
 	return obs.Observation{Result: obs.Finding, Variant: "handshake", Evidence: fmt.Sprintf("Certificate-verified TLS handshake to %s; %d approved destinations unproven. No HTTP request or upload was attempted.", strings.Join(verified, ", "), len(hosts)-len(verified))}
 }
@@ -80,10 +98,13 @@ func uploadHandshake(ctx context.Context, address, name string, roots *x509.Cert
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
-		return err
+		return errUploadConnect
 	}
 	// Close the underlying transport, avoiding any extra TLS-close write budget.
 	defer c.Close()
 	t := tls.Client(c, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: name, RootCAs: roots})
-	return t.HandshakeContext(ctx)
+	if t.HandshakeContext(ctx) != nil {
+		return errUploadTLS
+	}
+	return nil
 }
