@@ -835,6 +835,11 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   with its original recorded birth and organization, even if the provider renamed
   the tombstone; active volume names still match. Never resend DELETE while a
   matching volume is already deleting, and never count the request itself as proof.
+  Nitro binds the original namespace, claim, PV and storage-class UIDs and the
+  exact EBS handle/zone before every persistent-profile invocation. A reset job
+  comes from the host-rendered original manifest, checked against its frozen
+  configuration hash; rename it and recompute its hash without changing workload
+  or security intent. Do not clone runtime environment values from the API.
 
 - **RUN-15 Protected startup configuration, writable project.** Improve the
   configuration shared by the Nitro and Daytona workload runs: HOME points to an

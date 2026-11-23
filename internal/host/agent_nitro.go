@@ -13,18 +13,19 @@ import (
 // AgentPodBinding is RUN-8's host-created, same-run workload binding. It grants no
 // teardown ownership: the managed runner retains the original Job lifecycle.
 type AgentPodBinding struct {
-	Kubeconfig       string `json:"kubeconfig"`
-	Context          string `json:"context"`
-	Endpoint         string `json:"endpoint"`
-	RunID            string `json:"run_id"`
-	Namespace        string `json:"namespace"`
-	Name             string `json:"name"`
-	UID              string `json:"uid"`
-	JobUID           string `json:"job_uid"`
-	Image            string `json:"image"`
-	ConfigSHA256     string `json:"config_sha256"`
-	ContainerID      string `json:"container_id"`
-	CleanEnvironment bool   `json:"clean_environment,omitempty"` // RUN-18: only the host-controller workload uses this profile.
+	Kubeconfig       string                 `json:"kubeconfig"`
+	Context          string                 `json:"context"`
+	Endpoint         string                 `json:"endpoint"`
+	RunID            string                 `json:"run_id"`
+	Namespace        string                 `json:"namespace"`
+	Name             string                 `json:"name"`
+	UID              string                 `json:"uid"`
+	JobUID           string                 `json:"job_uid"`
+	Image            string                 `json:"image"`
+	ConfigSHA256     string                 `json:"config_sha256"`
+	ContainerID      string                 `json:"container_id"`
+	CleanEnvironment bool                   `json:"clean_environment,omitempty"` // RUN-18: only the host-controller workload uses this profile.
+	Workspace        *AgentWorkspaceBinding `json:"workspace,omitempty"`         // RUN-23: host-recorded static storage, never inferred from labels.
 }
 
 var agentRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
@@ -45,6 +46,9 @@ func agentImage(image string) bool {
 // This is configuration evidence, not cryptographic attestation. Name-to-call
 // races remain as for PodBox; only this run uses the disposable cluster.
 func AttachAgentPod(ctx context.Context, b AgentPodBinding) (*PodBox, error) {
+	if b.Workspace != nil && !validAgentWorkspace(b) {
+		return nil, errors.New("invalid persistent workspace binding")
+	}
 	if !agentRun.MatchString(b.RunID) || b.Namespace != "sandprobe-agent-"+b.RunID ||
 		!regexp.MustCompile(`^[a-z][a-z0-9+-]*://[a-f0-9]{32,128}$`).MatchString(b.ContainerID) ||
 		!agentName.MatchString(b.Name) || !agentUID.MatchString(b.UID) || !agentUID.MatchString(b.JobUID) ||
@@ -100,6 +104,11 @@ func (p *PodBox) checkAgentBinding(ctx context.Context, b AgentPodBinding) error
 		want := append(WorkloadEnvironment(), "python", "-I", "-c", "import time;time.sleep(1800)")
 		if err != nil || json.Unmarshal(raw, &command) != nil || !slices.Equal(command, want) {
 			return errors.New("workload clean-environment command changed")
+		}
+	}
+	if b.Workspace != nil {
+		if err := p.checkWorkspaceBinding(ctx, b); err != nil {
+			return err
 		}
 	}
 	return nil
