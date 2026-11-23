@@ -23,7 +23,11 @@ class Tests(unittest.TestCase):
   def run(events=None,listing=None,request=None,pages=1,token=None):
    logs=types.SimpleNamespace(items=events if events is not None else [event],next_token=token,total_pages=pages)
    audit=types.SimpleNamespace(get_organization_audit_logs=lambda *a,**kw:logs)
-   sandboxes=types.SimpleNamespace(list_sandboxes=lambda **kw:listing or types.SimpleNamespace(items=[],next_cursor=None))
+   def lookup(**kw):
+    self.assertEqual(kw['x_daytona_organization_id'],req['organization'])
+    self.assertEqual(kw['name'],req['name']);self.assertTrue(kw['include_errored_deleted'])
+    return listing or types.SimpleNamespace(items=[],next_cursor=None)
+   sandboxes=types.SimpleNamespace(list_sandboxes=lookup)
    client=types.SimpleNamespace(_api_client=None,_sandbox_api=sandboxes)
    with patch('daytona_api_client.api.audit_api.AuditApi',return_value=audit):
     return m.rejected_create(client,request or req)

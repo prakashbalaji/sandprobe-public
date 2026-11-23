@@ -145,7 +145,7 @@ def rejected_create(client,req):
             raise ValueError('create refusal unproven')
         matches.append({'id':event.id,'at':timestamp(event.created_at),'organization':event.organization_id,'body':body,'status':400})
     if len(matches)!=1:raise ValueError('create refusal ambiguous')
-    listing=client._sandbox_api.list_sandboxes(name=req['name'],limit=10,
+    listing=client._sandbox_api.list_sandboxes(x_daytona_organization_id=req['organization'],name=req['name'],limit=10,
         include_errored_deleted=True,_request_timeout=25)
     if listing.items or listing.next_cursor:raise ValueError('create absence unproven')
     digest=hashlib.sha256(json.dumps(matches[0],sort_keys=True,separators=(',',':')).encode()).hexdigest()
