@@ -416,9 +416,9 @@ func derive(id string, who *obs.Identity) (result, variant, reason, evidence str
 }
 
 // amp3 is AMP-3 from the identity (its row): whether an execve could give the agent a privilege it doesn't hold now,
-// through a setuid-root file or a file's capabilities. NoNewPrivs 1 forbids both. With NoNewPrivs 0, setuid-root files
-// in the system binary directories are a finding; otherwise a capability the bounding or inheritable set would let a
-// file grant, and the agent doesn't hold, leaves a pass unknown, since the probe doesn't look for such files.
+// through a setuid-root file or a file's capabilities. Only NoNewPrivs 1 rules both out. With NoNewPrivs 0, setuid-root
+// files in the system binary directories are a finding; otherwise AMP-3 is unknown, since the probe scans only those
+// directories, and only for setuid-root files.
 func amp3(who *obs.Identity) (result, variant, reason, evidence string) {
 	const graded = "graded by the host from the probe's identity"
 	scan := who.SetuidScan
@@ -430,21 +430,9 @@ func amp3(who *obs.Identity) (result, variant, reason, evidence string) {
 	case len(scan.Files) > 0:
 		return obs.Finding, "new_privs", "", graded
 	}
-	bnd, bndErr := strconv.ParseUint(who.CapBnd, 16, 64)
-	inh, inhErr := strconv.ParseUint(who.CapInh, 16, 64)
-	if bndErr != nil || inhErr != nil {
-		return obs.Unknown, "", "NoNewPrivs is 0 and the identity doesn't report CapBnd or CapInh, so capabilities an execve " +
-			"of a file with file capabilities could grant can't be told", ""
-	}
-	eff, _ := strconv.ParseUint(who.CapEff, 16, 64) // checked when the document was read
-	prm, _ := strconv.ParseUint(who.CapPrm, 16, 64) // a missing set holds nothing, so it can only widen what's new
-	amb, _ := strconv.ParseUint(who.CapAmb, 16, 64)
-	if gain := (bnd | inh) &^ (eff | prm | amb); gain != 0 {
-		return obs.Unknown, "", "NoNewPrivs is 0 and the agent's bounding or inheritable set holds " + capNames(gain) +
-			", which an execve of a file whose file capabilities name them would grant; the probe doesn't look for such files", ""
-	}
-	return obs.Pass, "", "", graded + ": NoNewPrivs is 0, but no setuid-root file is in the system binary directories, and " +
-		"the bounding and inheritable sets hold no capability the agent lacks, so no file capability can grant one"
+	return obs.Unknown, "", "NoNewPrivs is 0, so the kernel lets an execve raise privilege, and the probe can't rule out a " +
+		"program that would: it scans only the system binary directories, for setuid-root files, never other directories or files " +
+		"with file capabilities; set no-new-privileges to settle it", graded
 }
 
 // amp2 is AMP-2 from the identity (its row): uid 0, or a held capability, effective, permitted (raised into the
@@ -489,23 +477,21 @@ func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 
 // capSets names the held capabilities, the effective ones apart from those only permitted, at most twelve of each.
 func capSets(eff, held uint64) string {
+	list := func(caps uint64) string {
+		names := catalog.CapList(caps)
+		if n := len(names); n > 12 {
+			names = append(names[:12], strconv.Itoa(n-12)+" more")
+		}
+		return strings.Join(names, ", ")
+	}
 	var parts []string
 	if e := eff & held; e != 0 {
-		parts = append(parts, capNames(e)+" (effective)")
+		parts = append(parts, list(e)+" (effective)")
 	}
 	if p := held &^ eff; p != 0 {
-		parts = append(parts, capNames(p)+" (permitted, not effective: a process raises a permitted capability at will)")
+		parts = append(parts, list(p)+" (permitted, not effective: a process raises a permitted capability at will)")
 	}
 	return strings.Join(parts, "; ")
-}
-
-// capNames names at most twelve capabilities, and counts the rest.
-func capNames(caps uint64) string {
-	names := catalog.CapList(caps)
-	if n := len(names); n > 12 {
-		names = append(names[:12], strconv.Itoa(n-12)+" more")
-	}
-	return strings.Join(names, ", ")
 }
 
 // shape checks a proof is present, names the check's mechanism, agrees with the identity, and lists only targets the

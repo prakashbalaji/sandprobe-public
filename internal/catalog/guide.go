@@ -53,7 +53,7 @@ var Guide = map[string]Advice{
 	"AMP-2": {"can act as root, or with root's powers through Linux capabilities",
 		"Run the agent as an unprivileged user with an empty capability set.", "root caps"},
 	"AMP-3": {"can gain privileges by running setuid programs or files with capabilities",
-		"Set no_new_privs on the agent's process. Without it, remove setuid bits from the image and drop every capability from the agent's bounding set.", "setuid/caps"},
+		"Set no_new_privs on the agent's process: Docker's no-new-privileges security option, or allowPrivilegeEscalation: false in Kubernetes.", "setuid/caps"},
 	"AMP-4": {"has connect permission on a control socket, such as a container runtime's or a provider's API (the probe never connects)",
 		"Don't mount control sockets into the box, or restrict them to their owner.", "control socket"},
 	"AMP-5": {"sees daemons listening on the box's own loopback",

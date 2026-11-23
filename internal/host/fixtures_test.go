@@ -253,7 +253,8 @@ func expectUnknown(want map[string]string) func(t *testing.T, w world, r *Run) {
 
 // expectFileCaps is the file-capability case (AMP-3's row), first checked to be that case: the identity, and the kernel's
 // own answer when the agent runs the capable file. With NoNewPrivs 0 the run gains CAP_DAC_OVERRIDE, so AMP-3 is
-// unknown, naming it, while AMP-2 passes on what the agent holds now; with NoNewPrivs 1 it gains nothing, and both pass.
+// unknown, naming file capabilities and no-new-privileges, while AMP-2 passes on what the agent holds now; with
+// NoNewPrivs 1 it gains nothing, and both pass.
 func expectFileCaps(nnp int) func(t *testing.T, w world, r *Run) {
 	return func(t *testing.T, w world, r *Run) {
 		var d obs.Doc
@@ -281,9 +282,9 @@ func expectFileCaps(nnp int) func(t *testing.T, w world, r *Run) {
 		switch {
 		case nnp == 1 && o.Result != obs.Pass:
 			t.Errorf("AMP-3: want a pass with NoNewPrivs 1, got %+v", o)
-		case nnp == 0 && (o.Result != obs.Unknown || !strings.Contains(o.Reason, "CAP_DAC_OVERRIDE") ||
-			!strings.Contains(o.Reason, "file capabilities")):
-			t.Errorf("AMP-3: want unknown naming CAP_DAC_OVERRIDE and file capabilities, never a pass, got %+v", o)
+		case nnp == 0 && (o.Result != obs.Unknown || !strings.Contains(o.Reason, "file capabilities") ||
+			!strings.Contains(o.Reason, "no-new-privileges")):
+			t.Errorf("AMP-3: want unknown naming file capabilities and no-new-privileges, never a pass, got %+v", o)
 		}
 	}
 }
