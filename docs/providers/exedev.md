@@ -1,12 +1,13 @@
 # exe.dev: `run exe.dev`
 
-**Status for 0.3.0, being validated:** Experimental: needs your provider's written consent. Last validated: pending.
+**Status for 0.3.0, being validated:** Experimental. Last validated: pending.
 [All providers](README.md)
 
 `run exe.dev` creates one standalone Ubuntu 24.04 VM, 2 vCPU and 4 GB, with egress on and no integrations, probes it
 and deletes it (PRV-13). [docs/EXEDEV.md](../EXEDEV.md) has the adapter's full contract.
 
-**Get exe.dev's written consent before you run this.** Its terms bar benchmarking the service (see below).
+**Before you run this:** a live run needs the operator's own clearance for this bounded run, never represented as
+provider-written permission (PRV-13). Its terms bar benchmarking the service (see below).
 
 ## Prerequisites
 
@@ -45,8 +46,8 @@ exe.dev's create API sets no expiry. If your machine crashes mid-run, the VM kee
 ## Terms and consent
 
 PRV-13 records [exe.dev's terms of service](https://exe.dev/docs/terms-of-service) as checked on 17 Nov 2026. Section
-2.2 bars use "for benchmarking or competitive analysis of the Service". Sandprobe never presents a run as exe.dev's
-written permission.
+2.2 bars use "for benchmarking or competitive analysis of the Service". PRV-13: a live run needs the operator's own
+clearance for this bounded run, never represented as provider-written permission.
 
 ## What the score can and can't reach
 
