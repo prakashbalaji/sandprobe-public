@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from lifecycle import Failure, Journal
-from runner import Runner
+from runner import Runner, HOSTNAME
 
 
 class StandardGradeTests(unittest.TestCase):
@@ -53,8 +53,11 @@ class StandardGradeTests(unittest.TestCase):
             grade={'letter':'F','valid':True,'complete':False,'unknown':['EGR-1']}
             report={'schema':'sandprobe/1','run':{'box':{'provider_id':'original-uid'},'provider':'aws-nitro','id':'standard-run'},'grade':grade}
             r.ops.call=Mock(return_value=json.dumps({'report':report,'html':'<html>standard</html>','input':{},'evidence':{},'observations':'{}'}).encode())
+            r.upload_hosts=[HOSTNAME]
+            j.data['endpoint_resolution']={'ipv4':['1.1.1.1','8.8.8.8']}
             r.standard_grade('model-task-original','original-job','b'*64)
             args,kw=r.ops.call.call_args
+            self.assertEqual(json.loads(kw['payload'])['upload_addresses'],{HOSTNAME:'1.1.1.1'})
             binding=json.loads(kw['payload'])['pod']
             self.assertEqual(binding['uid'],'original-uid');self.assertEqual(binding['job_uid'],'original-job')
             self.assertEqual(binding['namespace'],r.ns);self.assertEqual(binding['container_id'],'original-container')

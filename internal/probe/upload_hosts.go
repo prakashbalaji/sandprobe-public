@@ -30,17 +30,25 @@ func egrUploadHosts(e *env, _ *catalog.Check) obs.Observation {
 // MEAS-6: fixed names, one resolution and at most one literal-address dial each.
 // Resolver or transport failures remain unknown; none is a negative proof.
 func uploadExposure(hosts []string, lookup func(context.Context, string, string) ([]netip.Addr, error), handshake func(context.Context, string, netip.Addr) error) obs.Observation {
-	if len(hosts) == 0 || catalog.ValidateUploadHosts(hosts) != nil {
+	endpoints, targetErr := catalog.ParseUploadTargets(hosts)
+	if len(hosts) == 0 || targetErr != nil {
 		return unknownObs("no valid approved workload-host list")
 	}
 	var verified []string
 	failures := map[string]int{"dns": 0, "answer": 0, "connect": 0, "tls": 0, "transport": 0}
-	for _, host := range hosts {
+	for _, endpoint := range endpoints {
+		host := endpoint.Host
 		ctx, cancel := context.WithTimeout(context.Background(), attemptTimeout)
-		ips, err := lookup(ctx, "ip", host)
+		var ips []netip.Addr
+		var err error
+		if endpoint.Address.IsValid() {
+			ips = []netip.Addr{endpoint.Address}
+		} else {
+			ips, err = lookup(ctx, "ip", host)
+		}
 		valid := err == nil && len(ips) > 0 && len(ips) <= 16
 		for _, ip := range ips {
-			valid = valid && uploadPublicIP(ip)
+			valid = valid && catalog.PublicUploadIP(ip)
 		}
 		if err != nil || ctx.Err() != nil {
 			failures["dns"]++
@@ -72,24 +80,6 @@ func uploadExposure(hosts []string, lookup func(context.Context, string, string)
 		return unknownObs(fmt.Sprintf("no certificate-verified TLS handshake to the approved workload hosts; unproven DNS=%d, answer=%d, connect=%d, TLS=%d, transport=%d; failures prove no refusal", failures["dns"], failures["answer"], failures["connect"], failures["tls"], failures["transport"]))
 	}
 	return obs.Observation{Result: obs.Finding, Variant: "handshake", Evidence: fmt.Sprintf("Certificate-verified TLS handshake to %s; %d approved destinations unproven. No HTTP request or upload was attempted.", strings.Join(verified, ", "), len(hosts)-len(verified))}
-}
-
-func uploadPublicIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	if !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-		return false
-	}
-	// Exclude translation/tunneling ranges that could route a public-looking IPv6
-	// address to a private IPv4 endpoint. Ordinary IPv6 unicast is in 2000::/3.
-	if ip.Is6() && (!netip.MustParsePrefix("2000::/3").Contains(ip) || netip.MustParsePrefix("2002::/16").Contains(ip) || netip.MustParsePrefix("2001::/32").Contains(ip)) {
-		return false
-	}
-	for _, block := range []string{"100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32"} {
-		if netip.MustParsePrefix(block).Contains(ip) {
-			return false
-		}
-	}
-	return true
 }
 
 // uploadHandshake verifies TLS then closes without sending any HTTP or application data.

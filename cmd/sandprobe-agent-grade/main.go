@@ -22,10 +22,11 @@ import (
 )
 
 type request struct {
-	UploadHosts []string              `json:"upload_hosts,omitempty"`
-	Contract    *obs.WorkloadContract `json:"contract"`
-	Pod         host.AgentPodBinding  `json:"pod"`
-	CanaryState string                `json:"canary_state"`
+	UploadAddresses map[string]string     `json:"upload_addresses,omitempty"`
+	UploadHosts     []string              `json:"upload_hosts,omitempty"`
+	Contract        *obs.WorkloadContract `json:"contract"`
+	Pod             host.AgentPodBinding  `json:"pod"`
+	CanaryState     string                `json:"canary_state"`
 }
 
 func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
@@ -34,7 +35,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
 		return errors.New("invalid grading request")
 	}
-	if err := catalog.ValidateUploadHosts(q.UploadHosts); err != nil {
+	if _, err := catalog.BindUploadHosts(q.UploadHosts, q.UploadAddresses); err != nil {
 		return err
 	}
 	if q.Contract == nil || (q.Contract.Schema != "sandprobe.workload-contract/1" && q.Contract.Schema != "sandprobe.workload-contract/3") || obs.ValidateWorkloadContract(q.Contract) != nil || q.Contract.BoxID != q.Pod.UID ||
@@ -73,7 +74,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts})
+	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}

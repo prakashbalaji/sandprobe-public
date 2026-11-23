@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -462,6 +463,10 @@ func execute(ctx context.Context, o options) (err error) {
 	stage = "standard-collection"
 	collection := collectionOptions(sha, contract)
 	collection.UploadHosts = uploadHosts
+	collection.UploadAddresses, e = workloadUploadAddresses(uploadHosts, config.NetworkAllowList)
+	if e != nil {
+		return errors.New("frozen workload endpoint binding failed")
+	}
 	r, e := host.Execute(ctx, b, public, collection)
 	if e != nil {
 		return errors.New("standard configuration collection failed")
@@ -547,6 +552,26 @@ func execute(ctx context.Context, o options) (err error) {
 }
 
 // RUN-13: Plan already skips EGR-6; it is not a provider-excludable check.
+// MEAS-7: use the first address of the same verified /32 policy as the workload.
+func workloadUploadAddresses(hosts []string, network string) (map[string]string, error) {
+	var addresses map[string]string
+	for _, name := range hosts {
+		if name != "bedrock-runtime.us-west-2.amazonaws.com" {
+			continue
+		}
+		first := strings.Split(network, ",")[0]
+		prefix, err := netip.ParsePrefix(first)
+		if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 32 || prefix.String() != first {
+			return nil, errors.New("frozen model endpoint unavailable")
+		}
+		addresses = map[string]string{name: prefix.Addr().String()}
+	}
+	if _, err := catalog.BindUploadHosts(hosts, addresses); err != nil {
+		return nil, err
+	}
+	return addresses, nil
+}
+
 func collectionOptions(sha string, contract *obs.WorkloadContract) host.Options {
 	return host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: host.DaytonaExclusions(), WorkloadContract: contract}
 }

@@ -812,6 +812,9 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                    "job_uid": job_uid, "image": self.image, "container_id": self.journal.data["task_container_id"], "config_sha256": config_sha},
                    "canary_state": str(self.journal.folder / "canary.state"),
                    "contract": self.journal.data["workload_contract"], "upload_hosts": self.upload_hosts}
+        # MEAS-7: the same literal address the workload used, from its frozen policy.
+        if HOSTNAME in self.upload_hosts:
+            request["upload_addresses"] = {HOSTNAME: self.journal.data["endpoint_resolution"]["ipv4"][0]}
         if self.controller == "host":
             request["pod"]["clean_environment"] = True
         # No retries: an ambiguous launch cannot become a second assessment.

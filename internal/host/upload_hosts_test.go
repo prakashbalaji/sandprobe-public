@@ -44,3 +44,27 @@ func TestApprovedUploadHostPlan(t *testing.T) {
 		t.Fatal("approved options failed before the survey")
 	}
 }
+
+func TestFrozenWorkloadEndpointPlan(t *testing.T) {
+	addresses := map[string]string{"github.com": "1.1.1.1"}
+	o := Options{Mode: "exec", UploadHosts: []string{"github.com"}, UploadAddresses: addresses}
+	m, in := Plan(o, &obs.Survey{}, "fixture", Storage{}, "192.0.2.1", "canary.test", "pin")
+	if grade.ManifestSound(m) != nil || !slices.Equal(m.Targets["EGR-6"], []string{"github.com=1.1.1.1"}) || !slices.Equal(in.Targets["EGR-6"], m.Targets["EGR-6"]) {
+		t.Fatal("bound endpoint missing from valid frozen plan")
+	}
+	addresses["github.com"] = "8.8.8.8"
+	if m.Targets["EGR-6"][0] != "github.com=1.1.1.1" {
+		t.Fatal("caller changed frozen target")
+	}
+	for _, bad := range []map[string]string{{"github.com": "127.0.0.1"}, {"pypi.org": "1.1.1.1"}} {
+		b := &uploadSurveyStop{}
+		o.UploadAddresses = bad
+		if _, err := Execute(context.Background(), b, nil, o); err == nil || b.called {
+			t.Fatal("invalid endpoint reached guest survey")
+		}
+	}
+	m.Targets["EGR-6"] = []string{"github.com=169.254.169.254"}
+	if grade.ManifestSound(m) == nil {
+		t.Fatal("saved manifest accepted infrastructure address")
+	}
+}

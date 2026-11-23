@@ -145,3 +145,37 @@ func TestUploadFailureStagesRemainUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestFrozenUploadEndpointSkipsDNSButKeepsTLS(t *testing.T) {
+	dials := 0
+	lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+		t.Fatal("frozen target reached guest DNS")
+		return nil, nil
+	}
+	handshake := func(ctx context.Context, host string, ip netip.Addr) error {
+		dials++
+		if host != "bedrock-runtime.us-west-2.amazonaws.com" || ip.String() != "1.1.1.1" {
+			t.Fatal("frozen SNI/address changed")
+		}
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > attemptTimeout {
+			t.Fatal("handshake budget absent")
+		}
+		return nil
+	}
+	target := []string{"bedrock-runtime.us-west-2.amazonaws.com=1.1.1.1"}
+	if got := uploadExposure(target, lookup, handshake); got.Result != obs.Finding || dials != 1 {
+		t.Fatal("verified bound handshake not observed")
+	}
+	got := uploadExposure(target, lookup, func(context.Context, string, netip.Addr) error { return errUploadTLS })
+	if got.Result != obs.Unknown || !strings.Contains(got.Reason, "TLS=1") {
+		t.Fatal("bound TLS failure became a pass")
+	}
+	// Validate the complete list before attempting even its first good endpoint.
+	got = uploadExposure([]string{"bedrock-runtime.us-west-2.amazonaws.com=1.1.1.1", "github.com=169.254.169.254"}, lookup, func(context.Context, string, netip.Addr) error {
+		t.Fatal("invalid binding allowed traffic")
+		return nil
+	})
+	if got.Result != obs.Unknown {
+		t.Fatal("invalid binding became evidence")
+	}
+}
