@@ -18,3 +18,9 @@ for user in 65534:65534 0:0; do
   echo "== as $user in $image"
   docker run --rm --network none --user "$user" -v "$out:/sp:ro" "$image" /sp/probe.test -test.v "$@"
 done
+# AMP-1 runs sudo from its pinned descriptor (execveat), never through a path: with a fake tree mounted over /proc,
+# whose /proc/self/fd/3 plays a sudo granting everything, every listing must still come from the pinned stand-in.
+echo "== as 0:0 in $image, a fake tree mounted over /proc"
+docker run --rm --network none --user 0:0 --cap-add SYS_ADMIN --security-opt apparmor=unconfined -v "$out:/sp:ro" "$image" sh -c \
+  'mkdir -p /fakeproc/self/fd && printf "#!/bin/sh\necho \"    (ALL) NOPASSWD: ALL\"\n" > /fakeproc/self/fd/3 &&
+   chmod 0755 /fakeproc/self/fd/3 && mount --bind /fakeproc /proc && exec /sp/probe.test -test.v -test.run "^TestSudoList$"'

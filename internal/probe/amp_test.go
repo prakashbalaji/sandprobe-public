@@ -3,6 +3,7 @@
 package probe
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/textproto"
@@ -18,48 +19,133 @@ import (
 	"sandprobe/internal/obs"
 )
 
-// Only a regular, root-owned, setuid file out of the agent's reach is pinned; anything else is refused before it runs.
+// AMP-1's allow-list: a chain is trusted only when every link and every directory on it is root's and out of the
+// agent's reach, and it ends at a root-owned setuid file named sudo; anything else is refused before it runs, and the
+// refusal says what failed. The image has no sudo, so what passes is shown by the sudors fixture.
 func TestPinSudo(t *testing.T) {
 	dir := t.TempDir()
 	own := filepath.Join(dir, "sudo")
 	os.WriteFile(own, []byte("#!/bin/sh\n"), 0o4755)
 	link := filepath.Join(dir, "link")
 	os.Symlink("/usr/bin/su", link)
-	for _, p := range []string{own, link, "/usr/bin/ls"} { // the last is root's, in root's directory, but not setuid
-		if fd, why := pinSudo(p); why == "" {
+	dangling := filepath.Join(dir, "dangling")
+	os.Symlink(filepath.Join(dir, "nowhere"), dangling)
+	want := map[string]string{
+		own:      fmt.Sprintf("%s is owned by uid %d, not root", dir, os.Geteuid()),
+		link:     fmt.Sprintf("the link %s isn't root's (uid %d)", link, os.Geteuid()),
+		dangling: "its links can't be followed to a file",
+		// root's, in root's directories, but not setuid; the second through two links and /bin's directory link
+		"/usr/bin/ls":    "/usr/bin/ls isn't setuid",
+		"/usr/bin/pager": "/usr/bin/more isn't setuid",
+		// root's and setuid, in root's directories, also through /bin's directory link, but not a sudo
+		"/usr/bin/su": "/usr/bin/su isn't named sudo or sudo.ws",
+		"/bin/su":     "/usr/bin/su isn't named sudo or sudo.ws",
+	}
+	if root { // root owns the temporary directory, and can write every directory
+		want[own] = "the agent can write " + dir
+		want[link] = "the agent can write " + dir
+		for _, p := range []string{"/usr/bin/ls", "/usr/bin/pager", "/usr/bin/su"} {
+			want[p] = "the agent can write /usr/bin"
+		}
+		want["/bin/su"] = "the agent can write /" // /bin is itself a link, in /
+	}
+	for p, reason := range want {
+		fd, chain, why := pinSudo(p)
+		if why == "" {
 			syscall.Close(fd)
-			t.Errorf("%s: want it refused", p)
+			t.Errorf("%s: want it refused, got it pinned as %s", p, chain)
+		} else if !strings.Contains(why, reason) {
+			t.Errorf("%s: want the refusal to say %q, got %q", p, reason, why)
 		}
-	}
-	// su is root-owned and setuid in the image, in root-owned directories: pinned as nobody; as root, the agent could
-	// write it, so never.
-	fd, why := pinSudo("/usr/bin/su")
-	if fd >= 0 {
-		syscall.Close(fd)
-	}
-	if root == (why == "") {
-		t.Errorf("/usr/bin/su as uid %d: pinned=%v (%s)", os.Geteuid(), why == "", why)
 	}
 }
 
-func TestSetuidRoot(t *testing.T) {
-	for _, tc := range []struct {
-		mode uint32
-		uid  uint32
-		want bool
-	}{
-		{syscall.S_IFREG | syscall.S_ISUID | 0o755, 0, true},
-		{syscall.S_IFREG | 0o755, 0, false},                      // not setuid
-		{syscall.S_IFREG | syscall.S_ISUID | 0o755, 1000, false}, // setuid, but not root's
-		{syscall.S_IFLNK | syscall.S_ISUID | 0o777, 0, false},    // a symlink pinned as itself
+// The walk follows every link on the way, a directory's as well as the last name's, counts each against SBX-2's eight,
+// names each in the chain, and ends at a path with no link in it.
+func TestWalk(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "d2"), 0o755)
+	os.WriteFile(filepath.Join(dir, "d2", "f"), nil, 0o644)
+	os.Symlink("d2", filepath.Join(dir, "d1"))                         // a directory link, relative
+	os.Symlink(filepath.Join(dir, "d1", "f"), filepath.Join(dir, "l")) // a link through it, absolute
+	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
+	os.Symlink("../d1/f", filepath.Join(dir, "sub", "up")) // .. taken against the link-free path
+	for p, wantChain := range map[string][]string{
+		filepath.Join(dir, "l"):         {filepath.Join(dir, "l"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
+		filepath.Join(dir, "sub", "up"): {filepath.Join(dir, "sub", "up"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
+		"/bin/su":                       {"/bin/su", "/usr/bin/su"},
 	} {
-		if got := setuidRoot(syscall.Stat_t{Mode: tc.mode, Uid: tc.uid}); got != tc.want {
-			t.Errorf("mode %o uid %d: want %v", tc.mode, tc.uid, tc.want)
+		links, steps, real, _, err := walk(p)
+		if err != nil || !slices.Equal(steps, wantChain) || len(links) != len(wantChain)-1 || real != wantChain[len(wantChain)-1] {
+			t.Errorf("%s: want the chain %v, got %v (links %v, real %s, %v)", p, wantChain, steps, links, real, err)
 		}
+	}
+	// nine directory links in a row: past SBX-2's eight, never followed to the end
+	for i := 1; i <= 9; i++ {
+		os.Symlink(fmt.Sprintf("n%d", i+1), filepath.Join(dir, fmt.Sprintf("n%d", i)))
+	}
+	os.Mkdir(filepath.Join(dir, "n10"), 0o755)
+	os.WriteFile(filepath.Join(dir, "n10", "f"), nil, 0o644)
+	if links, _, _, _, err := walk(filepath.Join(dir, "n1", "f")); err == nil || len(links) != maxHops || !strings.Contains(err.Error(), "more than 8") {
+		t.Errorf("nine directory links: want refused after eight, got %v after %d", err, len(links))
 	}
 }
 
-// sudo's listing, read the way AMP-1 reads it, through a pinned descriptor. A stand-in prints each listing.
+// Root, or any capability, permitted, effective or inheritable, means no chain is trusted, and the reason names them.
+func TestPrivileged(t *testing.T) {
+	for _, tc := range []struct {
+		euid int
+		caps uint64
+		want string
+	}{
+		{1000, 0, ""},
+		{1000, 1 << 3, "the agent holds CAP_FOWNER, so"},
+		{1000, 1 << 10, "the agent holds CAP_NET_BIND_SERVICE, so"},
+		{0, 0, "the agent is root, so"},
+		{0, 1<<0 | 1<<21, "the agent is root and holds CAP_CHOWN, CAP_SYS_ADMIN, so"},
+		{1000, 1<<41 - 1, "CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH, CAP_FOWNER, CAP_FSETID, CAP_KILL, CAP_SETGID, CAP_SETUID, 33 more, so"},
+	} {
+		got := privilegedWhy(tc.euid, tc.caps)
+		if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+			t.Errorf("euid %d, caps %#x: want %q, got %q", tc.euid, tc.caps, tc.want, got)
+		}
+	}
+	// read with capget: nobody holds none here, root the container's set
+	if why := privileged(); root == (why == "") {
+		t.Errorf("as uid %d: got %q", os.Geteuid(), why)
+	}
+}
+
+// TestMain lets the test binary stand in for sudo: AMP-1 runs a pinned file by descriptor (spawnFD), which can't run a
+// #! script while the descriptor stays close-on-exec, so the stand-in is this ELF binary, told by its environment what
+// shell script to play.
+func TestMain(m *testing.M) {
+	if script := os.Getenv("SANDPROBE_TEST_SUDO"); script != "" {
+		syscall.Exec("/bin/sh", []string{"sh", "-c", script}, os.Environ())
+		os.Exit(127)
+	}
+	os.Exit(m.Run())
+}
+
+// standIn pins this test binary to play script as sudo, and returns its descriptor.
+func standIn(t *testing.T, script string) int {
+	t.Helper()
+	base := sudoEnv
+	t.Cleanup(func() { sudoEnv = base })
+	sudoEnv = []string{"SANDPROBE_TEST_SUDO=" + script}
+	for _, v := range base {
+		if !strings.HasPrefix(v, "SANDPROBE_TEST_SUDO=") {
+			sudoEnv = append(sudoEnv, v)
+		}
+	}
+	fd, err := syscall.Open(os.Args[0], unixOPath|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fd
+}
+
+// sudo's listing, read the way AMP-1 reads it, from a pinned descriptor. A stand-in prints each listing.
 func TestSudoList(t *testing.T) {
 	for _, tc := range []struct{ listing, result, variant string }{
 		{"User agent may run the following commands on box:\n    (ALL : ALL) NOPASSWD: ALL\n", obs.Finding, "nopasswd_all"},
@@ -69,19 +155,27 @@ func TestSudoList(t *testing.T) {
 		{"    (root) NOPASSWD: /usr/bin/curl -H Authorization:sandprobe-fake\n", obs.Finding, "nopasswd_named"},
 		{"", obs.NotFound, ""},
 	} {
-		p := filepath.Join(t.TempDir(), "sudo")
-		os.WriteFile(p, []byte("#!/bin/sh\ncat <<'EOF'\n"+tc.listing+"EOF\n"), 0o755)
-		fd, err := syscall.Open(p, unixOPath|syscall.O_CLOEXEC, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		o := sudoList(p, fd)
+		o := sudoList("sudo", standIn(t, "cat <<'EOF'\n"+tc.listing+"EOF\n"))
 		if o.Result != tc.result || o.Variant != tc.variant {
 			t.Errorf("%q: want %s %s, got %+v", tc.listing, tc.result, tc.variant, o)
 		}
 		if strings.Contains(o.Evidence+o.Reason, "sandprobe-fake") || strings.Contains(o.Evidence, "/usr/bin") {
 			t.Errorf("a rule's commands reached the observation: %+v", o)
 		}
+	}
+	// a sudo ended by a signal looks like a child that died before its exec: unknown, never not_found
+	if o := sudoList("sudo", standIn(t, "kill -KILL $$")); o.Result != obs.Unknown || !strings.Contains(o.Reason, "signal") {
+		t.Errorf("a sudo killed by a signal: want unknown, got %+v", o)
+	}
+	// a #! file can't run from a close-on-exec descriptor, which would hand its interpreter a /proc path to look up
+	script := filepath.Join(t.TempDir(), "sudo")
+	os.WriteFile(script, []byte("#!/bin/sh\necho '    (ALL) NOPASSWD: ALL'\n"), 0o755)
+	fd, err := syscall.Open(script, unixOPath|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := sudoList(script, fd); o.Result != obs.Unknown || !strings.Contains(o.Reason, "can't run") {
+		t.Errorf("a #! sudo: want unknown, never run, got %+v", o)
 	}
 }
 
@@ -90,14 +184,9 @@ func TestSudoListBounded(t *testing.T) {
 	defer func(d time.Duration) { checkLimit = d }(checkLimit)
 	checkLimit = time.Second
 	run := func(script string) (obs.Observation, time.Duration) {
-		p := filepath.Join(t.TempDir(), "sudo")
-		os.WriteFile(p, []byte("#!/bin/sh\n"+script), 0o755)
-		fd, err := syscall.Open(p, unixOPath|syscall.O_CLOEXEC, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		fd := standIn(t, script)
 		start := time.Now()
-		o := sudoList(p, fd)
+		o := sudoList("sudo", fd)
 		return o, time.Since(start)
 	}
 	// 200 KB of other lines first, then the rule, then exit: drained, and the rule still found

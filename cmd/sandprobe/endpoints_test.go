@@ -73,11 +73,11 @@ func TestProviderEndpointsPlan(t *testing.T) {
 	if code := run([]string{"plan", "exec", "-no-canary", "-provider-endpoints", "SEC-4,AMP-7", "--", "sh"}, &out, &errs); code != 0 {
 		t.Fatalf("plan: exit %d, %s", code, errs.String())
 	}
-	for _, want := range []string{"Turns on, on your attestation (-provider-endpoints, PRV-15)",
+	for _, want := range append([]string{"Turns on, on your attestation (-provider-endpoints, PRV-15)",
 		"SEC-4 (cloud metadata credentials): you attest your provider's terms allow it on your own account",
 		"AMP-7 (the Kubernetes API): you attest your provider's terms allow it on your own account",
-		"169.254.169.254", "role listings only, never a credential", "a TCP and TLS handshake, no request (AMP-7)",
-		"nothing else: AMP-6, EGR-3 stay off", "excluded: EGR-3 is off", "You turned on SEC-4, AMP-7 with -provider-endpoints"} {
+		"a TCP and TLS handshake, no request (AMP-7)",
+		"nothing else: AMP-6, EGR-3 stay off", "excluded: EGR-3 is off", "You turned on SEC-4, AMP-7 with -provider-endpoints"}, sec4Lines...) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the plan doesn't say %q:\n%s", want, out.String())
 		}
@@ -106,9 +106,9 @@ func TestProviderEndpointsRecipePlan(t *testing.T) {
 	if code := run([]string{"plan", "kubernetes", "-no-canary", "-provider-endpoints", "SEC-4,AMP-7"}, &out, &errs); code != 0 {
 		t.Fatalf("plan: exit %d, %s", code, errs.String())
 	}
-	for _, want := range []string{"SEC-4 (cloud metadata credentials): you attest", "AMP-7 (the Kubernetes API): you attest",
-		"169.254.169.254", "nothing else: AMP-6, EGR-3 stay off, since they'd contact your provider's own endpoints (RCP-4)",
-		"(EGR-3, AMP-6) were off (RCP-4)", "You turned on SEC-4, AMP-7 with -provider-endpoints"} {
+	for _, want := range append([]string{"SEC-4 (cloud metadata credentials): you attest", "AMP-7 (the Kubernetes API): you attest",
+		"nothing else: AMP-6, EGR-3 stay off, since they'd contact your provider's own endpoints (RCP-4)",
+		"(EGR-3, AMP-6) were off (RCP-4)", "You turned on SEC-4, AMP-7 with -provider-endpoints"}, sec4Lines...) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the plan doesn't say %q:\n%s", want, out.String())
 		}

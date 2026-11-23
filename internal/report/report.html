@@ -293,9 +293,10 @@ td.long { overflow-wrap: anywhere; font: 12px var(--mono); }
     <div class="panel"><h3>Skipped, and why</h3><table><tbody>{{range .Skipped}}<tr><td>{{index . 0}}</td><td>{{index . 1}}</td></tr>{{else}}<tr><td>none</td><td></td></tr>{{end}}</tbody></table>
       {{if .ScopedOut}}<h3>Scoped out: nothing in scope to test, so neither a pass nor a finding</h3><ul class="plain">{{range .ScopedOut}}<li>{{.}}</li>{{end}}</ul>{{end}}</div>
   </div>
+  {{if .Attested}}<div class="panel" style="margin-top:12px"><h3>Turned on by your attestation (-provider-endpoints, PRV-15)</h3><table><tbody>{{range .Attested}}<tr><td>{{index . 0}}</td><td class="long">{{index . 1}}</td></tr>{{end}}</tbody></table></div>{{end}}
 </section>
 
-<footer>Sandprobe · report schema sandprobe/1 · {{.When}}</footer>
+<footer>Sandprobe · report schema {{.Data.Schema}} · {{.When}}</footer>
 </div>
 </main>
 </div>
