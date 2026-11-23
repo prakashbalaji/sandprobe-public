@@ -43,8 +43,28 @@ type canaryChoice struct {
 	retainNote string   // HCN-4's retention, for a public canary
 }
 
+// settleCanary is HCN-5's rule that the command line beats the environment: once any canary flag is given, the
+// SANDPROBE_CANARY* values the flags took as defaults are all set aside, so the flags name the whole choice and a stale
+// value can never outrank them. given holds the flags set on the command line.
+func (r *runFlags) settleCanary(given map[string]bool) {
+	r.canaryFlags = given["canary"] || given["canary-url"] || given["canary-pin"]
+	if !r.canaryFlags && !given["no-canary"] {
+		return // no canary flag: the environment's values stand in for them
+	}
+	if !given["canary"] {
+		r.canary = ""
+	}
+	if !given["canary-url"] {
+		r.canaryURL = ""
+	}
+	if !given["canary-pin"] {
+		r.canaryPin = ""
+	}
+}
+
 // chooseCanary is HCN-5's precedence, with no network call: -canary, -canary-url, then the hosted canary (run docker
-// starts its own instead, PRV-14). A canary-*.state file is used only when -canary names it, never found on its own.
+// never asks: it always starts its own, PRV-14). A canary-*.state file is used only when -canary names it, never found
+// on its own.
 func (r runFlags) chooseCanary() (canaryChoice, error) {
 	retain := "That canary sees the box's public address and this run's random nonces, keeps them in memory for at most 30 minutes, and stores nothing (HCN-4)."
 	if r.noCanary { // HCN-5: the person's own choice, never combined with naming a canary
@@ -244,18 +264,7 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ExecExclusions(), NoCanary: choice.none})
 		return err
 	}()
-	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Minute) // even after Ctrl-C
-	defer ccancel()
-	cleanup, cleaned := "nothing of your box was created or deleted; the scratch directory "+box.Scratch+" is confirmed gone", true
-	if cerr := box.Cleanup(cctx); cerr != nil {
-		cleanup, cleaned = "NOT confirmed removed: "+cerr.Error(), false
-		fmt.Fprintf(stderr, "sandprobe: %s\n", cleanup)
-	}
-	if public != nil {
-		if cerr := public.Close(cctx); cerr != nil {
-			fmt.Fprintf(stderr, "sandprobe: %s\n", cerr)
-		}
-	}
+	cleanup, cleaned := execTeardown(box, box.Scratch, public, stderr)
 	if err != nil {
 		return 0, fail("provider_error", err.Error(), "see the message; the cleanup is above", failExit(cleaned))
 	}
@@ -267,6 +276,23 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 		d.Grade.Notes = append(d.Grade.Notes, "The probe ran as "+r.as+", bound before any check ran (PRV-15).")
 	}
 	return finish(o, r, d, cleaned)
+}
+
+// execCleanupLimit bounds the scratch directory's removal after a run exec; the canary's slots have their own budget.
+var execCleanupLimit = 2 * time.Minute
+
+// execTeardown removes the scratch directory under its own budget, then gives back the canary's slots under theirs
+// (closeCanary), so a cleanup that used all of its time can't keep a slot held until it lapses (HCN-3, HCN-5).
+func execTeardown(box interface{ Cleanup(context.Context) error }, scratch string, public *host.HTTPSCanary, stderr io.Writer) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), execCleanupLimit) // even after Ctrl-C
+	defer cancel()
+	cleanup, cleaned := "nothing of your box was created or deleted; the scratch directory "+scratch+" is confirmed gone", true
+	if err := box.Cleanup(ctx); err != nil {
+		cleanup, cleaned = "NOT confirmed removed: "+err.Error(), false
+		fmt.Fprintf(stderr, "sandprobe: %s\n", cleanup)
+	}
+	closeCanary(public, stderr)
+	return cleanup, cleaned
 }
 
 // validExecUser is what -as takes for run exec: the probe's own rule for -whoami.

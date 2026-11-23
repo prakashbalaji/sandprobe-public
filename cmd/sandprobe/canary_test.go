@@ -293,3 +293,102 @@ func TestNativeRunOnTheHostedCanary(t *testing.T) {
 		t.Fatalf("a broken operator canary opened: %v", err)
 	}
 }
+
+// HCN-5: the command line beats the environment. A stale SANDPROBE_CANARY never outranks an explicit -canary-url and
+// -canary-pin; once any canary flag is given, every SANDPROBE_CANARY* value is set aside; with none, they stand in.
+func TestCanaryFlagsBeatTheEnvironment(t *testing.T) {
+	stale := strayState(t)
+	plan := func(args ...string) (int, planDoc, string) {
+		t.Helper()
+		var out, errs bytes.Buffer
+		code := run(append([]string{"plan"}, args...), &out, &errs)
+		var p planDoc
+		json.Unmarshal(out.Bytes(), &p)
+		return code, p, out.String() + errs.String()
+	}
+	t.Setenv("SANDPROBE_CANARY", stale)
+	code, p, text := plan("e2b", "-o", "json", "-canary-url", "https://control.sandprobe.test", "-canary-pin", testPin)
+	if code != 0 || !strings.Contains(strings.Join(p.Contacts, " "), "the public canary you named at https://control.sandprobe.test") || strings.Contains(text, stale) {
+		t.Errorf("a stale SANDPROBE_CANARY beside an explicit URL and pin: exit %d, %s", code, text)
+	}
+	// With no canary flag, the environment stands in for them.
+	if code, p, text = plan("e2b", "-o", "json"); code != 0 || !strings.Contains(strings.Join(p.Contacts, " "), "the operator canary in "+stale) {
+		t.Errorf("SANDPROBE_CANARY alone: exit %d, %s", code, text)
+	}
+	// A flag sets aside every environment value, the ones it doesn't name too.
+	t.Setenv("SANDPROBE_CANARY", "")
+	t.Setenv("SANDPROBE_CANARY_URL", "https://control.stale.test")
+	t.Setenv("SANDPROBE_CANARY_PIN", testPin)
+	if code, p, text = plan("e2b", "-o", "json", "-canary", stale); code != 0 || !strings.Contains(strings.Join(p.Contacts, " "), "the operator canary in "+stale) ||
+		strings.Contains(text, "stale.test") {
+		t.Errorf("-canary beside an environment URL: exit %d, %s", code, text)
+	}
+	if code, _, text = plan("e2b", "-o", "json", "-canary-url", "https://control.sandprobe.test"); code != exitUsage || !strings.Contains(text, "needs -canary-pin") {
+		t.Errorf("an explicit URL took the environment's pin: exit %d, %s", code, text)
+	}
+	if code, _, text = plan("exec", "-o", "json", "-no-canary", "--", "sh"); code != 0 || !strings.Contains(text, "you chose -no-canary") {
+		t.Errorf("-no-canary was refused for the environment's canary: exit %d, %s", code, text)
+	}
+}
+
+// HCN-5, PRV-14: run docker always uses its local canary, so a canary flag is refused before anything runs (no Docker
+// is on PATH here: a refusal that came any later would be Docker's error, not this one), and the environment's canary
+// values are never read.
+func TestDockerRefusesCanaryFlags(t *testing.T) {
+	isolateCanary(t)
+	t.Setenv("PATH", t.TempDir())
+	for _, flags := range [][]string{
+		{"-canary", "/nowhere.state"},
+		{"-canary-url", "https://control.sandprobe.test", "-canary-pin", testPin},
+		{"-canary-pin", testPin},
+	} {
+		for _, cmd := range []string{"plan", "run"} {
+			var out, errs bytes.Buffer
+			args := append(append([]string{cmd, "docker"}, flags...), "-y", "img")
+			if code := run(args, &out, &errs); code != exitUsage || !strings.Contains(errs.String(), "its own local canary") {
+				t.Errorf("%q: exit %d, %s %s", args, code, out.String(), errs.String())
+			}
+		}
+	}
+	t.Setenv("SANDPROBE_CANARY", "/nowhere.state")
+	var out, errs bytes.Buffer
+	if code := run([]string{"plan", "docker", "img"}, &out, &errs); code == exitUsage || strings.Contains(errs.String(), "local canary") {
+		t.Errorf("the environment's canary reached run docker: exit %d, %s", code, errs.String())
+	}
+}
+
+// stuckCleanup is a scratch removal that uses all of its budget and fails.
+type stuckCleanup struct{}
+
+func (stuckCleanup) Cleanup(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// HCN-3, HCN-5: run exec gives back the hosted canary's slot under closeCanary's own budget, even after a scratch
+// cleanup that used all of its own, so a slot is never held until it lapses.
+func TestExecReleasesTheSlotAfterACancelledCleanup(t *testing.T) {
+	isolateCanary(t)
+	pub := standInHosted(t)
+	limit := execCleanupLimit
+	execCleanupLimit = 50 * time.Millisecond
+	t.Cleanup(func() { execCleanupLimit = limit })
+	var r runFlags
+	choice, err := r.chooseCanary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, public, err := r.openCanary(context.Background(), choice, func(string, ...any) {})
+	if err != nil || public == nil {
+		t.Fatalf("open: %v", err)
+	}
+	var errs bytes.Buffer
+	cleanup, cleaned := execTeardown(stuckCleanup{}, "/tmp/sandprobe-x", public, &errs)
+	if cleaned || !strings.Contains(cleanup, "NOT confirmed removed") {
+		t.Fatalf("the stuck cleanup was called clean: %q", cleanup)
+	}
+	if strings.Contains(errs.String(), "slots weren't confirmed released") {
+		t.Fatalf("the slot wasn't released: %s", errs.String())
+	}
+	slotsFree(t, pub)
+}

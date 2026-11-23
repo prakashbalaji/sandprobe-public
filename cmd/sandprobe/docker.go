@@ -151,6 +151,10 @@ func dockerSubnet(ctx context.Context) (int, error) {
 
 // runDocker is PRV-14: plan, approval, then the run on a throwaway container and the confirmed teardown.
 func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer) (int, error) {
+	if r.canaryFlags { // HCN-5, PRV-14: its canary is always the local one, so a named canary is refused, never set aside
+		return 0, fail("usage", "run docker always uses its own local canary (PRV-14), so it takes no -canary, -canary-url or -canary-pin",
+			"drop the canary flag, or probe a running container through run exec with docker exec, which takes them", exitUsage)
+	}
 	if automaticRemoval(r.dockerOpts) {
 		return 0, fail("usage", "--rm bypasses safe volume ownership checks", "omit --rm; Sandprobe manages and verifies teardown", exitUsage)
 	}

@@ -74,7 +74,7 @@ the box's proxy) are off by default. The native adapters' rules for each provide
     the run's lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and
     arms the run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log
     and stores nothing.
-  - `run docker` starts its own canary container on your machine.
+  - `run docker` always starts its own canary container on your machine, and refuses a canary flag.
   - To use a canary you run yourself instead, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
     `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No test traffic, with `-no-canary`** (`run exec` and recipes): the probe sends nothing out of the box, and no

@@ -41,6 +41,7 @@ type runFlags struct {
 	scratch, canaryURL, canaryPin              string   // exec: the scratch directory (PRV-15); a public canary and its pin (HCN-5)
 	tlsInsecure                                bool     // canary check: accept a staging certificate; trust rests on the pin
 	noCanary                                   bool     // exec: run without a canary (HCN-5); Exfiltration isn't tested
+	canaryFlags                                bool     // -canary, -canary-url or -canary-pin given as a flag (HCN-5)
 	keepSandbox                                bool
 	basetenState                               string
 }
