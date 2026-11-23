@@ -9,9 +9,10 @@ Being validated for 0.3.0.
 
 ### Canary and score
 
-- Every run but `run docker` uses the hosted canary by default, the native provider adapters included. A canary
-  state file from `deploy/canary.sh` is used only when `-canary` names it, any canary flag sets every
-  `SANDPROBE_CANARY*` variable aside, and `run docker` refuses canary flags (HCN-5).
+- Every run but `run docker` and the Modal proof of concept uses the hosted canary by default, the native provider
+  adapters included; the proof of concept needs `-canary <state file>`. A canary state file from `deploy/canary.sh`
+  is used only when `-canary` names it, any canary flag sets every `SANDPROBE_CANARY*` variable aside, and
+  `run docker` refuses canary flags (HCN-5).
 - Cloud access now asks whether the agent can use your own cloud identity. On a native adapter whose provider's terms
   exclude its metadata and Kubernetes endpoints, Cloud access is not applicable and the score is out of five.
   `run exec` and recipes leave it "Not tested" (SCR-2). Reports that carry skip kinds declare the schema
@@ -66,6 +67,6 @@ release.
 - Native adapters for Fly Sprites, AWS Nitro on EKS, Baseten, E2B, Vercel Sandbox, Cloudflare Sandbox, Daytona, Boat
   and exe.dev, each run beside a canary you deploy with `deploy/canary.sh`.
 - A Modal proof of concept, built only with `make poc`.
-- The hosted canary for `run exec` and recipes, and `-no-canary` to send no test traffic at all.
+- The hosted canary for `run exec` and recipes, and `-no-canary` to send no test traffic to any canary.
 - A six-category score beside the letter grade, a JSON report and a self-contained HTML page, and the offline
   `scorecard`, `profile`, `assess` and `compare` commands.
