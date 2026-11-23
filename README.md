@@ -125,7 +125,7 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 | [E2B](docs/providers/e2b.md), [Daytona](docs/providers/daytona.md), [Vercel Sandbox](docs/providers/vercel.md), [Cloudflare Sandbox](docs/providers/cloudflare.md), [Fly Sprites](docs/providers/sprites.md), [AWS Nitro on EKS](docs/providers/aws-nitro.md) | `run <provider>`, native adapters | Stable target |
 | [Baseten](docs/providers/baseten.md) | `run baseten`, a native adapter | Beta |
 | [Modal](docs/providers/modal.md) | a proof of concept (`make poc`), not in the release build | Beta |
-| [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: needs your provider's written consent |
+| [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev, PRV-13), never represented as provider-written permission |
 
 The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/README.md) is the single source for
 it, with each provider's setup, the exact command, what it skips and why, and its terms.
@@ -142,17 +142,22 @@ lists each one with your attestation before anything runs, and the report record
 - **Test traffic, to a canary.** The probe sends DNS lookups and HTTPS, TCP and UDP attempts that carry only this
   run's random nonces. A way out counts only when the canary logs the nonce, and the host gets that receipt from the
   canary directly, never through the box.
-  - Every run but `run docker` uses the hosted canary at `control.pub.probe.ac0.dev` by default. It is run by
-    Summation and trusted only under the control key this release pins. It sees two addresses. The box's public
-    address, with the nonces its test traffic carries, is kept only for the run's lifetime, at most 30 minutes. The
-    public address of the machine running Sandprobe, which reserves and arms the run, is kept in a rate counter for
-    at most an hour. Both stay in memory: the canary writes no access log and stores nothing.
+  - Every run but `run docker` and the Modal proof of concept uses the hosted canary at `control.pub.probe.ac0.dev`
+    by default. It is run by Summation and trusted only under the control key this release pins. It sees two
+    addresses. The box's public address, with the nonces its test traffic carries, is kept only for the run's
+    lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and arms the
+    run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log and
+    stores nothing.
   - `run docker` always starts its own canary container on your machine, and refuses a canary flag.
+  - The Modal proof of concept needs `-canary <state file>`, naming a canary you deployed with `deploy/canary.sh`.
   - To use a canary you run yourself, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
     `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
-- **No test traffic, with `-no-canary`** (`run exec` and recipes): the probe sends nothing out of the box, and no
-  canary is contacted. Your own command, or the provider's API, still reaches the box. Exfiltration is then reported
-  as not tested, and the run can't grade above C.
+- **No canary traffic, with `-no-canary`** (`run exec` and recipes): the probe sends no test traffic to any canary,
+  and no canary is contacted. Exfiltration is then reported as not tested, and the run can't grade above C. Checks you
+  turn on with `-provider-endpoints` that don't need a canary still make the connections the plan names: SEC-4's
+  requests to the cloud metadata addresses and AMP-7's TLS handshake with the Kubernetes API. EGR-3 doesn't run, since
+  it needs a canary, and AMP-6 only checks for a vsock device and connects to nothing. Your own command, or the
+  provider's API, still reaches the box.
 - **Your reports stay with you.** Sandprobe uploads no report and has no telemetry.
 - **Your provider's own API**, when Sandprobe creates or reaches a box for you, with your own credentials.
 
@@ -180,7 +185,7 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 | Secrets | SEC-1 to SEC-5 | secret-shaped variable names, other processes' environments and memory, credential files, cloud metadata credentials |
 | Ways out | EGR-1 to EGR-6 | DNS to the canary's name server, HTTPS straight out or through a proxy, other ports, TLS interception |
 | Persistence | PER-1 to PER-5 | writable startup, PATH, schedule and access files; storage that survives the provider's reset |
-| Amplifiers | AMP-1 to AMP-8 | passwordless sudo, root or capabilities, setuid, control sockets, local daemons, vsock, the Kubernetes API, kernel settings |
+| Amplifiers | AMP-1 to AMP-8 | passwordless sudo, root or capabilities, setuid and file capabilities, control sockets, local daemons, vsock, the Kubernetes API, kernel settings |
 
 The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,

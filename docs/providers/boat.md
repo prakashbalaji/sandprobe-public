@@ -1,12 +1,13 @@
 # Boat: `run boat`
 
-**Status for 0.3.0, being validated:** Experimental: needs your provider's written consent. Last validated: pending.
+**Status for 0.3.0, being validated:** Experimental. Last validated: pending.
 [All providers](README.md)
 
 `run boat` creates one small CPU VM from Boat's base environment, in your personal wallet, probes it and deletes it
 permanently by the ID its create returned (PRV-11).
 
-**Get Boat's written consent before you run this.** Boat's terms restrict probing its security controls (see below).
+**Before you run this:** a live run needs the operator's informed authorization, never a claimed provider-written
+approval (PRV-11). Boat's terms restrict probing its security controls (see below).
 
 ## Prerequisites
 
@@ -48,7 +49,8 @@ PRV-11 records [Boat's terms](https://boat.dev/terms) as reviewed on 13 Nov 2026
 bypass, disable, reverse engineer" its security and access controls. TOS-6 bars "unauthorized vulnerability scanning,
 intrusion, exploitation, or network abuse". TOS-3 supports testing workloads. A run makes no exploit, bypass,
 privileged action or provider-control request: it observes permissions in the guest and sends markers to the canary.
-Sandprobe never presents a run as Boat's permission or waiver.
+PRV-11: a live run needs the operator's informed authorization, never a claimed provider-written approval. Sandprobe
+never presents a run as Boat's permission or waiver.
 
 ## What the score can and can't reach
 

@@ -2,6 +2,8 @@ package report
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -125,11 +127,109 @@ func TestHTMLIsSafe(t *testing.T) {
 	}
 }
 
+// UX-8: graphite is the default and mission the alternative; the retired modern, and any other value, render graphite.
+// The page's button cycles exactly the two, and reads a remembered modern as graphite.
+func TestThemes(t *testing.T) {
+	d := Build(run(), meta())
+	for in, want := range map[string]string{"": "graphite", "graphite": "graphite", "modern": "graphite", "Mission": "graphite",
+		evil: "graphite", "mission": "mission"} {
+		for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
+			b, err := render(d, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := string(b)
+			if !strings.Contains(p, `<html lang="en" data-theme="`+want+`">`) || !strings.Contains(p, `<span id="themeName">`+want+`</span>`) {
+				t.Errorf("-theme %q: want %s", in, want)
+			}
+			if !strings.Contains(p, `themes = ["graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern") saved = "graphite";`) {
+				t.Errorf("-theme %q: the button doesn't cycle graphite and mission, or a remembered modern is lost", in)
+			}
+			for _, rule := range []string{`:root, [data-theme="graphite"] {`, `[data-theme="mission"] {`, "@media print {", "@media (prefers-reduced-motion: reduce) {"} {
+				if !strings.Contains(p, rule) {
+					t.Errorf("-theme %q: the page has no %s", in, rule)
+				}
+			}
+		}
+	}
+}
+
+var (
+	tagRE   = regexp.MustCompile(`<[A-Za-z][^>]*>`)
+	styleRE = regexp.MustCompile(`(?s)<style>(.*?)</style>`)
+	fetchRE = regexp.MustCompile(`(?i)\s(src|href|srcset|xlink:href|action|formaction|poster|background)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
+	urlRE   = regexp.MustCompile(`(?i)url\(\s*['"]?([^)'"]*)`)
+)
+
+// OUT-2: the page fetches nothing, on every saved report, in both palettes, fresh or re-rendered. html/template
+// escapes every "<" in box text, so each tag found is a real one; the data block is JSON text, checked in
+// TestHTMLIsSafe, and box text may hold any word, so only tags and the style block are read.
+func TestHTMLLoadsNothing(t *testing.T) {
+	docs := map[string]Doc{"synthetic": Build(run(), meta())}
+	for _, pat := range []string{"../../demo/reports/*.json", "../../test/reports/*.json"} {
+		m, _ := filepath.Glob(pat)
+		for _, f := range m {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var d Doc
+			if json.Unmarshal(b, &d) == nil && d.Schema != "" {
+				docs[f] = d
+			}
+		}
+	}
+	if len(docs) < 7 {
+		t.Fatalf("want the synthetic run and the six saved reports, got %d", len(docs))
+	}
+	const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-`
+	for name, d := range docs {
+		for _, theme := range []string{"graphite", "mission"} {
+			for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
+				b, err := render(d, theme)
+				if err != nil {
+					t.Fatal(name, err)
+				}
+				page := dataRE.ReplaceAllString(string(b), "")
+				if !strings.Contains(page, csp) || !strings.Contains(page, `'; img-src data:; base-uri 'none'; form-action 'none'">`) {
+					t.Errorf("%s, %s: the CSP changed", name, theme)
+				}
+				styles := styleRE.FindAllStringSubmatch(page, -1)
+				if len(styles) != 1 {
+					t.Fatalf("%s, %s: want one style block, got %d", name, theme, len(styles))
+				}
+				code := styles[0][1]
+				for _, tag := range tagRE.FindAllString(page, -1) {
+					code += "\n" + tag
+					if strings.HasPrefix(strings.ToLower(tag), "<link") {
+						t.Errorf("%s, %s: %s", name, theme, tag)
+					}
+					for _, m := range fetchRE.FindAllStringSubmatch(tag, -1) {
+						if v := strings.Trim(m[2], `"'`); !strings.HasPrefix(v, "#") {
+							t.Errorf("%s, %s: %s=%s isn't a fragment", name, theme, m[1], m[2])
+						}
+					}
+				}
+				for _, bad := range []string{"@import", "@font-face"} {
+					if strings.Contains(code, bad) {
+						t.Errorf("%s, %s: the page holds %s", name, theme, bad)
+					}
+				}
+				for _, m := range urlRE.FindAllStringSubmatch(code, -1) {
+					if !strings.HasPrefix(m[1], "#") {
+						t.Errorf("%s, %s: url(%s) isn't a fragment", name, theme, m[1])
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestHTMLInvalid(t *testing.T) {
 	r := run()
 	r.Report = grade.Report{Invalid: "a duplicate check ID"}
 	b, err := HTML(Build(r, meta()), "mission")
-	if err != nil || !strings.Contains(string(b), "INVALID RUN") || !strings.Contains(string(b), "a duplicate check ID") || !strings.Contains(string(b), `data-theme="mission"`) {
+	if err != nil || !strings.Contains(string(b), "Invalid run") || !strings.Contains(string(b), "a duplicate check ID") || !strings.Contains(string(b), `data-theme="mission"`) {
 		t.Fatalf("want an invalid run shown as invalid, with no grade: %v", err)
 	}
 }
@@ -153,9 +253,9 @@ func TestNoFindingIsNotAllRefusals(t *testing.T) {
 	}
 	b, _ := HTML(d, "modern")
 	page := string(b)
-	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="green"`) || !strings.Contains(r, `<td class="res">Pass</td>`) ||
+	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="green"`) || !strings.Contains(r, `<td class="res"><span class="key">Pass</span></td>`) ||
 		!strings.Contains(r, "we proved it") || !strings.Contains(rowOf(page, "SEC-3"), "there isn&#39;t one") ||
-		!strings.Contains(rowOf(page, "SEC-2"), `<td class="res">N/A</td>`) {
+		!strings.Contains(rowOf(page, "SEC-2"), `<td class="res"><span class="key">N/A</span></td>`) {
 		t.Fatal("want the pass and the absence verified, and the scoped-out check not counted as either")
 	}
 	if strings.Contains(string(mapSVG(d)), `data-target="SEC-2"`) {
@@ -175,7 +275,7 @@ func TestIndicatorsStayIndicators(t *testing.T) {
 		t.Fatalf("lead: %q", d.Lead)
 	}
 	b, _ := HTML(d, "modern")
-	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<td class="res">Fail</td>`) ||
+	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<td class="res"><span class="key">Fail</span></td>`) ||
 		!strings.Contains(r, "a sign we saw, not something we confirmed") {
 		t.Fatal("the indicator's card doesn't say what kind of claim it is")
 	}

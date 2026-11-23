@@ -9,9 +9,10 @@ Being validated for 0.3.0.
 
 ### Canary and score
 
-- Every run but `run docker` uses the hosted canary by default, the native provider adapters included. A canary
-  state file from `deploy/canary.sh` is used only when `-canary` names it, any canary flag sets every
-  `SANDPROBE_CANARY*` variable aside, and `run docker` refuses canary flags (HCN-5).
+- Every run but `run docker` and the Modal proof of concept uses the hosted canary by default, the native provider
+  adapters included; the proof of concept needs `-canary <state file>`. A canary state file from `deploy/canary.sh`
+  is used only when `-canary` names it, any canary flag sets every `SANDPROBE_CANARY*` variable aside, and
+  `run docker` refuses canary flags (HCN-5).
 - Cloud access now asks whether the agent can use your own cloud identity. On a native adapter whose provider's terms
   exclude its metadata and Kubernetes endpoints, Cloud access is not applicable and the score is out of five.
   `run exec` and recipes leave it "Not tested" (SCR-2). Reports that carry skip kinds declare the schema
@@ -26,11 +27,23 @@ Being validated for 0.3.0.
 - Plans name all three SEC-4 metadata addresses the probe dials (UX-4).
 - AMP-1 grades sudo-rs installs instead of ending unknown, and PER-5 names why each root is a gap.
 - Write and read checks no longer pass a refusal the agent could undo through ownership or capabilities (TWN-4).
+- AMP-3 passes only with `NoNewPrivs` 1. With `NoNewPrivs` 0, setuid-root files in the system binary directories are
+  still a finding; otherwise AMP-3 is unknown, since the probe can't rule out a setuid-root file elsewhere or a file
+  with file capabilities anywhere, either of which an exec could gain privilege through. Set no-new-privileges to settle
+  it. A box without it and without setuid-root files used to pass AMP-3 and now ends incomplete. AMP-2's pass covers
+  only the capabilities held now.
 
 ### Saved reports
 
 - A saved `sandprobe/2` report with a field present but empty or null is refused (AGT-6).
 - An invalid report keeps its attested rows, and they stay not graded (GRD-5, PRV-15).
+
+### Web report
+
+- The HTML report takes the landing page's look: a graphite room, raised panels, Inter Tight headings, and results
+  as keys. A failure is a light key with a red legend; an unknown is a dashed key, never green. `graphite` is the
+  default palette and `mission` the alternative. `-theme modern`, the retired cyan palette, renders `graphite`, and a
+  page that remembered `modern` opens in `graphite` (UX-8). The page still fetches nothing, fonts included (OUT-2).
 
 ### Research harnesses
 
@@ -66,6 +79,6 @@ release.
 - Native adapters for Fly Sprites, AWS Nitro on EKS, Baseten, E2B, Vercel Sandbox, Cloudflare Sandbox, Daytona, Boat
   and exe.dev, each run beside a canary you deploy with `deploy/canary.sh`.
 - A Modal proof of concept, built only with `make poc`.
-- The hosted canary for `run exec` and recipes, and `-no-canary` to send no test traffic at all.
+- The hosted canary for `run exec` and recipes, and `-no-canary` to send no test traffic to any canary.
 - A six-category score beside the letter grade, a JSON report and a self-contained HTML page, and the offline
   `scorecard`, `profile`, `assess` and `compare` commands.

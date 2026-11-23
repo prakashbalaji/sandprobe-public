@@ -98,7 +98,7 @@ func TestInvalidRunKeepsAttestedRows(t *testing.T) {
 	}
 	p := string(page)
 	for _, want := range []string{"Turned on by your attestation (-provider-endpoints, PRV-15)", template.HTMLEscapeString(report.Attestation),
-		template.HTMLEscapeString(report.NotGraded), "INVALID RUN", "report schema sandprobe/2"} {
+		template.HTMLEscapeString(report.NotGraded), "Invalid run", "report schema sandprobe/2"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("the invalid run's page doesn't say %q", want)
 		}

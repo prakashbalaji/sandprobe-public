@@ -147,6 +147,15 @@ var fixtures = []fixture{
 	{name: "evidence-ninelinks", image: "evidence", settle: time.Second, opts: func(world) []string {
 		return []string{"--network", "none", "-e", "EVIDENCE=ninelinks"}
 	}, expect: expectUnknown(map[string]string{"PER-1": "more than 8", "SEC-3": "more than 8"})},
+	// AMP-3 and file capabilities: uid 65534 holding no capability, with NoNewPrivs 0 and Docker's bounding set, gains
+	// CAP_DAC_OVERRIDE by running a file whose file capabilities name it, with no setuid-root file anywhere it's scanned
+	// for. AMP-2 passes on what the agent holds now; AMP-3 can't pass. With NoNewPrivs 1 the kernel grants nothing
+	{name: "evidence-filecaps", image: "evidence", user: "65534:65534", settle: time.Second, expect: expectFileCaps(0),
+		opts: func(world) []string { return []string{"--network", "none", "-e", "EVIDENCE=filecaps"} }},
+	{name: "evidence-filecaps-nnp", image: "evidence", user: "65534:65534", settle: time.Second, expect: expectFileCaps(1),
+		opts: func(world) []string {
+			return []string{"--network", "none", "--security-opt", "no-new-privileges", "-e", "EVIDENCE=filecaps"}
+		}},
 	{name: "evidence-sockets", image: "evidence", settle: time.Second, expect: expectSockets, opts: func(world) []string {
 		return []string{"--network", "none", "--cap-add", "NET_ADMIN", "-e", "EVIDENCE=sockets"}
 	}},
@@ -257,6 +266,44 @@ func expectUnknown(want map[string]string) func(t *testing.T, w world, r *Run) {
 			if o := outcome(r.Report, id); o.Result != obs.Unknown || !strings.Contains(o.Reason, says) {
 				t.Errorf("%s: want unknown saying %q, got %+v", id, says, o)
 			}
+		}
+	}
+}
+
+// expectFileCaps is the file-capability case (AMP-3's row), first checked to be that case: the identity, and the kernel's
+// own answer when the agent runs the capable file. With NoNewPrivs 0 the run gains CAP_DAC_OVERRIDE, so AMP-3 is
+// unknown, naming file capabilities and no-new-privileges, while AMP-2 passes on what the agent holds now; with
+// NoNewPrivs 1 it gains nothing, and both pass.
+func expectFileCaps(nnp int) func(t *testing.T, w world, r *Run) {
+	return func(t *testing.T, w world, r *Run) {
+		var d obs.Doc
+		if err := json.Unmarshal(r.Doc, &d); err != nil || d.Identity == nil {
+			t.Fatalf("the probe's identity: %v", err)
+		}
+		id, none := d.Identity, "0000000000000000"
+		if id.UID != 65534 || id.CapEff != none || id.CapPrm != none || id.CapInh != none || id.CapAmb != none ||
+			id.CapBnd == none || id.CapBnd == "" || *id.NoNewPrivs != nnp ||
+			id.SetuidScan == nil || !id.SetuidScan.Complete || len(id.SetuidScan.Files) > 0 {
+			t.Fatalf("not the case under test: %+v, setuid scan %+v", *id, id.SetuidScan)
+		}
+		gained := "CapEff:\t0000000000000002" // CAP_DAC_OVERRIDE
+		if nnp == 1 {
+			gained = "CapEff:\t" + none
+		}
+		// run from the agent's own shell, as a hijacked agent would run it
+		if status := run(t, "docker", "exec", "-u", "65534:65534", r.Box.ID(), "sh", "-c", "/opt/filecaps/cat /proc/self/status"); !strings.Contains(status, gained) {
+			t.Fatalf("the capable file run as the agent: want %q in its own status, got\n%s", gained, status)
+		}
+		if o := outcome(r.Report, "AMP-2"); o.Result != obs.Pass {
+			t.Errorf("AMP-2: want a pass on the capabilities held now, got %+v", o)
+		}
+		o := outcome(r.Report, "AMP-3")
+		switch {
+		case nnp == 1 && o.Result != obs.Pass:
+			t.Errorf("AMP-3: want a pass with NoNewPrivs 1, got %+v", o)
+		case nnp == 0 && (o.Result != obs.Unknown || !strings.Contains(o.Reason, "file capabilities") ||
+			!strings.Contains(o.Reason, "no-new-privileges")):
+			t.Errorf("AMP-3: want unknown naming file capabilities and no-new-privileges, never a pass, got %+v", o)
 		}
 	}
 }

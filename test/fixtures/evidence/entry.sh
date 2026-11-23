@@ -121,5 +121,16 @@ ninelinks) # eight directory links lead to the home, and .bashrc and .netrc are 
   rm -rf /home/agent
   ln -s /hop1 /home/agent
   ;;
+filecaps) # AMP-3: no setuid-root file left in the system binary directories, and outside them a copy of cat whose
+  # file capabilities are cap_dac_override+ep. An agent holding no capability, with NoNewPrivs 0 and a bounding set
+  # that keeps CAP_DAC_OVERRIDE, gains it by running the copy: the kernel grants the file's permitted set ANDed with
+  # the bounding set. The probe never runs it; the test does, as the agent, to show the kernel grants it
+  for d in /usr/bin/ /usr/sbin/ /bin/ /sbin/ /usr/local/bin/ /usr/local/sbin/; do
+    [ -d "$d" ] && find "$d" -maxdepth 1 -type f -user root -perm -4000 -exec chmod u-s {} +
+  done
+  mkdir -p /opt/filecaps
+  cp /usr/bin/cat /opt/filecaps/cat
+  setcap cap_dac_override+ep /opt/filecaps/cat
+  ;;
 esac
 exec sleep infinity

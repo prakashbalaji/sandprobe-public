@@ -8,7 +8,8 @@ what it skips and why, its terms, and what the score can and can't reach there.
 
 - **Stable target:** meant to be fully supported in 0.3.0.
 - **Beta:** works, with known gaps that its page names.
-- **Experimental:** needs your provider's written consent before you run it.
+- **Experimental:** the provider's terms restrict testing, so a live run needs the operator's own authorization or
+  clearance, never represented as provider-written permission. Each page quotes its PRV row.
 
 | Provider | Status | Run | Setup | Checks | Last validated |
 |-|-|-|-|-|-|
@@ -23,8 +24,8 @@ what it skips and why, its terms, and what the score can and can't reach there.
 | [AWS Nitro on EKS](aws-nitro.md) | Stable target | `sandprobe run aws-nitro -variant isolated -y` | The cluster `deploy/eks.sh up` makes, with `PROFILE` set to your AWS CLI profile; `kubectl` | No provider exclusions, so SEC-4 and AMP-7 run. PER-5 skipped: the pod has no persistent volume. | pending |
 | [Modal](modal.md) | Beta: a proof of concept, not in the release build | `bin/sandprobe-poc poc modal run -variant default -canary <state file> -y` | `make poc`; `SANDPROBE_MODAL_WORKSPACE`; the token in `~/.modal.toml`; a canary from `deploy/canary.sh` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Modal-owned endpoints (PRV-5). PER-5 skipped: no reset. | pending |
 | [Baseten](baseten.md) | Beta | `sandprobe run baseten -y` | `SANDPROBE_BASETEN_KEY_FILE` or `BASETEN_API_KEY`; `BASETEN_TEAM_ID` when the key reaches several teams; `BASETEN_REGION` (optional) | Skips SEC-4, EGR-3, AMP-6, AMP-7: Baseten-owned endpoints (PRV-6). PER-5 skipped: suspend and resume isn't a reset. | pending |
-| [Boat](boat.md) | Experimental: needs your provider's written consent ([Boat's terms](https://boat.dev/terms)) | `sandprobe run boat -y` | `SANDPROBE_BOAT_KEY_FILE` or `BOAT_API_KEY` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Boat-owned endpoints (PRV-11). PER-5 skipped: no reset. | pending |
-| [exe.dev](exedev.md) | Experimental: needs your provider's written consent ([exe.dev's terms](https://exe.dev/docs/terms-of-service)) | `sandprobe run exe.dev -y` | `SANDPROBE_EXEDEV_KEY_FILE` (a key file only) | Skips SEC-4, EGR-3, AMP-6, AMP-7: exe.dev's own endpoints (PRV-13). PER-5 skipped: no reset. | pending |
+| [Boat](boat.md) | Experimental: a live run needs the operator's informed authorization, never a claimed provider-written approval (PRV-11; [Boat's terms](https://boat.dev/terms)) | `sandprobe run boat -y` | `SANDPROBE_BOAT_KEY_FILE` or `BOAT_API_KEY` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Boat-owned endpoints (PRV-11). PER-5 skipped: no reset. | pending |
+| [exe.dev](exedev.md) | Experimental: a live run needs the operator's own clearance for this bounded run, never represented as provider-written permission (PRV-13; [exe.dev's terms](https://exe.dev/docs/terms-of-service)) | `sandprobe run exe.dev -y` | `SANDPROBE_EXEDEV_KEY_FILE` (a key file only) | Skips SEC-4, EGR-3, AMP-6, AMP-7: exe.dev's own endpoints (PRV-13). PER-5 skipped: no reset. | pending |
 
 Every check a row doesn't skip runs. Every run also has these skips. Each is listed in the report with its reason,
 and none counts as a pass (GRD-3):

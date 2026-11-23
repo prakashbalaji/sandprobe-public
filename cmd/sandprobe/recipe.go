@@ -96,7 +96,10 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string,
 	}
 	residual := withRetention(host.RecipeResidual(rc, b.Target, attested), c)
 	contacts, boxNamed := []string{c.describe}, []string{named}
-	lines, extra, attestedNamed := attestedPlan(attested, recipeExclusions(rc), false, "RCP-4")
+	if c.none { // HCN-5: the connections the attested checks still make are named, never hidden behind "no canary"
+		contacts[0] = noCanaryLine(attested)
+	}
+	lines, extra, attestedNamed := attestedPlan(attested, recipeExclusions(rc), false, c.none, "RCP-4")
 	if len(attested) > 0 {
 		contacts, boxNamed = append(contacts, extra...), attestedNamed
 	}
@@ -114,7 +117,7 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string,
 			"on this machine, the recipe's sp_ functions, with your own credentials and permissions (recipe SHA-256 " + rc.SHA256[:12] + "…)"},
 		Reset:      "none: the recipe has no reset",
 		Deletes:    "the box, only by the ID its create returned, then waits for the provider to say it's gone; if it can't, the run exits 7 naming it",
-		LocalProxy: localProxy(attested, allowLocalProxy),
+		LocalProxy: localProxy(attested, allowLocalProxy, c.none),
 		Time:       "a minute or two, plus the box's start-up",
 		Residual:   residual,
 	}
