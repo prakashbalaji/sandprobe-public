@@ -29,14 +29,16 @@ often holds production clusters too.
 ## Run it
 
 ```sh
-SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe plan kubernetes -as <agent user>
-SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as <agent user> -y
+AGENT_USER=root   # set it to the user your agent runs as in the pod; the default debian image runs as root
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe plan kubernetes -as "$AGENT_USER"
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as "$AGENT_USER" -y
 ```
 
 If the cluster's context is in another kubeconfig file, name that file with `KUBECONFIG`:
 
 ```sh
-KUBECONFIG=$HOME/.kube/staging.yaml SANDPROBE_KUBE_CONTEXT=staging sandprobe run kubernetes -as <agent user> -y
+AGENT_USER=root   # the user your agent runs as in the pod
+KUBECONFIG=$HOME/.kube/staging.yaml SANDPROBE_KUBE_CONTEXT=staging sandprobe run kubernetes -as "$AGENT_USER" -y
 ```
 
 The pod carries `activeDeadlineSeconds: 3600`, so it stops on its own if cleanup never comes. It is deleted only
@@ -65,12 +67,13 @@ To grade a pod with the `isolated-sandbox` runtime class, put the runtime class 
 cat > nitro-overrides.json <<'EOF'
 {"spec": {"runtimeClassName": "isolated-sandbox"}}
 EOF
+AGENT_USER=root   # the user your agent runs as in the pod
 SANDPROBE_KUBE_CONTEXT=my-eks SANDPROBE_KUBE_OVERRIDES=./nitro-overrides.json \
-  sandprobe run kubernetes -as <agent user> -y
+  sandprobe run kubernetes -as "$AGENT_USER" -y
 ```
 
 The cluster must offer that runtime class: `kubectl get runtimeclass isolated-sandbox` names it. For the cluster that
-`deploy/eks.sh up` makes, `PROFILE=<your AWS CLI profile> deploy/eks.sh status` prints its kubeconfig and its
+`deploy/eks.sh up` makes, `PROFILE="$AWS_PROFILE" deploy/eks.sh status` prints its kubeconfig and its
 cluster name. Set `KUBECONFIG` to that kubeconfig and `SANDPROBE_KUBE_CONTEXT` to the cluster name, which is also
 the context's name. The four checks below stay off by default under the recipe, while `run aws-nitro` excludes none
 of them ([AWS Nitro on EKS](aws-nitro.md)).

@@ -15,18 +15,18 @@ Sandprobe uses, probes it and deletes it (the AWS Nitro row in SPEC.md).
 
 | Name | What it is |
 |-|-|
-| `PROFILE` | The AWS CLI profile `deploy/eks.sh` uses to make and delete the cluster. It has no default. |
+| `PROFILE` | The AWS CLI profile `deploy/eks.sh` uses to make and delete the cluster. It has no default. The commands below take it from `AWS_PROFILE`; if that isn't set, write the profile's name instead. |
 
 `deploy/eks.sh up` writes Sandprobe's own kubeconfig. Sandprobe uses that one, never yours.
 
 ## Run it
 
 ```sh
-PROFILE=<your profile> deploy/eks.sh up        # the cluster, its two IAM roles and Sandprobe's kubeconfig
+PROFILE="$AWS_PROFILE" deploy/eks.sh up        # the cluster, its two IAM roles and Sandprobe's kubeconfig
 sandprobe plan aws-nitro -variant isolated
 sandprobe run aws-nitro -variant isolated -y
 sandprobe run aws-nitro -variant network-isolated -y
-PROFILE=<your profile> deploy/eks.sh down      # deletes exactly what up recorded, and confirms each is gone
+PROFILE="$AWS_PROFILE" deploy/eks.sh down      # deletes exactly what up recorded, and confirms each is gone
 ```
 
 `-variant` picks the pod:

@@ -19,15 +19,16 @@ None of Sandprobe's own. Your command reaches the box with whatever access it al
 ## Run it
 
 ```sh
-sandprobe plan exec -as <agent user> -- docker exec -i my-agent-box sh
-sandprobe run exec -as <agent user> -y -- docker exec -i my-agent-box sh
-sandprobe run exec -as <agent user> -y -- kubectl exec -i pod/agent -c agent -- sh
-sandprobe run exec -as <agent user> -y -- ssh <agent user>@devbox sh
+AGENT_USER=agent   # set it to the user your agent runs as in the box
+sandprobe plan exec -as "$AGENT_USER" -- docker exec -i my-agent-box sh
+sandprobe run exec -as "$AGENT_USER" -y -- docker exec -i my-agent-box sh
+sandprobe run exec -as "$AGENT_USER" -y -- kubectl exec -i pod/agent -c agent -- sh
+sandprobe run exec -as "$AGENT_USER" -y -- ssh "$AGENT_USER@devbox" sh
 ```
 
 `-as` takes the user your agent really runs as in the box: a name, or a numeric uid. It doesn't switch users. Your
-command must already run as that user (`docker exec -u <user>`, the pod's `securityContext.runAsUser`,
-`ssh <user>@host`), and the run checks it before any check runs. Many images, debian and amazonlinux among them,
+command must already run as that user (`docker exec -u "$AGENT_USER"`, the pod's `securityContext.runAsUser`,
+`ssh "$AGENT_USER@devbox"`), and the run checks it before any check runs. Many images, debian and amazonlinux among them,
 have no `agent` user and run as root.
 
 - If the box's `/etc/passwd` has no user by that name, the run stops before any check with

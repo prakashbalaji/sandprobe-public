@@ -28,8 +28,9 @@ const nitroResidual = "Pods are reached by name (the readiness check, the upload
 // podImage is the EKS docs' own example of an isolated pod (PRV table).
 const podImage = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 
-// eksFix starts each command a fix names: deploy/eks.sh needs PROFILE, and has no default for it.
-const eksFix = "PROFILE=<your AWS CLI profile> deploy/eks.sh"
+// eksFix starts each command a fix names: deploy/eks.sh needs PROFILE, your AWS CLI profile, and has no default
+// for it. Taken from AWS_PROFILE, the fix runs as pasted; with that unset, eks.sh says to set PROFILE.
+const eksFix = `PROFILE="$AWS_PROFILE" deploy/eks.sh`
 
 // eksTarget is the only EKS deployment deploy/eks.sh recorded: its kubeconfig and the context named for its cluster,
 // bound to the cluster by the API endpoint recorded when the cluster was made, so no edit to the kubeconfig can send a

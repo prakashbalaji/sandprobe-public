@@ -18,14 +18,14 @@ import (
 // carries no secret.
 func canaryCheck(o opts, r runFlags, args []string, insecure bool) (int, error) {
 	if len(args) != 1 || args[0] != "check" {
-		return 0, fail("usage", "canary takes check", "sandprobe canary check, or name a public canary with -canary-url https://control.<domain> -canary-pin <pin>", exitUsage)
+		return 0, fail("usage", "canary takes check", "sandprobe canary check", exitUsage)
 	}
 	choice, err := r.chooseCanary() // HCN-5, with no network call: its refusals stand
 	if err != nil {
 		return 0, err
 	}
 	if choice.state != "" {
-		return 0, fail("usage", "canary check asks a public canary; the operator canary in "+choice.state+" answers only over SSM", "PROFILE=<your AWS CLI profile> deploy/canary.sh status checks it", exitUsage)
+		return 0, fail("usage", "canary check asks a public canary; the operator canary in "+choice.state+" answers only over SSM", `check it with PROFILE="$AWS_PROFILE" deploy/canary.sh status`, exitUsage)
 	}
 	hosted := r.canaryURL == ""
 	if insecure && hosted {

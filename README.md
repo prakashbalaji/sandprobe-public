@@ -49,10 +49,11 @@ you unpack it:
 
 ```sh
 gh release view -R summationai/sandprobe     # its notes give the verify command with the commit filled in
+RELEASE_COMMIT=                              # set it to the full commit SHA those notes name
 gh release download -R summationai/sandprobe -p sandprobe-darwin-arm64.gz
 gh attestation verify sandprobe-darwin-arm64.gz --repo summationai/sandprobe \
   --signer-workflow summationai/sandprobe/.github/workflows/release.yml \
-  --source-ref refs/heads/main --source-digest <release commit> --deny-self-hosted-runners
+  --source-ref refs/heads/main --source-digest "$RELEASE_COMMIT" --deny-self-hosted-runners
 gunzip sandprobe-darwin-arm64.gz && chmod +x sandprobe-darwin-arm64
 ```
 
@@ -94,9 +95,10 @@ holds their reports.
 **A box you already have.** Give Sandprobe any command that opens a shell in it:
 
 ```sh
-sandprobe run exec -as <agent user> -y -- docker exec -i my-agent-box sh
-sandprobe run exec -as <agent user> -y -- kubectl exec -i pod/agent -c agent -- sh
-sandprobe run exec -as <agent user> -y -- ssh <agent user>@devbox sh
+AGENT_USER=agent   # set it to the user your agent runs as in the box
+sandprobe run exec -as "$AGENT_USER" -y -- docker exec -i my-agent-box sh
+sandprobe run exec -as "$AGENT_USER" -y -- kubectl exec -i pod/agent -c agent -- sh
+sandprobe run exec -as "$AGENT_USER" -y -- ssh "$AGENT_USER@devbox" sh
 ```
 
 `-as` names the user your agent really runs as in the box. It checks that user, and doesn't switch to it: the run
@@ -107,9 +109,10 @@ scratch directory, which it removes, and never resets or deletes the box.
 **A throwaway copy.** Sandprobe creates the box, probes it and deletes it:
 
 ```sh
-sandprobe run docker my-agent-image -as <agent user> -y                         # a local Docker image
-SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as <agent user> -y  # a pod in your cluster
-sandprobe run sprites -y                                                        # a provider adapter
+AGENT_USER=agent                                                                 # the user your agent runs as
+sandprobe run docker my-agent-image -as "$AGENT_USER" -y                         # a local Docker image
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as "$AGENT_USER" -y  # a pod in your cluster
+sandprobe run sprites -y                                                         # a provider adapter
 ```
 
 Every run shows its plan first: what it will create, contact, mark and delete. Without `-y`, or a yes at the prompt,
