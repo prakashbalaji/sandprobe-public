@@ -15,5 +15,5 @@ subprocess.run([
     "--mount", f"type=bind,src={root}/deploy/eks-agent/container_smoke.py,dst=/checks/smoke.py,readonly",
     "--mount", f"type=bind,src={root}/deploy/eks-agent/fixtures/solution.py,dst=/checks/solution.py,readonly",
     "--entrypoint", WORKLOAD_ENVIRONMENT[0], "sandprobe-agent-local", *WORKLOAD_ENVIRONMENT[1:],
-    "python", "-I", "/checks/smoke.py",
+    "python", "-I", "/checks/smoke.py", "--setgid-workspace",
 ], check=True, timeout=90)

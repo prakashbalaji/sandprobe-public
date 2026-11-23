@@ -17,7 +17,8 @@ class ExplicitStub:
 
 assert os.getuid() == 10001
 assert "SANDPROBE_TEST_INHERITED_AUTH" not in os.environ
-assert stat.S_IMODE(os.stat("/workspace").st_mode) == 0o2770
+if "--setgid-workspace" in sys.argv:
+    assert stat.S_IMODE(os.stat("/workspace").st_mode) == 0o2770
 prepared = subprocess.run([sys.executable, "-I", "/opt/sandprobe/worker.py", "prepare"], check=True, capture_output=True, timeout=10)
 assert json.loads(prepared.stdout) == {"worker_ready": True}
 assert stat.S_IMODE(os.stat("/workspace/.cache").st_mode) == 0o700
