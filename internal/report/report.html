@@ -140,6 +140,7 @@ footer { color: var(--dim); font: 12px var(--mono); padding: 40px 0 56px; }
 .cat { --c: var(--find); display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: start; padding: 14px 16px;
   background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 10px; }
 .cat.green { --c: var(--pass); }
+.cat.na { --c: var(--dim); }
 .cat .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--c); margin-top: 5px; }
 .cat b { display: block; font-size: 17px; }
 .cat .q { display: block; color: var(--dim); font-size: 13px; }
@@ -156,6 +157,7 @@ h2.appendix { margin-top: 44px; }
 .cat-h .q { color: var(--dim); font-weight: 400; font-size: 15px; }
 .cat-h .verdict { margin-left: auto; font: 800 11px var(--mono); letter-spacing: .2em; color: var(--find); }
 .cat-h .verdict.green { color: var(--pass); }
+.cat-h .verdict.na { color: var(--dim); }
 .tbl { padding: 0; overflow: hidden; }
 table.tests { table-layout: fixed; }
 .tests th.sev, .tests td.sev { width: 92px; } .tests th.res, .tests td.res { width: 104px; }
@@ -217,21 +219,23 @@ td.long { overflow-wrap: anywhere; font: 12px var(--mono); }
 
 <main>
 <div class="wrap score">
+  {{with .Saved}}<p class="kicker"><em>{{.}}</em></p>{{end}}
   {{if .Card.Valid}}<p class="kicker">SANDBOX SCORE</p>
   <p class="scorebig" role="img" aria-label="Score {{.Card.Score}} of {{.Card.Of}}"><b>{{.Card.Score}}</b><span>/{{.Card.Of}}</span></p>
+  {{range .Card.NotCounted}}<p class="statement">{{.}}</p>{{end}}
   <p class="statement">{{.Statement}}</p>
   {{with .Card.Coverage}}<p>{{.Description}}</p>{{end}}
   <ol class="cats">{{range .Card.Rows}}
-    <li class="cat {{if .Green}}green{{else}}red{{end}}"><span class="dot" aria-hidden="true"></span>
+    <li class="cat {{if .Green}}green{{else if .NotApplicable}}na{{else}}red{{end}}"><span class="dot" aria-hidden="true"></span>
       <div><b>{{.Name}}</b><span class="q">{{.Question}}</span>{{if .Why}}<span class="why">{{.Why}}</span>{{end}}{{if .NotProven}}<span class="why np">{{.NotProven}}</span>{{end}}{{with .Coverage}}<span class="why">{{.Description}}</span>{{end}}</div>
-      <span class="verdict">{{if .Green}}GREEN{{else}}RED{{end}}</span></li>{{end}}
+      <span class="verdict">{{if .Green}}GREEN{{else if .NotApplicable}}NOT APPLICABLE{{else}}RED{{end}}</span></li>{{end}}
   </ol>{{else}}<p class="kicker"><em>INVALID RUN: NO SCORE</em></p>{{end}}
 </div>
 {{if .Card.Valid}}<div class="wrap">
   <h2 class="appendix"><b>What we tested</b> every test, by category</h2>
   {{if .Chains}}<section class="put">{{range .Chains}}<p class="chain"><span class="sevtag">{{.Sev}}</span>{{.Text}}</p>{{end}}</section>{{end}}
   {{range .Sections}}<section class="catsec">
-    <h3 class="cat-h"><b>{{.Num}}</b> {{.Name}} <span class="q">{{.Question}}</span><span class="ran">{{.Run}}/{{.Total}} tests run</span><span class="verdict{{if .Green}} green{{end}}">{{if .Green}}GREEN{{else}}RED{{end}}</span></h3>
+    <h3 class="cat-h"><b>{{.Num}}</b> {{.Name}} <span class="q">{{.Question}}</span><span class="ran">{{.Run}}/{{.Total}} tests run</span><span class="verdict{{if .Green}} green{{else if .NotApplicable}} na{{end}}">{{if .Green}}GREEN{{else if .NotApplicable}}NOT APPLICABLE{{else}}RED{{end}}</span></h3>
     <div class="panel tbl">
       <table class="tests"><thead><tr><th class="sev">Severity</th><th>Details</th><th class="res">Result</th></tr></thead>
       <tbody>{{range .Top}}<tr class="{{.Class}}" id="{{.ID}}"><td class="sev">{{.Sev}}</td><td><p class="ask">{{.Ask}}</p>{{if .Detail}}<p class="seen">{{.Detail}}</p>{{end}}{{if .Fix}}<p class="fixit"><b>Fix:</b> {{.Fix}}</p>{{end}}</td><td class="res">{{.Result}}</td></tr>{{else}}<tr class="none"><td class="sev"></td><td>No failures.</td><td class="res"></td></tr>{{end}}</tbody></table>

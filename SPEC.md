@@ -43,7 +43,7 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 - **JON-1 Strict framing.** Protocol JSON is one bounded value, depth at most64, with no trailing data. Duplicate object member names, including case aliases which Go would map to the same field, are rejected before decoding. Case-distinct object names are conservatively rejected; arrays retain case-sensitive values. No raw malformed data/member names are echoed. Unknown-field rules on existing protocols remain strict. Preserve valid canonical existing messages and saved-run shapes.
 - **JON-2 Every boundary and tests.** Apply JON-1 to host observation parsing and every probe stdin mode, with the existing1MiB byte bound checked before parsing (not a truncated reader accepted as EOF). Reject unsupported/extra probe arguments. Add duplicate/alias/nesting/trailing/oversize/fuzz regressions. CI runs build/vet/unit tests on Linux without cloud/provider credentials; no live provider tests or new paid resources.
-- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. Supported sandprobe/1 schema, canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report.
+- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
 - **ANL-2 Coverage profile.** Five fixed areas are egress(EGR), secrets(SEC-1/2/3/5), privilege(AMP-1/2/3/8.sys/8.blk), persistence(PER), provider reach(SEC-4/AMP-4/5/6/7). SEC-3 stays aggregate secrets; no image/provider attribution is inferred. Each catalog check requires an explicit area mapping; an unmapped future check blocks offline analysis until classified. Counts distinguish findings, negative proofs, find-only no-finding, absent/out-of-scope, unknown, excluded and missing catalog coverage. No profile labels a wall secure/Held or changes the saved legacy letter/caps. Invalid reports have no assessed area. Terminal output escapes untrusted identifiers; JSON labels reported data as unauthenticated and self-observed.
 - **CMP-1 Local comparison.** Compare two structurally validated reports by known check IDs/results/severities and declared scope/identity, never only the letter or prose heuristics. Flag new/worse findings and loss of coverage separately; removed/skipped/unknown checks cannot look like an improvement. Compare per-check scope/route, kind/evidence class, selected/skipped targets and recorded identity/config; unrecorded configuration remains unknown. Provider/mode/context differences are explicit; no-observed-change is conditional on matched coverage/context and means only the summarized fields, not equivalent security or an attestation. Ignore ephemeral runIDs/timestamps/nonces/receipt destinations when comparing observations. Keep invalid/incomplete inputs visible. Exit precedence is input/usage2, invalid/incomplete or unmatched context5, observed regression6, then assessed/no observed regression0. Automated gates must reject every nonzero exit and inspect both findings and context fields, rather than gate only on exit6. No network, file writes, schedules or notifications.
 - **QCK-1 Local quick observation.** A separate Linux quick entrypoint runs as the current identity with no network, provider APIs, external commands/sudo, socket connection, secret-value read, filesystem mutation, process memory/environment opens or persistence marker. The interface is `sandprobe-probe-linux-ARCH -quick [absolute-path ...]`; JSON-only output escapes untrusted strings. It reports own-identity metadata from at most64KiB of explicitly allowed proc status, at most256 environment names and metadata for at most32 explicitly declared absolute paths of at most1024 bytes each. No recursive traversal or symlink following; terminal strings are escaped. Output is capped at256KiB and the entrypoint has a five-second deadline; blocking filesystems may prevent graceful completion, so no result is inferred from timeout. Consumers must discard output on every nonzero exit and require complete JSON even on exit0; the watchdog may interrupt stdout and leave partial JSON with exit5. It reports permission metadata only; inaccessible/malformed observations stay unknown. It assigns no A–F grade or negative containment pass and labels egress/reset/sudo/process/provider-boundary coverage untested. It is not host-shipped attestation, a complete baseline, a comparison input or proof of secret disclosure. No fallback from quick data to sandprobe/1 report.
@@ -51,15 +51,17 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 ## Scorecard headline, 19 November 2026
 
-The scorecard is a simpler headline: six categories, each green or red, a score out of six, and every
-other detail in an appendix. This changes presentation only. The grader, the letter, OUT-1's schema and every saved
-report stay as they are; the scorecard is computed from a report's checks when it is shown, never written into one.
+The scorecard is a simpler headline: six categories, each green or red (or not applicable, SCR-2), a score out of
+the categories that apply, and every other detail in an appendix. This changes presentation only. The grader, the
+letter and every saved report stay as they are, and OUT-1 gains only SCR-2's skip kinds in its manifest, in reports
+that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's checks when it is shown, never written into one.
 
 - **SCR-1 Six categories.** Every catalog check belongs to exactly one category, each asked as a question:
   Secrets, "can it read keys and tokens?" (SEC-1, SEC-2, SEC-3, SEC-5); Exfiltration, "can data leave the box?"
   (EGR-1 to EGR-6, each EGR-5 port); Containment, "can it reach past the box to the host?" (AMP-4, AMP-5, AMP-6,
-  AMP-8.sys, AMP-8.blk); Privilege, "can it become root?" (AMP-1, AMP-2, AMP-3); Cloud access, "can it use the box's
-  cloud identity?" (SEC-4, AMP-7); Persistence, "can it leave something for the next session?" (PER-1 to PER-5).
+  AMP-8.sys, AMP-8.blk); Privilege, "can it become root?" (AMP-1, AMP-2, AMP-3); Cloud access, "can it use your cloud
+  identity?" (SEC-4, AMP-7): a cloud identity the person owns, meaning their own cloud roles, the metadata service of
+  their own cloud, and their own Kubernetes API, never a hosted provider's own infrastructure; Persistence, "can it leave something for the next session?" (PER-1 to PER-5).
   This refines ANL-2's five areas without changing them: provider reach splits into Containment and Cloud access,
   and AMP-8 moves from privilege to Containment. An unmapped check fails the tests. Chains have no category; the
   checks they join already turn their own categories red.
@@ -67,10 +69,42 @@ report stay as they are; the scorecard is computed from a report's checks when i
   skipped), none is unknown, and none has a finding above Info: the bar GRD-1 sets for an A. Anything else is red, and
   its reason says which: found, couldn't prove, or not tested. When every unknown in a category comes from HCN-5's
   no-canary choice, the reason reads "not tested: run without a canary" (a host reason, never a box string), and the
-  category stays red. The score is the number of green categories out of six.
+  category stays red.
+  A category is not applicable only when every one of its checks was skipped and each skip's kind is `provider_terms`:
+  a native adapter's PRV row excludes that provider-owned endpoint because the provider's terms do (PRV-5). In
+  practice that is Cloud access (SEC-4 and AMP-7) on a hosted provider. Provider terms limit what Sandprobe measures,
+  not whether a risk exists, so this rests on SCR-1's narrowed contract: on a hosted sandbox the metadata service and
+  any Kubernetes API belong to the provider, and the box holds no cloud identity of the person's that these checks
+  could reach. A credential of the person's own injected into the box (an environment variable, a key file) is still
+  Secrets' to catch (SEC-1, SEC-3), never Cloud access's. The row reads "Not applicable: this box holds no cloud
+  identity of yours that Sandprobe checks here; the provider's own endpoints weren't tested (their terms)", fixed
+  text, and the line beside the score names the category with that provider's exclusion reasons from this binary's
+  own PRV rows, never the report's text. A kind is never taken on the report's word: the scorecard derives each
+  check's kind from this binary's own policy for the provider the run names (a native adapter's PRV-row exclusions are
+  `provider_terms`; `run exec`'s and a shipped recipe's defaults are `opt_in`; any other provider has none), uses it
+  only when the manifest records the same, and ANL-1 refuses a saved report whose recorded kinds disagree with it, so
+  editing `SkipKinds` alone changes nothing. Only the host writes a kind, and only for a check it excluded
+  under GRD-3's provider-endpoint gate (`SkipKinds` in the manifest, never in the probe's input); a skip without one
+  (a report from before this rule, a survey-driven skip such as "no vsock device", the managed workload runners'
+  exclusions) is plain "Not tested". The managed workload runners record no kind, so their exposure cards (SCR-4)
+  stay out of six: the Nitro runner's exclusions are RUN-8's audit scope, not a provider's terms, and the Daytona
+  workload runner, though it uses PRV-12's exclusions, keeps the common Nitro and Daytona ranking and the deploy
+  runners' six-category check; `run daytona` itself reads out of five. Nothing the box returns, no unknown, and no `-no-canary` run makes a category
+  not applicable: HCN-5's checks stay unknown, so their category stays "not tested: run without a canary", red, and
+  the run incomplete. PRV-15's and RCP-4's default exclusions (`run exec`, `run kubernetes`) are kind `opt_in`, since
+  the person may lift them, and on a Kubernetes cluster Cloud access is the category that matters most: when none of
+  a category's checks was tested and its skips are `opt_in`, it stays red, and the reason reads "Not tested: run exec
+  and recipes skip provider-owned endpoints by default". The score is the number of green categories out of the
+  applicable ones. A not-applicable row is never green and never counted as passed: it leaves the denominator, so a
+  run with one reads at most 5/5 and is never shown or serialized as 6/6. Coverage still counts its checks as
+  skipped (SCR-5), so the card keeps the unmeasured endpoints visible. The letter doesn't change: GRD-3's skips already never touch GRD-1 or
+  GRD-2. `compare` reports a changed set of `provider_terms` skips as a changed setup (CMP-1's declared
+  configuration), so a newly not-applicable category is never read as like-for-like, and a check that goes from
+  tested to skipped stays coverage loss. An `opt_in` skip and one with no kind both read "Not tested", so a report
+  from before this rule and a new `opt_in` one of the same box compare as a matched pair.
   A green row that rests on a check with no finding but no negative proof says so in one line ("not proven: DNS"),
-  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. Six of six therefore means
-  no finding above Info and nothing unknown, and is still bounded by GRD-4 and SBX-10.
+  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. A full score therefore means
+  no finding above Info and nothing unknown in the categories it counts, and is still bounded by GRD-4 and SBX-10.
 - **SCR-5 Exposure and measurement coverage are separate.** Preserve SCR-2's RC
   score, but attach deterministic catalog-wide coverage to every valid scorecard.
   Partition each category's checks into proven pass/absence, findings (including
@@ -81,8 +115,9 @@ report stay as they are; the scorecard is computed from a report's checks when i
   requires a pass/absence or finding for every check; a finding is a completed
   observation, never a security pass. List all gaps by fixed catalog ID. State
   category/check usable-result and completion counts beside the score in JSON,
-  terminal and HTML, including workload scorecards. A green category and a score
-  of six never imply complete coverage. Invalid runs claim no coverage; historical
+  terminal and HTML, including workload scorecards. A green category and a full
+  score never imply complete coverage, and coverage still counts all six categories,
+  a not-applicable one's checks as skipped (SCR-2). Invalid runs claim no coverage; historical
   scorecards without coverage remain readable and never gain an invented complete
   status. Derive coverage only from graded checks and grading unknowns, never a
   provider flag, supplied counter, workload pass or configuration declaration.
@@ -90,8 +125,9 @@ report stay as they are; the scorecard is computed from a report's checks when i
   changes no scope exclusion, and changes no RC exposure verdict. Only synthetic
   public fixtures enter tests; private saved runs and accounts remain outside git.
 - **SCR-3 Headline first, details in the appendix.** OUT-2's page, the terminal summary after a run, and the offline
-  `sandprobe scorecard <report.json>` lead with the score and the six rows: name, question, green or red, and a short
-  reason built only from catalog IDs and titles, never from box strings. GRD-4's statement stays beside the score.
+  `sandprobe scorecard <report.json>` lead with the score and the six rows: name, question, green, red or not
+  applicable (SCR-2), and a short reason built only from catalog IDs and titles, never from box strings (a
+  not-applicable row's reason is the host's own skip reason). GRD-4's statement stays beside the score.
   Below the rows, "What we tested" gives each category a table headed "x/y tests run", with columns Severity,
   Details (the test as a plain question, what was seen, and the fix when it failed) and Result. Fail (a finding above
   Info; an indicator says it is a sign, not a confirmation) and Unknown sit on top, worst first. Pass (a refusal or an
@@ -1058,7 +1094,7 @@ one, the amended text lands in place only after review.
   - The box is an existing box (PRV-1): non-mutating checks only, GRD-3's existing-box skips, no reset, and the
     boundary is the person's attestation (PRV-2, UX-4). The launch mode is `exec` (SBX-4).
   - The provider isn't identified, so SEC-4, EGR-3, AMP-6 and AMP-7, the checks that contact a provider-owned
-    endpoint, are excluded by default (Sandprobe checks the person's own box and sends only to the
+    endpoint, are excluded by default, as kind `opt_in` (SCR-2) (Sandprobe checks the person's own box and sends only to the
     canary). `-provider-endpoints <IDs>` selects named ones only (for example `SEC-4,AMP-7`), each one the person
     attests their provider's terms allow on their own account; the plan lists each with that attestation before
     approval (AGT-3), and the report records it beside the check. Nothing selects them all at once.
@@ -1467,20 +1503,23 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   provider-owned endpoint under PRV-15's default for an unidentified provider, or RCP-4's for a recipe) is `skipped`
   and listed. Only the checks these gates name can be skipped (EGR-3, EGR-6, PER-5 and AMP-6, and SEC-4 and AMP-7 for
   a provider whose rules exclude them or under PRV-15's or RCP-4's default), only by the host, and each with its
-  reason; AMP-2 and AMP-3 never are.
+  reason; AMP-2 and AMP-3 never are. A provider-endpoint skip (SEC-4, EGR-3, AMP-6, AMP-7) also records its kind in
+  the manifest's `SkipKinds` (SCR-2): `provider_terms` from a native adapter's PRV row (PRV-5), `opt_in` under
+  PRV-15's or RCP-4's default. Skips change no letter.
 - **GRD-4 The grade says what it covers.** Beside every grade: "graded on N checks for this box at <time>, from a
   host-shipped probe's own observations; not a certification", SBX-10's boundary, the not-proven list (KND-2), and the
   scoped-out and skipped lists.
 - **GRD-5 The host trusts nothing from the box.** Before the run, the host fixes the manifest: the mode, the checks
   selected, each check's planned targets and discovery rules (from the catalog), the run nonce, one nonce and one
   planned endpoint per canary check, EGR-3's proxy and whether a local one is approved, the box's immutable provider
-  ID, and the probe's digest. A pass or an absence
+  ID, the probe's digest, and each provider-endpoint skip's kind (GRD-3). A pass or an absence
   must cover every planned target and report every discovery rule with exactly the targets it found; a gap is unknown,
   and a target nobody planned invalidates the run. The probe reports its identity (SBX-4) once, and the host always
   grades AMP-2 and AMP-3 from it, whether or not the probe reports them: AMP-2 from uid and CapEff, AMP-3 from
   NoNewPrivs and the setuid scan (with NoNewPrivs 0 and no completed scan, AMP-3 is unknown). Any AMP-2 or AMP-3 observation that differs, whatever its result, or a proof's
   root flag that contradicts the identity, invalidates the run, as does a missing identity. So does an unsound
   manifest: a check neither selected nor skipped, both, selected twice, or skipped without a GRD-3 gate or a reason;
+  a skip kind on a check that isn't skipped or isn't a provider endpoint, or a kind other than SCR-2's two;
   a selected canary check without its own nonce or a planned endpoint; or EGR-3 without a planned proxy (unless the
   manifest says the agent's can't be parsed, and then never with one) or with an unapproved loopback one. So does an attempt through any proxy but the planned one, through a loopback proxy
   nobody approved, or through a proxy on any route but EGR-3's. The probe's
@@ -1491,7 +1530,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 
 ### OUT: what it writes
 
-- **OUT-1 JSON.** `schema: "sandprobe/1"`; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
+- **OUT-1 JSON.** `schema`, the lowest version whose fields the report needs (AGT-6): `sandprobe/1`, or `sandprobe/2`
+  when the manifest carries SCR-2's `SkipKinds`; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
   UTC)`, duration_ms, mode, provider, box {provider_id, name, created_by_sandprobe}}`; `manifest`; `identity` (SBX-4);
   `toolchain [{name, path, owner, mode, link_target}]` (lstat metadata of box tools, never a hash: only `probe.sha256` is a digest); `overrides []`; `checks [{id, category, kind, result, evidence_class,
   severity, scope {destination, port, route}, evidence, proof {mechanism, result}, clients, fix, duration_ms}]`;
@@ -1591,7 +1631,13 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **AGT-5 Errors say what to do.** `{"error": "<code>", "message": "...", "fix": "<command or action>"}`, with codes
   from a fixed list: `usage`, `cli_missing`, `not_logged_in`, `needs_approval`, `needs_attestation`, `provider_error`,
   `timeout`, `invalid_run`.
-- **AGT-6 A stable schema.** A breaking change to OUT-1 bumps `sandprobe/N`.
+- **AGT-6 A stable schema.** A breaking change to OUT-1 bumps `sandprobe/N`. A new field is breaking, since readers
+  refuse unknown fields (JON-1). A report declares the lowest version whose fields it needs, so one that needs none of
+  a newer version's fields keeps the older identifier, byte for byte, and older readers still read it. A reader takes
+  every version it knows and refuses a report whose declared version isn't exactly the one its fields need: a
+  `sandprobe/1` report carrying `SkipKinds`, or a `sandprobe/2` one without them. A reader older than a report refuses
+  it as unsupported input; its fix names the versions it reads, and the report's own `schema` says which it is. Versions:
+  `sandprobe/1`; `sandprobe/2` adds the manifest's `SkipKinds` (SCR-2).
 
 ### PRV: providers
 
@@ -1615,7 +1661,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **PRV-5 A provider's rules of engagement narrow the checks.** Before any probe runs on a provider, its published
   security-research, bug bounty, penetration-testing and acceptable-use terms are read, and the PRV row cites what
   they say. Where they or the project owner exclude a destination or surface for that provider, the host skips
-  the checks that would touch it (GRD-3), each with its reason, and the report lists them. A surface that is only
+  the checks that would touch it (GRD-3), each with its reason and the kind `provider_terms` (SCR-2), and the report
+  lists them. A surface that is only
   detected, such as a control socket's `lstat`, isn't excluded: detecting it is fine, using it isn't. Modal: SEC-4,
   AMP-6, AMP-7 and EGR-3, since each would send a request to an endpoint Modal owns.
 
@@ -1669,7 +1716,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
     rule or authorizes repeating a held probe surface.
   - Reports explicitly say intentionally retained, never deleted, and add optional `cleanup.retention` containing
     `expires_at`, `state_file`, and a structured `cleanup_command` argument list. This additive field preserves
-    `sandprobe/1`. Normal grading exit codes apply after verified intentional retention; report-write failure after
+    `sandprobe/1` (a Baseten report declares `sandprobe/2` for SCR-2's skip kinds). Normal grading exit codes apply after verified intentional retention; report-write failure after
     retention remains an error and prints the journal path/expiry to stderr. Never lose the operator's recovery path.
   - `cleanup baseten -baseten-state <journal> -y` needs no canary. It reads only a regular current-user-owned mode-0600
     journal without following symlinks, rejects unknown/malformed fields or an unconfirmed create, restores its recorded
@@ -2127,6 +2174,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
 | SCR-5 | synthetic six-category coverage partition and malformed/missing/unknown/scoped-out cases, unchanged RC scores, invalid/historical coverage absence, terminal/HTML/workload coverage visibility and count validation |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression |
+| SCR-2 (not applicable) | `internal/report/scorecard_na_test.go`, on a Docker fixture run replanned through `host.Plan`, the grader and `Build`: `TestScoreNotApplicable` (each native adapter's PRV-row exclusions make Cloud access not applicable with SCR-2's fixed reason, never green, out of five, named on one line with this binary's own PRV reasons, in JSON and on the page, which carries no saved-report note; the letter equals the same run's without a kind), `TestNativesAreThePolicy` (the providers treated as provider terms are exactly `host.TermsExclusions`; exec and the shipped recipe derive opt-in; docker and aws-nitro nothing), `TestScoreOptInStaysNotTested` (run exec's and a recipe's defaults: red, out of six, "Not tested: run exec and recipes skip provider-owned endpoints by default"), `TestScoreNoCanaryIsNeverNotApplicable` (Exfiltration "not tested: run without a canary", red, incomplete), `TestNotApplicableNeedsTheHostsKind` (no kind, a row the manifest never skipped, an empty reason, one check tested, unknown or missing, or a provider-terms kind on run exec, whose policy is opt-in: never not applicable; the box answering "skipped", or answering a check the host skipped, invalidates the run), `TestWorkloadExposureNotApplicable` (a forged out-of-six, green, extra, unknown or dropped not-applicable row, or provider-terms reasons on a counted row, is refused), `TestCleanBoxReadsFiveOfFive` (a clean box reads 5/5 in the card, its JSON and the page, never 6/6, Cloud access never green); `TestSixOfSixIsAnA` (every saved Docker report stays out of six with nothing left out, and a full score is a complete A); `internal/host`: `TestPlanRecordsSkipKinds` (a kind only for the host's own exclusions, never a survey-driven skip, never in the probe's input; the grader refuses a kind on a check that isn't skipped or isn't an endpoint, or that isn't a kind; Execute refuses an unknown kind); `cmd/sandprobe/scorecard_na_test.go`: `TestExclusionKinds` (every adapter's exclusions record a kind: opt-in for run exec and recipes, provider terms for the rest), `TestScorecardNotApplicable` (Sprites and E2B read "Score 2/5" with the line; exec and kubernetes "Score 2/6" with the default-skip reason; the same in `-o json`), `TestReportSchemaVersions` (AGT-6: a report with skip kinds declares `sandprobe/2`, one without stays `sandprobe/1`; a `sandprobe/1` report carrying skip kinds, a `sandprobe/2` one without them, and an unknown version are refused, and the refusal names the versions this build reads), `TestScorecardNoCanaryStaysRed` (exit 5, red), `TestCompareNotApplicable` (tested to not applicable is coverage loss and a changed setup; opt-in to not applicable is a changed setup, exit 5; a matched pair, and a report with no kind against an opt-in one, read unchanged), `TestScorecardRefusesForgedKinds` (ANL-1), `TestScorecardRefusesForgedProvenance` (the security review's forgery: a valid run exec report with SEC-4 and AMP-7 edited from opt_in to provider_terms is refused, and scored directly stays out of six), `TestOfflineRenderingsSayNotReVerified` (ANL-1: scorecard text, JSON and the `-out` page, profile, assess and compare each say the saved report wasn't re-verified) |
 | HCN-1 | `internal/canarycontrol`: the whole public path over HTTPS, every answer verified under the pinned control key and naming the canary's receipt address and domain (`TestPublicAnswersNameTheReceiptAddress`); an answer replayed for another challenge, altered, re-signed or under an unpinned key is refused; the control name never gets the receipt key and a box name never reaches the control server; method, path, unknown field, op mismatch, trailing data and oversize refusals; a long run label never makes an answer over the bound (`TestPublicAnswerBoundedForLongRun`, `TestControlAnswerBounded`); a control key file that's a symlink, not regular, open to others, not this user's, oversize or carrying trailing bytes is refused (`TestLoadKeyFileSafety`); a browser's cross-site POST (simple content type, Origin or Sec-Fetch-Site) is refused (`TestControlRefusesBrowserPosts`); `TestPublicNeedsAChallenge`; host: `TestHTTPSCanaryImpostor` (an impostor behind a trusted interception root and a redirected name is never believed, and Execute stops before the probe), `TestHTTPSCanaryRefusesRedirectAndOversize`, `TestNewHTTPSCanaryChecks`, `TestHTTPSCanaryAddressFromSignedStatus` (the receipt address comes from the signed status, never from where the control connection went, and a changed one is refused), `TestHTTPSCanaryErrorsRedact` |
 | HCN-2 | `TestPublicSecretGuardsTheRun`: without the secret a box can't query, disarm, re-arm its run or arm its nonce elsewhere, and the host's receipt survives; `TestPublicCantTouchOperatorRuns`; `TestPublicGenerationChangesOnRearm`; host: `TestHTTPSCanaryRearmedRun` (a re-armed run is never read: the old secret is refused, and the thief's secret shows another generation) |
 | HCN-3 | `TestPublicReservation` (no arm without a reservation; one slot per secret; release; expiry), `TestPublicBounds` (per-source runs at once and per hour, by reservation), `TestPublicGlobalBound`, `TestSourceOf` (IPv6 /64), `TestPublicOverloadAtACap`; host: `TestHTTPSCanaryRun` (no arm without a reservation; reserve, arm, receipt, disarm) ; `TestHTTPSCanaryLostAnswersRelease` (a reserve, arm or disarm lost before or after the canary acted never leaves a slot held past Close), `TestHTTPSCanaryCloseRetries` (a Close that couldn't release keeps the slots for the next one) |

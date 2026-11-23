@@ -71,7 +71,7 @@ func Validate(d *report.Doc) error {
 		}
 	}
 
-	if d.Schema != report.Schema || d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
+	if d.Schema != report.SchemaFor(d.Manifest) || d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
 		return ErrInput
 	}
 	if !slices.Contains([]string{"exec", "entrypoint"}, d.Run.Mode) {
@@ -103,6 +103,14 @@ func Validate(d *report.Doc) error {
 	}
 	for id := range d.Manifest.Skipped {
 		if _, ok := catalog.Get(id); !ok {
+			return ErrInput
+		}
+	}
+	// SCR-2: a skip kind names only a skipped provider-endpoint check, and only one of the two kinds; and it must be
+	// the kind this binary's own policy derives for the run's provider, so an edited kind is refused, never scored.
+	policy := report.PolicyKinds(d.Run.Provider)
+	for id, kind := range d.Manifest.SkipKinds {
+		if _, ok := d.Manifest.Skipped[id]; !ok || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) || policy[id] != kind {
 			return ErrInput
 		}
 	}
@@ -308,6 +316,19 @@ func proofMechanism(c catalog.Check) string {
 	return c.Mechanism
 }
 
+// termsSkips is the checks a report skipped for the provider's terms (SCR-2), sorted: the only kind that changes
+// which categories its score counts. An opt-in skip and one with no kind both read "Not tested".
+func termsSkips(m obs.Manifest) []string {
+	var ids []string
+	for id, kind := range m.SkipKinds {
+		if kind == obs.SkipProviderTerms {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func covered(c report.Check) bool {
 	return c.ID != "" && c.Result != obs.Unknown && c.Result != obs.Skipped
 }
@@ -350,7 +371,8 @@ func Compare(a, b *report.Doc) Comparison {
 	if !reflect.DeepEqual(referenceContextNotes(a.Grade.Notes), referenceContextNotes(b.Grade.Notes)) {
 		out.ContextChanges = append(out.ContextChanges, "reported_reference_context")
 	}
-	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI {
+	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup.
+	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) {
 		out.ContextChanges = append(out.ContextChanges, "declared_configuration")
 	}
 	rowsA, rowsB := map[string]report.Check{}, map[string]report.Check{}

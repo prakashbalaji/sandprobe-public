@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -111,7 +112,7 @@ func runCloudflare(o opts, r runFlags, plan bool, stderr io.Writer) (int, error)
 		}
 		if err == nil {
 			step("running scoped Cloudflare baseline checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.CloudflareExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.CloudflareExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	step("deleting recorded Cloudflare sandbox and verifying absence")

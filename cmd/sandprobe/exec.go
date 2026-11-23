@@ -14,6 +14,7 @@ import (
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -264,7 +265,7 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 			return err
 		}
 		step("running the probe as uid %d through your command", w.UIDs[1])
-		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ExecExclusions(), NoCanary: choice.none})
+		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, NoCanary: choice.none})
 		return err
 	}()
 	cleanup, cleaned := execTeardown(box, box.Scratch, public, stderr)

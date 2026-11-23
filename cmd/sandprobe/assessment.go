@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"sandprobe/internal/analysis"
+	"sandprobe/internal/report"
 )
 
 func assessSaved(o opts, args []string) (int, error) {
@@ -12,7 +13,7 @@ func assessSaved(o opts, args []string) (int, error) {
 	}
 	d, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	a, err := analysis.Assess(d, args[1])
 	if err != nil {
@@ -37,6 +38,7 @@ func assessSaved(o opts, args []string) (int, error) {
 		for _, limit := range a.Limits {
 			fmt.Fprintln(o.stdout, limit)
 		}
+		fmt.Fprintln(o.stdout, report.SavedNote)
 	}
 	// CAL-3: uncertainty wins exit precedence without hiding a reported violation.
 	if !a.SourceComplete || a.Counts[analysis.Inconclusive] > 0 {

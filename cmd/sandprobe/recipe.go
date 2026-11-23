@@ -15,6 +15,7 @@ import (
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 	"sandprobe/recipes"
@@ -215,7 +216,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 			return err
 		}
 		step("running the probe as uid %d through the recipe", w.UIDs[1])
-		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: recipeExclusions(rc), NoCanary: choice.none})
+		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: recipeExclusions(rc), ExcludedKind: obs.SkipOptIn, NoCanary: choice.none})
 		return err
 	}()
 	cleanup, cleaned := recipeCleanup(box, j, stderr)

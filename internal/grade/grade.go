@@ -228,6 +228,12 @@ func manifestSound(m obs.Manifest) error {
 			return fmt.Errorf("%s is skipped without a reason", ck.ID)
 		}
 	}
+	// SCR-2: a skip kind names only a provider-endpoint check the host skipped, and only one of the two kinds.
+	for id, kind := range m.SkipKinds {
+		if _, skipped := m.Skipped[id]; !skipped || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) {
+			return fmt.Errorf("%s has a skip kind it can't have (SCR-2)", id)
+		}
+	}
 	if err := marksSound(m, selected["PER-5"]); err != nil {
 		return err
 	}

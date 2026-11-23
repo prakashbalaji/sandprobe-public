@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -118,7 +119,7 @@ func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		if err == nil {
 			step("running scoped Boat baseline checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BoatExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BoatExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	step("deleting recorded Boat sandbox and verifying absence")

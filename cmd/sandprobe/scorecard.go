@@ -20,11 +20,12 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 	}
 	d, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	card := report.Score(*d)
+	card.Verification = "structural_only_unauthenticated" // ANL-1: a saved report is never re-verified
 	if r.outSet {
-		page, err := report.HTML(*d, r.theme)
+		page, err := report.SavedHTML(*d, r.theme)
 		if err != nil {
 			return 0, err
 		}
@@ -36,12 +37,17 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 		o.emit(card)
 	} else {
 		printCard(o, card, d.Statement)
+		fmt.Fprintf(o.stdout, "\n%s\n", report.SavedNote)
 	}
 	if !d.Grade.Valid || !d.Grade.Complete {
 		return exitPartial, nil
 	}
 	return exitGraded, nil
 }
+
+// reportInputFix is the fix for a saved report this build refuses (ANL-1): it names the versions this build reads,
+// so a report from a newer sandprobe says what it needs (AGT-6).
+var reportInputFix = "Use a regular, unedited " + strings.Join(report.Schemas, " or ") + " report file under 8 MiB; a report that declares a later schema needs a newer sandprobe."
 
 // A saved report is unauthenticated input (ANL-1): its provider and run ID name the page only when each is a plain
 // name, never a path, and anything else gets a fixed name.
@@ -90,7 +96,7 @@ func printable(s string) string {
 	return b.String()
 }
 
-// printCard writes the headline: the score, then one line per category, green or red.
+// printCard writes the headline: the score, then one line per category, green, red or not applicable (SCR-2).
 func printCard(o opts, c report.Card, statement string) {
 	green, red, reset := "", "", ""
 	if f, ok := o.stdout.(*os.File); ok && isTerminal(f) {
@@ -101,18 +107,25 @@ func printCard(o opts, c report.Card, statement string) {
 		fmt.Fprintf(w, "\nScore: none (invalid run)\n")
 		return
 	}
-	fmt.Fprintf(w, "\nScore %d/%d\n\n", c.Score, c.Of)
+	fmt.Fprintf(w, "\nScore %d/%d\n", c.Score, c.Of)
+	for _, line := range c.NotCounted() {
+		fmt.Fprintln(w, printable(line))
+	}
+	fmt.Fprintln(w)
 	if c.Coverage != nil {
 		fmt.Fprintln(w, c.Coverage.Description())
 	}
 	for _, row := range c.Rows {
 		mark, color := "RED  ", red
-		if row.Green {
+		switch {
+		case row.Green:
 			mark, color = "GREEN", green
+		case row.NotApplicable: // SCR-2: never green, and out of the score
+			mark, color = "N/A  ", ""
 		}
 		fmt.Fprintf(w, "  %s● %s%s  %-13s %s\n", color, mark, reset, row.Name, row.Question)
-		if row.Why != "" {
-			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, row.Why, reset)
+		if row.Why != "" { // a not-applicable reason is the report's own skip reason: escaped like its other text
+			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), reset)
 		}
 		if row.NotProven != "" {
 			fmt.Fprintf(w, "  %-22s %s\n", "", row.NotProven)

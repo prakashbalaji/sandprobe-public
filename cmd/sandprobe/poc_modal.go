@@ -215,7 +215,7 @@ func pocRun(o opts, r runFlags, stderr io.Writer) (int, error) {
 			return err
 		}
 		step("running the probe as the image's default user")
-		run, err := host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ModalExcluded})
+		run, err := host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ModalExcluded, ExcludedKind: obs.SkipProviderTerms})
 		if err != nil {
 			return err
 		}

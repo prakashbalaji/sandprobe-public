@@ -15,8 +15,24 @@ import (
 	"sandprobe/internal/obs"
 )
 
-// Schema is OUT-1's version; a breaking change bumps it (AGT-6).
+// Schema is OUT-1's first version, which every report declares that needs none of a later version's fields (AGT-6).
 const Schema = "sandprobe/1"
+
+// SchemaSkipKinds is OUT-1's version that adds the manifest's SkipKinds (SCR-2). A new field is a breaking change,
+// since readers refuse unknown fields (JON-1), so it bumps the version (AGT-6).
+const SchemaSkipKinds = "sandprobe/2"
+
+// Schemas are the versions this build reads, oldest first.
+var Schemas = []string{Schema, SchemaSkipKinds}
+
+// SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
+// reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
+func SchemaFor(m obs.Manifest) string {
+	if len(m.SkipKinds) > 0 {
+		return SchemaSkipKinds
+	}
+	return Schema
+}
 
 // Boundary is SBX-10, which every report states beside the grade.
 const Boundary = "No false passes holds against faults, misconfiguration, wrappers and shims in the agent's environment, " +
@@ -192,7 +208,7 @@ type Cleanup struct {
 // Build makes OUT-1 from a run.
 func Build(r *host.Run, m Meta) Doc {
 	rep, man := r.Report, r.Manifest
-	d := Doc{Schema: Schema, Statement: "", Boundary: Boundary, Manifest: man,
+	d := Doc{Schema: SchemaFor(man), Statement: "", Boundary: Boundary, Manifest: man,
 		Probe: Probe{Version: m.Version, SHA256: man.ProbeSHA256, HostShipped: true},
 		Run: Run{ID: man.RunID, Nonce: man.Nonce, StartedAt: m.StartedAt.UTC().Format(time.RFC3339), DurationMS: m.Duration.Milliseconds(),
 			Mode: man.Mode, Provider: m.Provider, Box: Box{ProviderID: man.BoxID, Name: m.BoxName, CreatedBySandprobe: m.CreatedBySandprobe},

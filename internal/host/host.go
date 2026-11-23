@@ -69,11 +69,14 @@ type Options struct {
 	// Excluded is what the provider's rules of engagement rule out (PRV-5): check ID to the reason. Only the checks
 	// GRD-3 names for it may be excluded; Execute refuses any other.
 	Excluded map[string]string
+	// ExcludedKind is why Excluded skips them (SCR-2): obs.SkipProviderTerms for a native adapter's PRV row,
+	// obs.SkipOptIn for PRV-15's or RCP-4's default. Empty records no kind, and the scorecard reads "Not tested".
+	ExcludedKind string
 }
 
 // excludable is every check a provider's rules of engagement may skip (GRD-3, PRV-5): each would send a request to
 // an endpoint the provider owns.
-var excludable = map[string]bool{"SEC-4": true, "AMP-6": true, "AMP-7": true, "EGR-3": true}
+var excludable = catalog.ProviderEndpoints
 
 // Run is everything one run produced, for the report.
 type Run struct {
@@ -123,6 +126,9 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 		if !excludable[id] {
 			return nil, fmt.Errorf("%s can't be excluded by a provider's rules of engagement (GRD-3)", id)
 		}
+	}
+	if k := o.ExcludedKind; k != "" && k != obs.SkipProviderTerms && k != obs.SkipOptIn {
+		return nil, fmt.Errorf("%q isn't a skip kind (SCR-2)", k)
 	}
 	out, err := b.Probe(ctx, []string{"-survey"}, nil)
 	if err != nil {
@@ -319,9 +325,16 @@ func Teardown(ctx context.Context, r *Run) error {
 // parse leaves EGR-3 unknown.
 func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, pin string) (obs.Manifest, obs.Input) {
 	skip := map[string]string{"EGR-6": "contacting EGR-6's public upload hosts wasn't approved"}
+	var kinds map[string]string // SCR-2: only the host's own exclusions get a kind, never a survey-driven skip
 	for id, why := range o.Excluded {
 		if excludable[id] {
 			skip[id] = why
+			if o.ExcludedKind != "" {
+				if kinds == nil {
+					kinds = map[string]string{}
+				}
+				kinds[id] = o.ExcludedKind
+			}
 		}
 	}
 	runID := token("r")
@@ -372,7 +385,8 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 	m := obs.Manifest{RunID: runID, Nonce: token("n"), BoxID: boxID, ProbeSHA256: o.ProbeSHA256, Mode: o.Mode,
 		Selected: selected, Skipped: skipped, Targets: targets, Discover: discover,
 		CheckNonces: map[string]string{}, Endpoints: map[string]string{}, Proxy: proxy, AllowLocalProxy: o.AllowLocalProxy,
-		ProxyMalformed: s.Proxy != nil && s.Proxy.Malformed && skip["EGR-3"] == "", KubeAPI: s.KubeAPI, NoCanary: o.NoCanary}
+		ProxyMalformed: s.Proxy != nil && s.Proxy.Malformed && skip["EGR-3"] == "", KubeAPI: s.KubeAPI, NoCanary: o.NoCanary,
+		SkipKinds: kinds}
 	if o.WorkloadContract != nil {
 		contract := *o.WorkloadContract
 		m.WorkloadContract = &contract

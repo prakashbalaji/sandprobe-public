@@ -40,7 +40,7 @@ type view struct {
 	Passes                                                                                   []group
 	Skipped, Identity, Hosts, Markers, Reset, Calls                                          [][2]string
 	ScopedOut, NotTested, Notes                                                              []string
-	Cleanup, Residual                                                                        string
+	Cleanup, Residual, Saved                                                                 string
 	Data                                                                                     Doc
 	Card                                                                                     Card // SCR-3: the headline
 	Sections                                                                                 []section
@@ -50,7 +50,7 @@ type view struct {
 // section is one category's table in "What we tested" (SCR-3): failures and unknowns on top, the rest folded away.
 type section struct {
 	Num, Name, Question, RestLabel string
-	Green                          bool
+	Green, NotApplicable           bool
 	Run, Total                     int
 	Top, Rest                      []test
 }
@@ -136,7 +136,8 @@ func sections(d Doc, c Card) []section {
 	}
 	var out []section
 	for i, cat := range Categories {
-		sec := section{Num: fmt.Sprintf("%d", i+1), Name: cat.Name, Question: cat.Question, Green: c.Rows[i].Green, Total: len(cat.Checks)}
+		sec := section{Num: fmt.Sprintf("%d", i+1), Name: cat.Name, Question: cat.Question, Green: c.Rows[i].Green,
+			NotApplicable: c.Rows[i].NotApplicable, Total: len(cat.Checks)}
 		counts := map[string]int{}
 		for _, id := range cat.Checks {
 			ck, ok := got[id]
@@ -189,9 +190,17 @@ func sevClass(s string) string {
 	return "low"
 }
 
+// SavedNote is ANL-1's plain statement on every offline rendering of a saved report.
+const SavedNote = "From a saved report: structurally checked only. Its observations and canary receipts weren't re-verified, and an edited report can't be told apart (ANL-1)."
+
+// SavedHTML is OUT-2 re-rendered from a saved report (SCR-3's -out): the same page, saying it wasn't re-verified.
+func SavedHTML(d Doc, theme string) ([]byte, error) { return render(d, theme, SavedNote) }
+
 // HTML renders OUT-2: one file that loads nothing, with a fresh script nonce, every box string escaped as text by
 // html/template, and the OUT-1 document in a JSON data block.
-func HTML(d Doc, theme string) ([]byte, error) {
+func HTML(d Doc, theme string) ([]byte, error) { return render(d, theme, "") }
+
+func render(d Doc, theme, saved string) ([]byte, error) {
 	nonce := make([]byte, 18)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
@@ -205,7 +214,7 @@ func HTML(d Doc, theme string) ([]byte, error) {
 		Boundary: d.Boundary, Invalid: d.Grade.Invalid, Complete: d.Grade.Complete, Valid: d.Grade.Valid,
 		Crit: d.Grade.Counts["critical"], High: d.Grade.Counts["high"], Med: d.Grade.Counts["medium"], Low: d.Grade.Counts["low"],
 		Unknown: len(d.Grade.Unknown), ScopedOut: d.Limits.ScopedOut, NotTested: d.Limits.NotTested, Notes: d.Grade.Notes,
-		Cleanup: d.Cleanup.Outcome, Residual: d.Cleanup.Residual, Data: d, Card: Score(d)}
+		Cleanup: d.Cleanup.Outcome, Residual: d.Cleanup.Residual, Saved: saved, Data: d, Card: Score(d)}
 	if v.Box == "" {
 		v.Box = d.Run.Box.ProviderID
 	}

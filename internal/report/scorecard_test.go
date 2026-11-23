@@ -130,7 +130,8 @@ func TestScoreNeverCleanByDefault(t *testing.T) {
 	}
 }
 
-// SCR-2: across every saved report, six of six never shows where the letter isn't a complete A.
+// SCR-2: across every saved report, a full score never shows where the letter isn't a complete A. Each is a local
+// Docker run, where Cloud access is tested, so each stays out of six with no category left out.
 func TestSixOfSixIsAnA(t *testing.T) {
 	var files []string
 	for _, pat := range []string{"../../demo/reports/*.json", "../../test/reports/*.json"} {
@@ -144,10 +145,13 @@ func TestSixOfSixIsAnA(t *testing.T) {
 			t.Fatal(err)
 		}
 		var d Doc
-		if json.Unmarshal(b, &d) != nil || d.Schema != Schema {
-			continue // not a sandprobe/1 report: summaries, cleanup and provenance records
+		if json.Unmarshal(b, &d) != nil || d.Schema != SchemaFor(d.Manifest) {
+			continue // not a sandprobe report: summaries, cleanup and provenance records
 		}
 		n++
+		if c := Score(d); c.Of != 6 || len(c.NotCounted()) != 0 {
+			t.Errorf("%s: a Docker run scored out of %d, leaving out %q", f, c.Of, c.NotCounted())
+		}
 		if c := Score(d); c.Score == c.Of {
 			six++
 			if d.Grade.Letter != "A" || !d.Grade.Complete {

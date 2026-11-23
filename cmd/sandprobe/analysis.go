@@ -16,7 +16,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	}
 	a, err := analysis.Load(args[0])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	if !compare {
 		p := analysis.Summarize(a)
@@ -30,6 +30,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 			for _, limit := range p.Limits {
 				fmt.Fprintln(o.stdout, limit)
 			}
+			fmt.Fprintln(o.stdout, report.SavedNote)
 		}
 		if !p.Valid || !p.Complete {
 			return exitPartial, nil
@@ -38,7 +39,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	}
 	b, err := analysis.Load(args[1])
 	if err != nil {
-		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", "Use a regular, unedited sandprobe/1 report file under 8 MiB.", exitUsage)
+		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	c := analysis.Compare(a, b)
 	if o.json() {
@@ -88,4 +89,5 @@ func printComparison(o opts, c analysis.Comparison) {
 		fmt.Fprintln(o.stdout, "Some checks couldn't be proven in at least one report, so an all-clear here wouldn't count either.")
 	}
 	fmt.Fprintln(o.stdout, "This compares the two reports only; it doesn't vouch for either box.")
+	fmt.Fprintln(o.stdout, report.SavedNote)
 }
