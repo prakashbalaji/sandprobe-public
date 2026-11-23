@@ -26,6 +26,11 @@ Being validated for 0.3.0.
 - Plans name all three SEC-4 metadata addresses the probe dials (UX-4).
 - AMP-1 grades sudo-rs installs instead of ending unknown, and PER-5 names why each root is a gap.
 - Write and read checks no longer pass a refusal the agent could undo through ownership or capabilities (TWN-4).
+- AMP-3 no longer passes when the agent could gain a capability by running a file with file capabilities. With
+  `NoNewPrivs` 0 and no setuid-root file found, a bounding or inheritable set holding a capability the agent lacks
+  leaves AMP-3 unknown, since the probe doesn't look for such files. A box without `no_new_privs`, with a non-empty
+  bounding set and no setuid-root files, used to pass AMP-3 and now ends incomplete. AMP-2's pass covers only the
+  capabilities held now.
 
 ### Saved reports
 

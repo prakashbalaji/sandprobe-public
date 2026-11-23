@@ -409,27 +409,50 @@ func fits(ck *catalog.Check, o obs.Observation, m obs.Manifest, id *obs.Identity
 
 // derive is AMP-2 and AMP-3 as the host grades them, from the identity alone.
 func derive(id string, who *obs.Identity) (result, variant, reason, evidence string) {
-	const graded = "graded by the host from the probe's identity"
 	if id == "AMP-2" {
 		return amp2(who)
 	}
+	return amp3(who)
+}
+
+// amp3 is AMP-3 from the identity (its row): whether an execve could give the agent a privilege it doesn't hold now,
+// through a setuid-root file or a file's capabilities. NoNewPrivs 1 forbids both. With NoNewPrivs 0, setuid-root files
+// in the system binary directories are a finding; otherwise a capability the bounding or inheritable set would let a
+// file grant, and the agent doesn't hold, leaves a pass unknown, since the probe doesn't look for such files.
+func amp3(who *obs.Identity) (result, variant, reason, evidence string) {
+	const graded = "graded by the host from the probe's identity"
 	scan := who.SetuidScan
 	switch {
 	case *who.NoNewPrivs == 1:
-		return obs.Pass, "", "", graded // no setuid file can raise privilege, whatever exists
+		return obs.Pass, "", "", graded + ": NoNewPrivs is 1, so no setuid file or file capability can raise privilege, whatever exists"
 	case scan == nil || !scan.Complete:
 		return obs.Unknown, "", "NoNewPrivs is 0 and the setuid scan didn't complete", graded
 	case len(scan.Files) > 0:
 		return obs.Finding, "new_privs", "", graded
 	}
-	return obs.Pass, "", "", graded
+	bnd, bndErr := strconv.ParseUint(who.CapBnd, 16, 64)
+	inh, inhErr := strconv.ParseUint(who.CapInh, 16, 64)
+	if bndErr != nil || inhErr != nil {
+		return obs.Unknown, "", "NoNewPrivs is 0 and the identity doesn't report CapBnd or CapInh, so capabilities an execve " +
+			"of a file with file capabilities could grant can't be told", ""
+	}
+	eff, _ := strconv.ParseUint(who.CapEff, 16, 64) // checked when the document was read
+	prm, _ := strconv.ParseUint(who.CapPrm, 16, 64) // a missing set holds nothing, so it can only widen what's new
+	amb, _ := strconv.ParseUint(who.CapAmb, 16, 64)
+	if gain := (bnd | inh) &^ (eff | prm | amb); gain != 0 {
+		return obs.Unknown, "", "NoNewPrivs is 0 and the agent's bounding or inheritable set holds " + capNames(gain) +
+			", which an execve of a file whose file capabilities name them would grant; the probe doesn't look for such files", ""
+	}
+	return obs.Pass, "", "", graded + ": NoNewPrivs is 0, but no setuid-root file is in the system binary directories, and " +
+		"the bounding and inheritable sets hold no capability the agent lacks, so no file capability can grant one"
 }
 
 // amp2 is AMP-2 from the identity (its row): uid 0, or a held capability, effective, permitted (raised into the
 // effective set at will) or ambient (permitted too), Critical for the dangerous ones and High for the rest. An
 // inheritable capability becomes permitted only through an execve of a file whose file capabilities name it, which
 // NoNewPrivs 1 forbids: with NoNewPrivs 0 it leaves a pass unknown, since the probe doesn't look for such files. The
-// evidence names each capability, effective or only permitted.
+// evidence names each capability, effective or only permitted. A pass covers what the agent holds now; what an execve
+// could give it is AMP-3's.
 func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 	eff, _ := strconv.ParseUint(who.CapEff, 16, 64) // checked when the document was read
 	prm, prmErr := strconv.ParseUint(who.CapPrm, 16, 64)
@@ -460,26 +483,29 @@ func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 			strings.Join(catalog.CapList(inh), ", ") + ", which an execve of a file whose file capabilities name them " +
 			"would make permitted; the probe doesn't look for such files", ""
 	}
-	return obs.Pass, "", "", "graded by the host from the probe's identity: no capability held, effective, permitted or ambient"
+	return obs.Pass, "", "", "graded by the host from the probe's identity: no capability held now, effective, permitted or " +
+		"ambient; AMP-3 covers gaining one on exec"
 }
 
 // capSets names the held capabilities, the effective ones apart from those only permitted, at most twelve of each.
 func capSets(eff, held uint64) string {
-	list := func(caps uint64) string {
-		names := catalog.CapList(caps)
-		if n := len(names); n > 12 {
-			names = append(names[:12], strconv.Itoa(n-12)+" more")
-		}
-		return strings.Join(names, ", ")
-	}
 	var parts []string
 	if e := eff & held; e != 0 {
-		parts = append(parts, list(e)+" (effective)")
+		parts = append(parts, capNames(e)+" (effective)")
 	}
 	if p := held &^ eff; p != 0 {
-		parts = append(parts, list(p)+" (permitted, not effective: a process raises a permitted capability at will)")
+		parts = append(parts, capNames(p)+" (permitted, not effective: a process raises a permitted capability at will)")
 	}
 	return strings.Join(parts, "; ")
+}
+
+// capNames names at most twelve capabilities, and counts the rest.
+func capNames(caps uint64) string {
+	names := catalog.CapList(caps)
+	if n := len(names); n > 12 {
+		names = append(names[:12], strconv.Itoa(n-12)+" more")
+	}
+	return strings.Join(names, ", ")
 }
 
 // shape checks a proof is present, names the check's mechanism, agrees with the identity, and lists only targets the

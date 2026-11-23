@@ -533,7 +533,16 @@ func TestGrades(t *testing.T) {
 		}, "F", nil},
 		{"dangerous capabilities are F", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.CapEff = "0000000000200000" }, "F", nil},
 		{"other capabilities are D", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.CapEff = "0000000000000400" }, "D", nil},
-		{"NoNewPrivs 0 with a complete scan finding nothing passes", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.NoNewPrivs = ptr(0) }, "A", nil},
+		{"NoNewPrivs 0 with no setuid file and a bounding set: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			d.Identity.NoNewPrivs = ptr(0)
+		}, "C", func(t *testing.T, r Report) {
+			if o := outcome(r, "AMP-3"); o.Result != obs.Unknown || !strings.Contains(o.Reason, "file capabilities") {
+				t.Fatalf("want AMP-3 unknown naming file capabilities, got %+v", o)
+			}
+		}},
+		{"NoNewPrivs 0 with no setuid file and empty bounding and inheritable sets passes", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			d.Identity.NoNewPrivs, d.Identity.CapBnd = ptr(0), "0000000000000000"
+		}, "A", nil},
 		{"NoNewPrivs 0 with no setuid scan: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
 			d.Identity.NoNewPrivs, d.Identity.SetuidScan = ptr(0), nil
 		}, "C", func(t *testing.T, r Report) {
@@ -859,6 +868,46 @@ func TestAMP2CapabilitySets(t *testing.T) {
 		res, v, why, ev := derive("AMP-2", id)
 		if res != tc.result || v != tc.variant || !strings.Contains(why+ev, tc.mentions) {
 			t.Errorf("%s: want %s %s mentioning %q, got %s %s %q %q", tc.name, tc.result, tc.variant, tc.mentions, res, v, why, ev)
+		}
+	}
+}
+
+// AMP-3 asks whether an execve could give the agent a privilege it doesn't hold now. With NoNewPrivs 0 a file's
+// capabilities can grant whatever the bounding set (permitted) or the inheritable set allows, and the probe doesn't
+// look for such files, so a capability the agent lacks there leaves a pass unknown (AMP-3's row): the identity the
+// review of #34 reproduced, uid 65534 holding nothing under Docker's bounding set, can't pass.
+func TestAMP3ExecGains(t *testing.T) {
+	zero, one := 0, 1
+	const none, docker, dac = "0000000000000000", "00000000a80425fb", "0000000000000002" // CAP_DAC_OVERRIDE
+	clean, setuid := &obs.SetuidScan{Complete: true}, &obs.SetuidScan{Complete: true, Files: []string{"/usr/bin/passwd"}}
+	for _, tc := range []struct {
+		name                      string
+		uid                       int
+		prm, inh, bnd             string
+		nnp                       *int
+		scan                      *obs.SetuidScan
+		result, variant, mentions string
+	}{
+		{"nothing held, Docker's bounding set", 65534, none, none, docker, &zero, clean, obs.Unknown, "", "CAP_DAC_OVERRIDE"},
+		{"the same with NoNewPrivs 1", 65534, none, none, docker, &one, clean, obs.Pass, "", "NoNewPrivs is 1"},
+		{"only an inheritable capability", 1000, none, dac, none, &zero, clean, obs.Unknown, "", "CAP_DAC_OVERRIDE"},
+		{"empty bounding and inheritable sets", 1000, none, none, none, &zero, clean, obs.Pass, "", "no capability the agent lacks"},
+		{"the bounding set holds only what's held", 1000, dac, none, dac, &zero, clean, obs.Pass, "", "no capability the agent lacks"},
+		{"root holding its bounding set", 0, docker, none, docker, &zero, clean, obs.Pass, "", "no capability the agent lacks"},
+		{"no CapBnd reported", 1000, none, none, "", &zero, clean, obs.Unknown, "", "doesn't report CapBnd"},
+		{"no CapInh reported", 1000, none, "", none, &zero, clean, obs.Unknown, "", "doesn't report CapBnd or CapInh"},
+		{"setuid-root files", 1000, none, none, docker, &zero, setuid, obs.Finding, "new_privs", ""},
+		{"an incomplete scan", 1000, none, none, none, &zero, &obs.SetuidScan{}, obs.Unknown, "", "setuid scan didn't complete"},
+		{"setuid-root files with NoNewPrivs 1", 1000, none, none, docker, &one, setuid, obs.Pass, "", "NoNewPrivs is 1"},
+	} {
+		id := &obs.Identity{UID: tc.uid, CapEff: none, CapPrm: tc.prm, CapInh: tc.inh, CapBnd: tc.bnd, CapAmb: none,
+			NoNewPrivs: tc.nnp, SetuidScan: tc.scan}
+		res, v, why, ev := derive("AMP-3", id)
+		if res != tc.result || v != tc.variant || !strings.Contains(why+ev, tc.mentions) {
+			t.Errorf("%s: want %s %s mentioning %q, got %s %s %q %q", tc.name, tc.result, tc.variant, tc.mentions, res, v, why, ev)
+		}
+		if a2, _, _, _ := derive("AMP-2", id); res == obs.Pass && a2 == obs.Pass && *tc.nnp == 0 && tc.bnd != none {
+			t.Errorf("%s: AMP-2 and AMP-3 both pass with NoNewPrivs 0 and a bounding set the agent doesn't hold", tc.name)
 		}
 	}
 }
