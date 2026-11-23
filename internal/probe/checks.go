@@ -279,9 +279,12 @@ func sec3(e *env, ck *catalog.Check) obs.Observation {
 // writable is PER-1 to PER-4, AMP-4 and AMP-8's kernel settings: write or replace, never opened for writing.
 func writable(e *env, ck *catalog.Check) obs.Observation {
 	found := map[string][]string{}
+	unset := false // PATH is unset, so where the agent's launcher looks can't be told: PER-2 can't pass
 	if ck.ID == "PER-2" {
 		wd, _ := os.Getwd()
-		dirs, err := pathDirs(os.Getenv("PATH"), wd)
+		entries, ok := pathEntries()
+		unset = !ok
+		dirs, err := pathDirs(entries, wd)
 		if err != nil {
 			return unknownObs(err.Error())
 		}
@@ -296,7 +299,7 @@ func writable(e *env, ck *catalog.Check) obs.Observation {
 	if err != nil {
 		return sweepErr(err)
 	}
-	return e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
+	o := e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
 		variant := "writable"
 		if ck.ID == "AMP-8.sys" {
 			variant = "writable_sysctl"
@@ -310,6 +313,10 @@ func writable(e *env, ck *catalog.Check) obs.Observation {
 		}
 		return variant, strings.Join(ev, "; ")
 	})
+	if unset && o.Result != obs.Finding {
+		return unknownObs(pathUnset)
+	}
+	return o
 }
 
 // AMP-4: the known control sockets, each an existing socket the agent may connect to, never connected.
@@ -497,7 +504,7 @@ func listDir(dir string) ([]os.DirEntry, error) {
 }
 
 func sshKeys(home string) ([]string, error) {
-	dir := filepath.Join(home, ".ssh")
+	dir := under(home, ".ssh")
 	entries, err := listDir(dir)
 	if err != nil {
 		return nil, err
@@ -505,7 +512,7 @@ func sshKeys(home string) ([]string, error) {
 	var out []string
 	for _, d := range entries {
 		if strings.HasPrefix(d.Name(), "id_") && !strings.HasSuffix(d.Name(), ".pub") {
-			out = append(out, filepath.Join(dir, d.Name()))
+			out = append(out, under(dir, d.Name()))
 		}
 	}
 	return out, nil
@@ -538,11 +545,14 @@ func secretFiles(root string) ([]string, error) {
 			return err
 		}
 		for _, d := range entries {
-			p := filepath.Join(dir, d.Name())
+			p := under(dir, d.Name())
 			isDir := d.IsDir()
-			if d.Type()&os.ModeSymlink != 0 {
-				n, err := resolve(p)
-				isDir = err == nil && n.errno == 0 && n.st.Mode&syscall.S_IFMT == syscall.S_IFDIR
+			if d.Type()&os.ModeSymlink != 0 { // where the link leads, as the kernel resolves it (walkPath)
+				w, err := walkFor(p)
+				if err == nil {
+					isDir = w.errno == 0 && w.nodes[w.last()].dir
+					w.close()
+				}
 			}
 			switch {
 			case !isDir:
@@ -594,7 +604,7 @@ func dotenvs(home, wd string) ([]string, error) {
 		}
 		entries, err := listDir(dir)
 		if errors.Is(err, errHidden) && depth == 2 {
-			p := filepath.Join(dir, ".env")
+			p := under(dir, ".env")
 			switch e := errnoOf(lstat(p, new(syscall.Stat_t))); {
 			case e == 0:
 				add(p)
@@ -608,7 +618,7 @@ func dotenvs(home, wd string) ([]string, error) {
 			return err
 		}
 		for _, d := range entries {
-			p := filepath.Join(dir, d.Name())
+			p := under(dir, d.Name())
 			switch {
 			case d.Name() == ".env":
 				add(p)
@@ -617,14 +627,17 @@ func dotenvs(home, wd string) ([]string, error) {
 				if err := walk(p, depth+1); err != nil {
 					return err
 				}
-			case d.Type()&os.ModeSymlink != 0:
-				n, err := resolve(p)
+			case d.Type()&os.ModeSymlink != 0: // where the link leads, as the kernel resolves it (walkPath)
+				w, err := walkFor(p)
 				switch {
 				case errors.Is(err, errDangling):
 					continue // leads nowhere the agent could read
 				case err != nil:
-					return err // a loop, or too many hops: coverage can't be established
-				case n.errno == 0 && n.st.Mode&syscall.S_IFMT == syscall.S_IFDIR:
+					return err // a loop, or too many links: coverage can't be established
+				}
+				isDir := w.errno == 0 && w.nodes[w.last()].dir
+				w.close()
+				if isDir {
 					if err := walk(p, depth+1); err != nil {
 						return err
 					}
@@ -644,24 +657,21 @@ func dotenvs(home, wd string) ([]string, error) {
 	return out, nil
 }
 
-// pathDirs are the PATH entries ahead of the first system directory, other than the planned /usr/local/bin. An empty
-// or relative entry is searched relative to the working directory, so it resolves against wd; without one, it can't
-// be judged.
-func pathDirs(path, wd string) ([]string, error) {
+// pathDirs are the PATH entries ahead of the first system directory, other than the planned /usr/local/bin, each as
+// given, never cleaned (SBX-2). An empty or relative entry is searched relative to the working directory, so it
+// resolves against wd; without one, it can't be judged.
+func pathDirs(entries []string, wd string) ([]string, error) {
 	system := map[string]bool{"/usr/sbin": true, "/usr/bin": true, "/sbin": true, "/bin": true}
 	seen := map[string]bool{}
 	var out []string
-	for _, d := range filepath.SplitList(path) {
+	var err error
+	for _, d := range entries {
 		if system[d] {
 			break
 		}
-		if !filepath.IsAbs(d) {
-			if wd == "" {
-				return nil, fmt.Errorf("PATH entry %q is relative to a working directory the probe can't tell", d)
-			}
-			d = filepath.Join(wd, d)
+		if d, err = fromPath(d, wd); err != nil {
+			return nil, err
 		}
-		d = filepath.Clean(d)
 		if d == "/usr/local/bin" || seen[d] {
 			continue
 		}
@@ -669,4 +679,34 @@ func pathDirs(path, wd string) ([]string, error) {
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// pathEntries is PATH split as execvp splits it in glibc and musl: on every colon, so the whole of an empty PATH, or an
+// entry at either end or between two colons, is one empty entry, the working directory (filepath.SplitList drops an
+// empty PATH altogether). ok is false when PATH is unset (pathUnset).
+func pathEntries() (entries []string, ok bool) {
+	p, ok := os.LookupEnv("PATH")
+	if !ok {
+		return nil, false
+	}
+	return strings.Split(p, ":"), true
+}
+
+// pathUnset is why a check that lists PATH can't pass, or be absent, when PATH is unset.
+const pathUnset = "PATH is unset, and where commands are then looked up depends on the agent's launcher, which the " +
+	"probe can't tell: glibc's execvp searches /bin:/usr/bin, dash and bash their compiled defaults, and Debian's " +
+	"bash ends its default in \".\", the working directory"
+
+// fromPath is a PATH entry as the shell searches it: an absolute one as given, an empty one the working directory,
+// and any other relative one under it, never cleaned (SBX-2). Without a working directory a relative one can't be told.
+func fromPath(d, wd string) (string, error) {
+	switch {
+	case filepath.IsAbs(d):
+		return d, nil
+	case wd == "":
+		return "", fmt.Errorf("PATH entry %q is relative to a working directory the probe can't tell", d)
+	case d == "":
+		return wd, nil
+	}
+	return under(wd, d), nil
 }

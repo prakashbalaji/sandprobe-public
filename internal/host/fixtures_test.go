@@ -128,6 +128,35 @@ var fixtures = []fixture{
 				t.Errorf("AMP-2: want a dangerous_caps finding naming CAP_DAC_READ_SEARCH as only permitted, got %+v", o)
 			}
 		}},
+	// TWN-4 for every entry on the way: the agent's own link in root's sticky directory, which the kernel lets it
+	// rename, leads its home to root's read-only files; replacing the link redirects them, so PER-1 can't pass
+	{name: "evidence-stickylink", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=stickylink"}
+	}, expect: expectWritable(map[string]string{"PER-1": "~/.bashrc"})},
+	// the walk resolves as the kernel does: a last ../ link after a directory link lands in the real directory, so the
+	// write and the read it allows are found and the read it refuses isn't, never judged on the decoys beside the link;
+	// and one budget of eight links covers the whole path, so a ninth leaves both checks unknown (SBX-2, TWN-4)
+	{name: "evidence-dotdot", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=dotdot"}
+	}, expect: func(t *testing.T, w world, r *Run) {
+		expectWritable(map[string]string{"PER-1": "~/.bashrc", "SEC-3": ".git-credentials"})(t, w, r)
+		if o := outcome(r.Report, "SEC-3"); strings.Contains(o.Evidence, ".netrc") {
+			t.Errorf("SEC-3: the kernel refuses ~/.netrc, yet it was found: %+v", o)
+		}
+	}},
+	// a path reaches the walk as given: HOME and a PATH entry of link/.., which the kernel resolves from where the link
+	// leads, never lexically, so the writable startup file and the readable credential are found, and the sudo on PATH
+	// leaves AMP-1 unknown, never absent (SBX-2)
+	{name: "evidence-homedotdot", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=homedotdot", "-e", "HOME=/spcase/base/link/..",
+			"-e", "PATH=/spcase/base/link/..:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+	}, expect: func(t *testing.T, w world, r *Run) {
+		expectWritable(map[string]string{"PER-1": "~/.bashrc", "SEC-3": "~/.netrc"})(t, w, r)
+		expectUnknown(map[string]string{"AMP-1": "only off the fixed paths"})(t, w, r)
+	}},
+	{name: "evidence-ninelinks", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=ninelinks"}
+	}, expect: expectUnknown(map[string]string{"PER-1": "more than 8", "SEC-3": "more than 8"})},
 	// AMP-3 and file capabilities: uid 65534 holding no capability, with NoNewPrivs 0 and Docker's bounding set, gains
 	// CAP_DAC_OVERRIDE by running a file whose file capabilities name it, with no setuid-root file anywhere it's scanned
 	// for. AMP-2 passes on what the agent holds now; AMP-3 can't pass. With NoNewPrivs 1 the kernel grants nothing

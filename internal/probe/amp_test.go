@@ -44,10 +44,10 @@ func TestPinSudo(t *testing.T) {
 	if root { // root owns the temporary directory, and can write every directory
 		want[own] = "the agent can write " + dir
 		want[link] = "the agent can write " + dir
-		for _, p := range []string{"/usr/bin/ls", "/usr/bin/pager", "/usr/bin/su"} {
-			want[p] = "the agent can write /usr/bin"
+		for _, p := range []string{"/usr/bin/ls", "/usr/bin/pager", "/usr/bin/su", "/bin/su"} {
+			want[p] = "the agent can write /usr/bin" // the deepest directory looked in, judged first
 		}
-		want["/bin/su"] = "the agent can write /" // /bin is itself a link, in /
+		want[link] = "the agent can write /usr/bin"
 	}
 	for p, reason := range want {
 		fd, chain, why := pinSudo(p)
@@ -60,8 +60,8 @@ func TestPinSudo(t *testing.T) {
 	}
 }
 
-// The walk follows every link on the way, a directory's as well as the last name's, counts each against SBX-2's eight,
-// names each in the chain, and ends at a path with no link in it.
+// The walk resolves as the kernel does: every link on the way, a directory's as well as the last name's, followed from
+// the directory that holds it and named in the chain; one budget of eight for the whole path.
 func TestWalk(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "d2"), 0o755)
@@ -69,16 +69,21 @@ func TestWalk(t *testing.T) {
 	os.Symlink("d2", filepath.Join(dir, "d1"))                         // a directory link, relative
 	os.Symlink(filepath.Join(dir, "d1", "f"), filepath.Join(dir, "l")) // a link through it, absolute
 	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
-	os.Symlink("../d1/f", filepath.Join(dir, "sub", "up")) // .. taken against the link-free path
+	os.Symlink("../d1/f", filepath.Join(dir, "sub", "up")) // .. taken from the directory holding the link
 	for p, wantChain := range map[string][]string{
 		filepath.Join(dir, "l"):         {filepath.Join(dir, "l"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
-		filepath.Join(dir, "sub", "up"): {filepath.Join(dir, "sub", "up"), filepath.Join(dir, "d1", "f"), filepath.Join(dir, "d2", "f")},
+		filepath.Join(dir, "sub", "up"): {filepath.Join(dir, "sub", "up"), dir + "/sub/../d1/f", filepath.Join(dir, "d2", "f")},
 		"/bin/su":                       {"/bin/su", "/usr/bin/su"},
 	} {
-		links, steps, real, _, err := walk(p)
-		if err != nil || !slices.Equal(steps, wantChain) || len(links) != len(wantChain)-1 || real != wantChain[len(wantChain)-1] {
-			t.Errorf("%s: want the chain %v, got %v (links %v, real %s, %v)", p, wantChain, steps, links, real, err)
+		w, err := walkPath(p, true)
+		if err != nil {
+			t.Errorf("%s: %v", p, err)
+			continue
 		}
+		if !slices.Equal(w.steps, wantChain) || w.nodes[w.last()].path != wantChain[len(wantChain)-1] {
+			t.Errorf("%s: want the chain %v, got %v ending at %s", p, wantChain, w.steps, w.nodes[w.last()].path)
+		}
+		w.close()
 	}
 	// nine directory links in a row: past SBX-2's eight, never followed to the end
 	for i := 1; i <= 9; i++ {
@@ -86,8 +91,8 @@ func TestWalk(t *testing.T) {
 	}
 	os.Mkdir(filepath.Join(dir, "n10"), 0o755)
 	os.WriteFile(filepath.Join(dir, "n10", "f"), nil, 0o644)
-	if links, _, _, _, err := walk(filepath.Join(dir, "n1", "f")); err == nil || len(links) != maxHops || !strings.Contains(err.Error(), "more than 8") {
-		t.Errorf("nine directory links: want refused after eight, got %v after %d", err, len(links))
+	if _, err := walkPath(filepath.Join(dir, "n1", "f"), true); err == nil || !strings.Contains(err.Error(), "more than 8") {
+		t.Errorf("nine directory links: want refused after eight, got %v", err)
 	}
 }
 
@@ -315,6 +320,39 @@ func TestAMP1Absent(t *testing.T) {
 	}
 }
 
+// PATH is split as execvp splits it (SBX-2): all of an empty PATH, "::" and a trailing colon are empty entries, each the
+// working directory; an unset PATH leaves the search to the agent's launcher, which the probe can't tell. With a
+// writable working directory holding a file named sudo, PER-2 and AMP-1 each find or are unknown, never a pass or
+// absent.
+func TestPATHWorkingDirectory(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/sudo"); err == nil {
+		t.Skip("sudo is installed here")
+	}
+	per2, _ := catalog.Get("PER-2")
+	ck, _ := catalog.Get("AMP-1")
+	targets, discover := catalog.Plan([]string{"AMP-1"})
+	for path, why := range map[string]string{"": "only off the fixed paths", "::": "only off the fixed paths",
+		"/nonexistent:": "only off the fixed paths", "unset": "PATH is unset"} {
+		dir := t.TempDir()
+		chdir(t, dir)
+		os.WriteFile(filepath.Join(dir, "sudo"), []byte("#!/bin/sh\n"), 0o755) // only ever lstat'd
+		t.Setenv("PATH", path)
+		if path == "unset" {
+			os.Unsetenv("PATH")
+		}
+		o := writable(testEnv(t, map[string][]string{"PER-2": {"/usr/local/bin"}}), per2)
+		if o.Result != obs.Finding && o.Result != obs.Unknown {
+			t.Errorf("PER-2, PATH %q, a writable working directory: want a finding or unknown, got %s", path, o.Result)
+		}
+		a := amp1(&env{in: obs.Input{Targets: targets, Discover: discover}, root: root}, ck)
+		if a.Result != obs.Unknown || !strings.Contains(a.Reason, why) {
+			t.Errorf("AMP-1, PATH %q, a sudo in the working directory: want unknown saying %q, got %s %q", path, why,
+				a.Result, a.Reason)
+		}
+		t.Logf("PATH %q: PER-2 %s %s%s; AMP-1 %s %s", path, o.Result, o.Evidence, o.Reason, a.Result, a.Reason)
+	}
+}
+
 // AMP-7 contacts only the API the plan named, never a local one.
 func TestAMP7Gate(t *testing.T) {
 	ck, _ := catalog.Get("AMP-7")
@@ -441,5 +479,24 @@ func TestExchangeDeadline(t *testing.T) {
 	}
 	if err := silent(100*time.Millisecond, time.Now().Add(5*time.Second)); err != errNoAnswer {
 		t.Errorf("silent for one attempt, well before the deadline: want errNoAnswer, got %v", err)
+	}
+}
+
+// AMP-1's allow-list refuses the post-merge review's shape too: a link on sudo's chain the agent owns, in root's sticky
+// /tmp, which it could replace; every link must be root's, and no directory on the way writable by anyone.
+func TestPinSudoStickyLink(t *testing.T) {
+	link := filepath.Join("/tmp", fmt.Sprintf("sp-sudolink-%d", os.Getpid()))
+	os.Remove(link)
+	if err := os.Symlink("/usr/bin", link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	fd, chain, why := pinSudo(filepath.Join(link, "su"))
+	if why == "" {
+		syscall.Close(fd)
+		t.Fatalf("a chain through a link in a sticky directory: want refused, got pinned as %s", chain)
+	}
+	if !root && !strings.Contains(why, "isn't root's") && !strings.Contains(why, "/tmp is writable by anyone") { // root writes /usr/bin first
+		t.Errorf("want the refusal to name the link or /tmp, got %q", why)
 	}
 }

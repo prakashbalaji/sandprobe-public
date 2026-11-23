@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -19,8 +18,12 @@ import (
 // agent as it is (faccessat, the open); the model answers only for what a change could gain. It reads stat
 // information alone: nothing is opened, read or changed.
 
-// inode is one inode on a path as the kernel traverses it: a real directory, or the target.
+// inode is one inode on a path as the kernel traverses it: a real directory, a symlink entry on the way, or the
+// target. parent is the directory it was looked up in (-1 for "/").
 type inode struct {
+	parent     int
+	ftype      uint32 // the file type bits
+	ino        uint64
 	path       string
 	seen       bool // stat could see it; past a directory the agent can't search, nothing can be
 	exists     bool
@@ -79,103 +82,6 @@ func theAgent() agentID {
 	}
 	a.eff &= a.caps
 	return a
-}
-
-// pathNodes are the inodes the kernel traverses for p: "/", every real directory below it, each symlink on the way
-// followed (a directory's as well as the last name's when follow is set) within SBX-2's eight hops, and the target
-// last. A missing component, and everything after it, doesn't exist; past a directory the agent can't search,
-// nothing is seen.
-func pathNodes(p string, follow bool) ([]inode, error) {
-	ns := []inode{stat("/")}
-	rest := strings.Split(p, "/")
-	cur, hops := "/", 0
-	for len(rest) > 0 {
-		c := rest[0]
-		rest = rest[1:]
-		switch c {
-		case "", ".":
-			continue
-		case "..":
-			if cur != "/" {
-				cur, ns = filepath.Dir(cur), ns[:len(ns)-1]
-			}
-			continue
-		}
-		next := filepath.Join(cur, c)
-		last := true
-		for _, r := range rest {
-			last = last && (r == "" || r == ".")
-		}
-		var st syscall.Stat_t
-		err := syscall.Lstat(next, &st)
-		switch e := errnoOf(err); {
-		case e == syscall.ENOENT || e == syscall.ENOTDIR:
-			ns = append(ns, inode{path: next, seen: true})
-			for _, r := range rest {
-				if r != "" && r != "." {
-					next = filepath.Join(next, r)
-					ns = append(ns, inode{path: next, seen: true})
-				}
-			}
-			return ns, nil
-		case e == syscall.EACCES:
-			ns = append(ns, inode{path: next})
-			for _, r := range rest {
-				if r != "" && r != "." {
-					next = filepath.Join(next, r)
-					ns = append(ns, inode{path: next})
-				}
-			}
-			return ns, nil
-		case err != nil:
-			return nil, fmt.Errorf("%w: %s: %v", errModel, next, err)
-		}
-		if st.Mode&syscall.S_IFMT == syscall.S_IFLNK && (!last || follow) {
-			if hops++; hops > maxHops {
-				return nil, fmt.Errorf("%w: more than %d links on the way to %s", errModel, maxHops, p)
-			}
-			t, err := os.Readlink(next)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %s: %v", errModel, next, err)
-			}
-			if filepath.IsAbs(t) {
-				cur, ns = "/", ns[:1]
-			}
-			rest = append(strings.Split(t, "/"), rest...)
-			continue
-		}
-		n := stat(next)
-		n.mountPoint = uint64(st.Dev) != ns[len(ns)-1].dev
-		ns = append(ns, n)
-		cur = next
-	}
-	return ns, nil
-}
-
-// stat is one inode's attributes, by lstat, statfs and the ACL's extended attribute's size; nothing is opened.
-func stat(p string) inode {
-	n := inode{path: p, seen: true}
-	var st syscall.Stat_t
-	if syscall.Lstat(p, &st) != nil {
-		n.seen = false
-		return n
-	}
-	n.dev = uint64(st.Dev)
-	n.exists = true
-	n.dir = st.Mode&syscall.S_IFMT == syscall.S_IFDIR
-	n.link = st.Mode&syscall.S_IFMT == syscall.S_IFLNK
-	n.uid, n.gid, n.mode = st.Uid, st.Gid, st.Mode&0o1777
-	var fs syscall.Statfs_t
-	if syscall.Statfs(p, &fs) == nil {
-		n.ro = fs.Flags&1 /* ST_RDONLY */ != 0
-		n.procfs = fs.Type == 0x9fa0                    /* PROC_SUPER_MAGIC */
-		n.noEntries = n.procfs || fs.Type == 0x62656572 /* SYSFS_MAGIC */
-	}
-	if !n.link {
-		size, err := unix.Lgetxattr(p, "system.posix_acl_access", nil)
-		n.acl = err == nil && size > 0
-	}
-	return n
 }
 
 // allows is the kernel's permission check of one inode for an identity: the owner's, the group's or the others' bits;
@@ -269,16 +175,22 @@ func identities(a agentID, ns []inode) ([]identity, bool) {
 	return ids, complete
 }
 
-// reach: can identity id resolve the path to ns[i], every directory before it searchable (as it is, or opened)?
+// reach: can identity id make every lookup up to ns[i], each directory it looks in searchable (as it is, or opened)?
 func reach(ns []inode, i int, id identity, opened []bool) verdict {
-	for j := 0; j < i; j++ {
+	for k := 1; k <= i; k++ {
+		d := ns[k].parent
+		if d < 0 {
+			continue // "/" itself, which no lookup reaches
+		}
 		switch {
-		case !ns[j].seen:
+		case !ns[d].seen:
 			return cantTell
-		case !ns[j].exists:
+		case !ns[d].exists:
 			return cannot
-		case !allows(&ns[j], id, 1, opened[j]):
+		case !allows(&ns[d], id, 1, opened[d]):
 			return cannot
+		case k < i && ns[k].seen && !ns[k].exists:
+			return cannot // the path breaks at a missing entry
 		}
 	}
 	return can
@@ -335,9 +247,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 	result, how := cannot, ""
 	last := len(ns) - 1
 	for _, id := range ids {
-		v, at := goal(ns, id, opened, want, onlyOpen)
+		v, at, replace := goal(ns, id, opened, want, onlyOpen)
 		if v == can {
-			return can, describe(a, ns, id, opened, why, at, want)
+			return can, describe(a, ns, id, opened, why, at, replace, want)
 		}
 		if v == cantTell {
 			via := "a change of mode"
@@ -353,9 +265,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 	return result, how
 }
 
-// goal is one identity's answer, and the inode whose access gives it: the target, or the directory whose entry it
-// can create or replace.
-func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (verdict, int) {
+// goal is one identity's answer, and the node whose access gives it: the target, or (replace) the entry it can create
+// or replace in the directory it was looked up in.
+func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (verdict, int, bool) {
 	last := len(ns) - 1
 	t := ns[last]
 	result := cannot
@@ -363,20 +275,24 @@ func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (v
 		r := reach(ns, last, id, opened)
 		switch {
 		case r == can && t.seen && t.exists && !(want == 2 && t.ro) && allows(&t, id, want, opened[last]):
-			return can, last
+			return can, last, false
 		case r == cantTell || r == can && !t.seen:
 			result = cantTell
 		}
 	}
 	if want != 2 || onlyOpen {
-		return result, -1
+		return result, -1, false
 	}
-	for j := last - 1; j >= 0; j-- {
-		p, c := ns[j], ns[j+1]
-		if !p.seen || !p.exists || !p.dir || p.ro || p.noEntries || !allows(&p, id, 3, opened[j]) {
+	for k := last; k >= 1; k-- { // every entry on the way, a symlink's included, in the directory it was looked up in
+		d := ns[k].parent
+		if d < 0 {
+			continue // "/" is no entry of any directory
+		}
+		p, c := ns[d], ns[k]
+		if !p.seen || !p.exists || !p.dir || p.ro || p.noEntries || !allows(&p, id, 3, opened[d]) {
 			continue
 		}
-		r := reach(ns, j, id, opened)
+		r := reach(ns, k, id, opened)
 		if r == cannot {
 			continue
 		}
@@ -387,23 +303,23 @@ func goal(ns []inode, id identity, opened []bool, want uint32, onlyOpen bool) (v
 		case !c.exists:
 		case c.mountPoint:
 			child = cannot
-		case p.mode&syscall.S_ISVTX != 0 && !opened[j] && id.uid != p.uid && id.uid != c.uid &&
+		case p.mode&syscall.S_ISVTX != 0 && !opened[d] && id.uid != p.uid && id.uid != c.uid &&
 			id.caps&capFowner == 0 && !(id.caps&capChown != 0 && !c.ro && !c.procfs):
 			child = cannot
 		}
 		switch {
 		case r == can && child == can:
-			return can, j
+			return can, k, true
 		case child != cannot:
 			result = cantTell
 		}
 	}
-	return result, -1
+	return result, -1, false
 }
 
 // describe says how an identity gets the access: the change of uid or groups, the capabilities it raises, and the
 // modes it changes on the way.
-func describe(a agentID, ns []inode, id identity, opened []bool, why []string, at int, want uint32) string {
+func describe(a agentID, ns []inode, id identity, opened []bool, why []string, at int, replace bool, want uint32) string {
 	var parts []string
 	if id.uid != a.uid {
 		parts = append(parts, fmt.Sprintf("as uid %d (CAP_SETUID)", id.uid))
@@ -427,15 +343,19 @@ func describe(a agentID, ns []inode, id identity, opened []bool, why []string, a
 	} else if dac := id.caps & (capDacOverride | capDacReadSearch); dac != 0 {
 		parts = append(parts, "with "+capList(dac))
 	}
-	for i := 0; i <= at && i < len(ns); i++ {
-		need := uint32(1) // search, on the way
-		switch {
-		case i == at && at == len(ns)-1:
-			need = want
-		case i == at:
-			need = 3 // write and search the directory whose entry changes
+	need := map[int]uint32{} // the access each node gives the goal: search for every lookup, then the goal's own
+	for m := 1; m <= at; m++ {
+		if ns[m].parent >= 0 {
+			need[ns[m].parent] |= 1
 		}
-		if opened[i] && !allows(&ns[i], id, need, false) {
+	}
+	if replace {
+		need[ns[at].parent] |= 3 // write and search the directory whose entry changes
+	} else {
+		need[at] |= want
+	}
+	for i := range ns {
+		if w, ok := need[i]; ok && opened[i] && !allows(&ns[i], id, w, false) {
 			parts = append(parts, "changing the mode of "+ns[i].path+", "+why[i])
 		}
 	}
@@ -445,24 +365,19 @@ func describe(a agentID, ns []inode, id identity, opened []bool, why []string, a
 	return strings.Join(parts, ", ")
 }
 
-// modelGain is TWN-4's question for a path the kernel refused the agent as it is: could a change get it want? A
+// modelOn is TWN-4's question for a walked path the kernel refused the agent as it is: could a change get it want? A
 // path whose modes alone already let the agent in, though the kernel refused, is decided by an ACL or a security
 // module, which the model doesn't follow: it can't tell. So too where an ACL lies on the way and the agent has any
 // power to change identity or mode.
-func modelGain(p string, follow bool, want uint32, onlyOpen bool) (verdict, string, error) {
-	ns, err := pathNodes(p, follow)
-	if err != nil {
-		return cannot, "", err
-	}
+func modelOn(ns []inode, p string, want uint32, onlyOpen bool) (verdict, string) {
 	a := theAgent()
 	if v, _ := gains(a, ns, want, onlyOpen, false); v == can {
-		return cantTell, "its modes let the agent in, yet the kernel refused it: an ACL or a security module decides " + p, nil
+		return cantTell, "its modes let the agent in, yet the kernel refused it: an ACL or a security module decides " + p
 	}
 	for _, n := range ns {
 		if n.acl && (a.caps&(capSetuid|capSetgid|capChown|capFowner|capDacOverride|capDacReadSearch) != 0 || n.uid == a.uid) {
-			return cantTell, "an ACL on " + n.path + " decides, which the model doesn't follow", nil
+			return cantTell, "an ACL on " + n.path + ", or one the probe can't rule out, decides, which the model doesn't follow"
 		}
 	}
-	v, how := gains(a, ns, want, onlyOpen, true)
-	return v, how, nil
+	return gains(a, ns, want, onlyOpen, true)
 }
