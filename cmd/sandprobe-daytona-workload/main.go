@@ -32,7 +32,7 @@ import (
 var sourceCommit string
 var hexRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
 
-type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts string }
+type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts, storageProfile string }
 type taskResult struct {
 	Schema                     string `json:"schema"`
 	Workload                   string `json:"workload"`
@@ -50,6 +50,46 @@ type cleanupResult struct {
 	Confirmed bool   `json:"confirmed"`
 	Proof     string `json:"proof"`
 }
+
+// RUN-23: assessment and recovery must not rewrite one volume ledger at once.
+func lockManagedFolder(folder string) (*os.File, error) {
+	st, err := os.Lstat(folder)
+	if err != nil || !st.IsDir() || st.Mode().Perm() != 0700 {
+		return nil, errors.New("managed folder unavailable or unsafe")
+	}
+	owner, ok := st.Sys().(*syscall.Stat_t)
+	if !ok || owner.Uid != uint32(os.Getuid()) {
+		return nil, errors.New("managed folder not owned")
+	}
+	f, err := os.OpenFile(filepath.Join(folder, ".managed-run.lock"), os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, errors.New("managed lock unavailable")
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+		f.Close()
+		return nil, errors.New("managed lock unsafe")
+	}
+	owner, ok = info.Sys().(*syscall.Stat_t)
+	if !ok || owner.Uid != uint32(os.Getuid()) || owner.Nlink != 1 {
+		f.Close()
+		return nil, errors.New("managed lock not private")
+	}
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		f.Close()
+		return nil, errors.New("managed assessment or recovery already active")
+	}
+	return f, nil
+}
+
+func persistentCleanupRecord(folder string, p *host.DaytonaPersistentBox, volume *host.DaytonaVolume, gone map[string]bool) error {
+	result := host.DaytonaPersistentCleanup{BoxIDs: p.BoxIDs(), BoxesConfirmed: gone[""], StorageConfirmed: gone[volume.ID()], Confirmed: gone[""] && gone[volume.ID()]}
+	if err := save(folder, "persistent-cleanup.json", result); err != nil {
+		return err
+	}
+	return save(folder, "storage-cleanup.json", map[string]any{"volume_id": volume.ID(), "confirmed": result.StorageConfirmed, "proof": "see original-ID volume journal"})
+}
+
 type cappedOutput struct{ bytes.Buffer }
 
 func (b *cappedOutput) Write(p []byte) (int, error) {
@@ -289,8 +329,20 @@ func execute(ctx context.Context, o options) (err error) {
 	}
 	stage := "preflight"
 	createAttempted := false
+	storageCreateAttempted := false
+	if o.storageProfile == "" {
+		o.storageProfile = "ephemeral"
+	}
+	if o.storageProfile != "ephemeral" && o.storageProfile != "persistent-workspace" {
+		return errors.New("invalid storage profile")
+	}
+	lock, e := lockManagedFolder(o.folder)
+	if e != nil {
+		return e
+	}
+	defer lock.Close()
 	defer func() {
-		save(o.folder, "execution-status.json", map[string]any{"stage": stage, "create_attempted": createAttempted, "completed": err == nil, "failure_category": failureCategory(err)})
+		save(o.folder, "execution-status.json", map[string]any{"stage": stage, "create_attempted": createAttempted, "storage_create_attempted": storageCreateAttempted, "completed": err == nil, "failure_category": failureCategory(err)})
 	}()
 	if !hexRun.MatchString(o.runID) {
 		return errors.New("invalid managed run ID")
@@ -346,9 +398,43 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = save(o.folder, "snapshot.json", snapshot); e != nil {
 		return e
 	}
+	var volume *host.DaytonaVolume
+	var persistent *host.DaytonaPersistentBox
+	storageCleanupRecorded := false
+	if o.storageProfile == "persistent-workspace" {
+		stage = "create-storage"
+		storageCreateAttempted = true
+		volume, e = client.CreateDaytonaVolume(ctx, o.folder)
+		if volume != nil {
+			defer func() {
+				if storageCleanupRecorded {
+					return
+				}
+				dctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+				defer cancel()
+				de := volume.Destroy(dctx)
+				confirmed := de == nil && volume.CleanupConfirmed()
+				se := save(o.folder, "storage-cleanup.json", map[string]any{"volume_id": volume.ID(), "confirmed": confirmed, "proof": "see original-ID volume journal"})
+				if se != nil || !confirmed {
+					err = errors.New("storage cleanup unconfirmed")
+				}
+			}()
+		}
+		if e != nil {
+			return e
+		}
+		if e = save(o.folder, "storage-profile.json", map[string]any{"storage_profile": o.storageProfile, "volume_id": volume.ID(), "mount_path": "/workspace", "subpath": "", "uid": 10001, "source_commit": sourceCommit}); e != nil {
+			return e
+		}
+	}
 	stage = "create-sandbox"
 	createAttempted = true
-	b, e := client.CreateDaytonaWorkload(ctx, o.folder, o.snapshot, o.network)
+	var b *host.DaytonaBox
+	if volume != nil {
+		b, e = client.CreateDaytonaWorkload(ctx, o.folder, o.snapshot, o.network, volume)
+	} else {
+		b, e = client.CreateDaytonaWorkload(ctx, o.folder, o.snapshot, o.network)
+	}
 	if b == nil {
 		return errors.New("sandbox create failed before intent")
 	}
@@ -370,7 +456,15 @@ func execute(ctx context.Context, o options) (err error) {
 		dctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		cleanup := cleanupResult{ID: b.ID()}
-		if de := b.Destroy(dctx); de == nil {
+		if persistent != nil {
+			gone := persistent.Teardown(dctx, []obs.Volume{{ID: volume.ID(), MountPath: "/workspace", Subpath: ""}})
+			cleanup.Confirmed = gone[""]
+			cleanup.Proof = "see all recorded original/replacement IDs in persistent-cleanup.json"
+			storageCleanupRecorded = true
+			if se := persistentCleanupRecord(o.folder, persistent, volume, gone); se != nil || !gone[volume.ID()] {
+				err = errors.New("persistent storage cleanup unconfirmed")
+			}
+		} else if de := b.Destroy(dctx); de == nil {
 			cleanup.Proof = b.CleanupProof
 			cleanup.Confirmed = b.ConfirmWorkloadGone(dctx) == nil
 		}
@@ -473,23 +567,39 @@ func execute(ctx context.Context, o options) (err error) {
 	if e != nil {
 		return errors.New("frozen workload endpoint binding failed")
 	}
-	r, e := host.Execute(ctx, b, public, collection)
+	var target host.Box = b
+	if volume != nil {
+		persistent, e = host.NewDaytonaPersistentBox(ctx, b, bin)
+		if e != nil {
+			return e
+		}
+		target = persistent
+	}
+	r, e := host.Execute(ctx, target, public, collection)
 	if e != nil {
 		return errors.New("standard configuration collection failed")
 	}
-	after, e = b.WorkloadConfiguration(ctx)
-	if e != nil || after != config {
-		return errors.New("configuration changed during grading")
-	}
-	fAfter, e = b.WorkloadFixture(ctx)
-	if e != nil || fAfter != fixture {
-		return errors.New("fixture changed during grading")
+	if persistent != nil {
+		if e = persistent.VerifyOriginalAfterCollection(ctx); e != nil {
+			return e
+		}
+	} else {
+		after, e = b.WorkloadConfiguration(ctx)
+		if e != nil || after != config {
+			return errors.New("configuration changed during grading")
+		}
+		fAfter, e = b.WorkloadFixture(ctx)
+		if e != nil || fAfter != fixture {
+			return errors.New("fixture changed during grading")
+		}
 	}
 	if !r.Report.Valid {
 		r.Report.Invalid = "standard observation evidence invalid or incomplete"
 	}
 	d := report.Build(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
-	d.Statement = "Legacy generic diagnostic only. The primary workload configuration assessment is workload-report.json/html."
+	if persistent != nil {
+		d.Statement = "Persistent-workspace profile: other checks observed the original workload; PER-5 uses the separately proven recreation. RC exposure and coverage remain separate from the workload configuration assessment."
+	}
 	if e = save(o.folder, "legacy-standard-report.json", d); e != nil {
 		return e
 	}
@@ -511,6 +621,18 @@ func execute(ctx context.Context, o options) (err error) {
 	}
 	stage = "stop-workload-before-final-receiver"
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	if persistent != nil {
+		gone := persistent.Teardown(stopCtx, []obs.Volume{{ID: volume.ID(), MountPath: "/workspace", Subpath: ""}})
+		if !gone[""] || !gone[volume.ID()] {
+			stopCancel()
+			return errors.New("persistent workload cleanup unconfirmed")
+		}
+		storageCleanupRecorded = true
+		if e = persistentCleanupRecord(o.folder, persistent, volume, gone); e != nil {
+			stopCancel()
+			return e
+		}
+	}
 	stopProof, stopError := receiver.StopWorkload(stopCtx, b)
 	stopCancel()
 	if stopError != nil {
@@ -583,8 +705,9 @@ func collectionOptions(sha string, contract *obs.WorkloadContract) host.Options 
 }
 func main() {
 	var o options
-	var cleanupState string
+	var cleanupState, cleanupPersistentState string
 	flag.StringVar(&cleanupState, "cleanup-state", "", "original private cleanup journal")
+	flag.StringVar(&cleanupPersistentState, "cleanup-persistent-state", "", "original private volume/consumer journal")
 	flag.StringVar(&o.key, "key-file", "", "owner-only API key file")
 	flag.StringVar(&o.python, "sdk-python", "", "pinned SDK interpreter")
 	flag.StringVar(&o.modelPython, "model-python", "", "pinned Nitro Bedrock SDK interpreter")
@@ -594,13 +717,30 @@ func main() {
 	flag.StringVar(&o.snapshot, "snapshot", "", "CPU snapshot UUID")
 	flag.StringVar(&o.network, "network", "", "fixed regional model IPv4 /32 list")
 	flag.StringVar(&o.uploadHosts, "upload-hosts", "", "explicit comma-separated shipped workload names for TLS-only EGR-6")
+	flag.StringVar(&o.storageProfile, "storage-profile", "ephemeral", "ephemeral or separately labelled persistent-workspace")
 	flag.StringVar(&o.root, "source-root", ".", "clean exact-source repository")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
+	budget := 12 * time.Minute
+	if o.storageProfile == "persistent-workspace" {
+		budget = 18 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	if cleanupState != "" {
+	if cleanupState != "" && cleanupPersistentState != "" {
+		os.Exit(5)
+	}
+	if cleanupState != "" || cleanupPersistentState != "" {
+		path := cleanupState
+		if cleanupPersistentState != "" {
+			path = cleanupPersistentState
+		}
+		lock, e := lockManagedFolder(filepath.Dir(path))
+		if e != nil {
+			os.Exit(5)
+		}
+		defer lock.Close()
 		key, e := host.DaytonaKey(o.key)
 		if e != nil {
 			os.Exit(5)
@@ -608,6 +748,14 @@ func main() {
 		client, e := host.NewDaytonaClient(key, o.python)
 		if e != nil {
 			os.Exit(5)
+		}
+		if cleanupPersistentState != "" {
+			result, e := client.CleanupDaytonaPersistentState(ctx, cleanupPersistentState)
+			json.NewEncoder(os.Stdout).Encode(result)
+			if e != nil {
+				os.Exit(5)
+			}
+			return
 		}
 		id, proof, e := client.CleanupDaytonaState(ctx, cleanupState)
 		json.NewEncoder(os.Stdout).Encode(cleanupResult{ID: id, Confirmed: e == nil, Proof: proof})

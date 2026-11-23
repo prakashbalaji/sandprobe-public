@@ -5,6 +5,7 @@ package host
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 
 	"sandprobe/internal/obs"
@@ -18,6 +19,63 @@ type DaytonaPersistentBox struct {
 	configuration                  DaytonaWorkloadConfiguration
 	fixture                        DaytonaFixture
 	resetStarted, originalVerified bool
+}
+
+type DaytonaPersistentCleanup struct {
+	BoxIDs           []string `json:"box_ids"`
+	BoxesConfirmed   bool     `json:"boxes_confirmed"`
+	StorageConfirmed bool     `json:"storage_confirmed"`
+	Confirmed        bool     `json:"confirmed"`
+}
+
+func (p *DaytonaPersistentBox) BoxIDs() []string {
+	ids := make([]string, 0, len(p.boxes))
+	for _, box := range p.boxes {
+		ids = append(ids, box.ID())
+	}
+	return ids
+}
+
+// CleanupDaytonaPersistentState recovers every consumer before releasing storage.
+// A missing or ID-less live consumer journal is uncertainty, never box absence.
+func (c *DaytonaClient) CleanupDaytonaPersistentState(ctx context.Context, path string) (DaytonaPersistentCleanup, error) {
+	result := DaytonaPersistentCleanup{BoxIDs: []string{}}
+	v, err := c.RecoverDaytonaVolume(path)
+	if err != nil {
+		return result, err
+	}
+	for _, consumer := range v.journal.Consumers {
+		result.BoxIDs = append(result.BoxIDs, consumer.ID)
+		if consumer.Gone {
+			continue
+		}
+		if _, err = os.Lstat(consumer.Journal); err != nil {
+			return result, errors.New("persistent consumer journal missing; absence unproven")
+		}
+		id, _, cleanupErr := c.CleanupDaytonaState(ctx, consumer.Journal)
+		if id != "" {
+			result.BoxIDs[len(result.BoxIDs)-1] = id
+		}
+		if cleanupErr != nil {
+			return result, cleanupErr
+		}
+	}
+	v, err = c.RecoverDaytonaVolume(path)
+	if err != nil {
+		return result, err
+	}
+	for _, consumer := range v.journal.Consumers {
+		if consumer.ID == "" || !consumer.Gone {
+			return result, errors.New("persistent consumer deletion unconfirmed")
+		}
+	}
+	result.BoxesConfirmed = true
+	if err = v.Destroy(ctx); err != nil {
+		return result, err
+	}
+	result.StorageConfirmed = v.CleanupConfirmed()
+	result.Confirmed = result.BoxesConfirmed && result.StorageConfirmed
+	return result, nil
 }
 
 func NewDaytonaPersistentBox(ctx context.Context, b *DaytonaBox, binary []byte) (*DaytonaPersistentBox, error) {

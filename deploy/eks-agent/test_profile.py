@@ -13,7 +13,8 @@ class ProfileTests(unittest.TestCase):
         args = self.settings()
         args.update(controller="host", model=profile.LIGHTWEIGHT_MODEL)
         baseline = profile.render(**args)
-        plan = profile.render(**args, storage_profile="persistent-workspace")
+        binding={"id":"vol-"+"b"*17,"zone":"us-west-2a"}
+        plan = profile.render(**args, storage_profile="persistent-workspace",workspace_volume=binding)
         self.assertEqual(plan["storage_profile"], "persistent-workspace")
         before = {v["kind"] + ":" + v["metadata"]["name"]: v for v in baseline["kubernetes"]["items"]}
         after = {v["kind"] + ":" + v["metadata"]["name"]: v for v in plan["kubernetes"]["items"]}
@@ -22,6 +23,7 @@ class ProfileTests(unittest.TestCase):
         old = copy.deepcopy(before["Job:model-task"])
         old["spec"]["template"]["spec"]["volumes"][0] = {
             "name": "workspace", "persistentVolumeClaim": {"claimName": "workspace"}}
+        old["spec"]["template"]["spec"]["securityContext"]["fsGroupChangePolicy"]="OnRootMismatch"
         self.assertEqual(after["Job:model-task"], old)
         sc = after["StorageClass:sandprobe-workspace-0123456789abcdef"]
         self.assertEqual(sc["provisioner"], "ebs.csi.eks.amazonaws.com")
@@ -30,14 +32,25 @@ class ProfileTests(unittest.TestCase):
         claim = after["PersistentVolumeClaim:workspace"]
         self.assertEqual(claim["metadata"]["namespace"], "sandprobe-agent-0123456789abcdef")
         self.assertEqual(claim["spec"]["storageClassName"], sc["metadata"]["name"])
-        self.assertNotIn("volumeName", claim["spec"])
+        self.assertEqual(claim["spec"]["volumeName"],sc["metadata"]["name"])
         self.assertNotIn("selector", claim["spec"])
+        pv=after["PersistentVolume:"+sc["metadata"]["name"]]["spec"]
+        self.assertEqual(pv["csi"],{"driver":"ebs.csi.eks.amazonaws.com","volumeHandle":binding["id"],"fsType":"ext4"})
+        self.assertEqual(pv["claimRef"],{"namespace":claim["metadata"]["namespace"],"name":"workspace"})
+        self.assertEqual(pv["nodeAffinity"]["required"]["nodeSelectorTerms"][0]["matchExpressions"][0]["values"],[binding["zone"]])
+        self.assertEqual(plan["storage_context"]["provenance"],"caller_supplied_unverified")
         self.assertEqual((plan["live_status"], plan["security_grade"]), ("not_executed", "not_assessed"))
 
     def test_persistent_workspace_rejects_unrecognized_or_guest_profile(self):
         for value in ("persistent-workspace", "existing-production-claim", "../claim", None):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 profile.render(**self.settings(), storage_profile=value)
+        args=self.settings();args.update(controller="host",model=profile.LIGHTWEIGHT_MODEL)
+        for binding in (None,{}, {"id":"named-existing-volume","zone":"us-west-2a"},
+                        {"id":"vol-"+"b"*17,"zone":"other-region-a"},
+                        {"id":"vol-"+"b"*17,"zone":"us-west-2a","mount":"/host"}):
+            with self.subTest(binding=binding),self.assertRaises(ValueError):
+                profile.render(**args,storage_profile="persistent-workspace",workspace_volume=binding)
 
     def settings(self):
         run = "0123456789abcdef"

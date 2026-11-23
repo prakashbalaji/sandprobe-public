@@ -134,6 +134,9 @@ class Commands:
             if returncode:
                 errors.seek(0)
                 error = errors.read(8192)
+                if (Path(args[0]).name == "aws" and "ec2" in args and "describe-volumes" in args
+                        and re.search(rb"An error occurred \(InvalidVolume\.NotFound\) when calling", error)):
+                    raise Failure("volume_not_found")
                 if re.search(rb"An error occurred \((NoSuchEntity|RepositoryNotFoundException|ResourceNotFoundException)\) when calling", error):
                     raise Failure("resource_not_found")
                 # CMD-1: fixed categories only; never return raw stderr/credentials.
