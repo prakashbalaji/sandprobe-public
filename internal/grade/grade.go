@@ -409,27 +409,38 @@ func fits(ck *catalog.Check, o obs.Observation, m obs.Manifest, id *obs.Identity
 
 // derive is AMP-2 and AMP-3 as the host grades them, from the identity alone.
 func derive(id string, who *obs.Identity) (result, variant, reason, evidence string) {
-	const graded = "graded by the host from the probe's identity"
 	if id == "AMP-2" {
 		return amp2(who)
 	}
+	return amp3(who)
+}
+
+// amp3 is AMP-3 from the identity (its row): whether an execve could give the agent a privilege it doesn't hold now,
+// through a setuid-root file or a file's capabilities. Only NoNewPrivs 1 rules both out. With NoNewPrivs 0, setuid-root
+// files in the system binary directories are a finding; otherwise AMP-3 is unknown, since the probe scans only those
+// directories, and only for setuid-root files.
+func amp3(who *obs.Identity) (result, variant, reason, evidence string) {
+	const graded = "graded by the host from the probe's identity"
 	scan := who.SetuidScan
 	switch {
 	case *who.NoNewPrivs == 1:
-		return obs.Pass, "", "", graded // no setuid file can raise privilege, whatever exists
+		return obs.Pass, "", "", graded + ": NoNewPrivs is 1, so no setuid file or file capability can raise privilege, whatever exists"
 	case scan == nil || !scan.Complete:
 		return obs.Unknown, "", "NoNewPrivs is 0 and the setuid scan didn't complete", graded
 	case len(scan.Files) > 0:
 		return obs.Finding, "new_privs", "", graded
 	}
-	return obs.Pass, "", "", graded
+	return obs.Unknown, "", "NoNewPrivs is 0, so the kernel lets an execve raise privilege, and the probe can't rule out a " +
+		"program that would: it scans only the system binary directories, for setuid-root files, never other directories or files " +
+		"with file capabilities; set no-new-privileges to settle it", graded
 }
 
 // amp2 is AMP-2 from the identity (its row): uid 0, or a held capability, effective, permitted (raised into the
 // effective set at will) or ambient (permitted too), Critical for the dangerous ones and High for the rest. An
 // inheritable capability becomes permitted only through an execve of a file whose file capabilities name it, which
 // NoNewPrivs 1 forbids: with NoNewPrivs 0 it leaves a pass unknown, since the probe doesn't look for such files. The
-// evidence names each capability, effective or only permitted.
+// evidence names each capability, effective or only permitted. A pass covers what the agent holds now; what an execve
+// could give it is AMP-3's.
 func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 	eff, _ := strconv.ParseUint(who.CapEff, 16, 64) // checked when the document was read
 	prm, prmErr := strconv.ParseUint(who.CapPrm, 16, 64)
@@ -460,7 +471,8 @@ func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 			strings.Join(catalog.CapList(inh), ", ") + ", which an execve of a file whose file capabilities name them " +
 			"would make permitted; the probe doesn't look for such files", ""
 	}
-	return obs.Pass, "", "", "graded by the host from the probe's identity: no capability held, effective, permitted or ambient"
+	return obs.Pass, "", "", "graded by the host from the probe's identity: no capability held now, effective, permitted or " +
+		"ambient; AMP-3 covers gaining one on exec"
 }
 
 // capSets names the held capabilities, the effective ones apart from those only permitted, at most twelve of each.

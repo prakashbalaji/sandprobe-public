@@ -185,7 +185,7 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 | Secrets | SEC-1 to SEC-5 | secret-shaped variable names, other processes' environments and memory, credential files, cloud metadata credentials |
 | Ways out | EGR-1 to EGR-6 | DNS to the canary's name server, HTTPS straight out or through a proxy, other ports, TLS interception |
 | Persistence | PER-1 to PER-5 | writable startup, PATH, schedule and access files; storage that survives the provider's reset |
-| Amplifiers | AMP-1 to AMP-8 | passwordless sudo, root or capabilities, setuid, control sockets, local daemons, vsock, the Kubernetes API, kernel settings |
+| Amplifiers | AMP-1 to AMP-8 | passwordless sudo, root or capabilities, setuid and file capabilities, control sockets, local daemons, vsock, the Kubernetes API, kernel settings |
 
 The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
