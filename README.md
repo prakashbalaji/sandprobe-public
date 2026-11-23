@@ -11,26 +11,92 @@ failed quietly is "unknown", never a pass. The probe never reads a secret's valu
 
 > Early days: version 0.x. The rules are in [SPEC.md](SPEC.md), and every behaviour traces to a rule ID there.
 
-## Quick start
+## Install
 
-You need Go 1.25, and Docker for `run docker` and the fixture tests.
+On macOS or Linux, arm64 or x86_64:
 
 ```sh
-git clone https://github.com/summationai/sandprobe
-cd sandprobe
-make                        # builds the Linux probes, then bin/sandprobe with them embedded
-bin/sandprobe providers     # what's ready on this machine, and how to set up the rest
-bin/sandprobe explain EGR-2 # what a check does, what a finding means, and the fix
+curl -fsSL https://probe.agent.cloud/install.sh | sh
 ```
+
+The installer downloads the build for your machine, checks it against `SHA256SUMS`, and installs `sandprobe` into
+`~/.local/bin`, or `SANDPROBE_INSTALL_DIR`. If the download or the checksum fails, an earlier install stays as it was.
+
+Or let a coding agent do it. Paste this into one:
+
+```text
+Run curl -fsSL https://probe.agent.cloud/agents.md and follow it to install Sandprobe.
+```
+
+Then:
+
+```sh
+sandprobe version
+sandprobe providers         # what's ready on this machine, and how to set up the rest
+sandprobe explain EGR-2     # what a check does, what a finding means, and the fix
+```
+
+To build from source instead, you need Go 1.25: clone this repository and run `make`, which builds the Linux probes,
+then `bin/sandprobe` with them embedded.
+
+## Verify a download
+
+Every release is on [GitHub Releases](https://github.com/summationai/sandprobe/releases): four gzipped binaries (macOS
+and Linux, arm64 and amd64), `SHA256SUMS` for the `.gz` files and `SHA256SUMS-binaries` for the binaries. A checksum
+shows that a file arrived intact, not who built it. So each of those files also carries a build attestation, which
+binds it to this repository's release workflow, on `main`, at the release's commit (REL-3). Verify the `.gz` before
+you unpack it:
+
+```sh
+gh release view -R summationai/sandprobe     # its notes give the verify command with the commit filled in
+gh release download -R summationai/sandprobe -p sandprobe-darwin-arm64.gz
+gh attestation verify sandprobe-darwin-arm64.gz --repo summationai/sandprobe \
+  --signer-workflow summationai/sandprobe/.github/workflows/release.yml \
+  --source-ref refs/heads/main --source-digest <release commit> --deny-self-hosted-runners
+gunzip sandprobe-darwin-arm64.gz && chmod +x sandprobe-darwin-arm64
+```
+
+Keep every flag: `--repo` alone is only the minimum identity check. Verify `SHA256SUMS` the same way before you trust
+a checksum from it. A release is authentic when its files verify, never because its tag exists. To rebuild a release
+and compare it byte for byte, check out its commit and run `make release` with Go 1.25.14 (REL-1).
+
+## Try it in 30 seconds
+
+Three demo boxes, made from a vibe-coded booking app. They run in Docker on your machine, every key in them is the
+fake value `sandprobe-fake`, and a local canary stands in for an attacker's server. No provider is contacted. You
+need Docker and `sandprobe`.
+
+```sh
+git clone https://github.com/summationai/sandprobe && cd sandprobe/demo/boxes
+for box in vibe hardened regressed; do docker build -q -t sandprobe-demo/$box -f $box.Dockerfile .; done
+cd "$(mktemp -d)"
+sandprobe run docker sandprobe-demo/vibe -as agent -y -out vibe
+sandprobe run docker sandprobe-demo/hardened -as agent -y -out hardened -- \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp
+sandprobe run docker sandprobe-demo/regressed -as agent -y -out regressed -- \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp
+sandprobe compare hardened/*.json regressed/*.json
+```
+
+Once the images are built, each run takes under 10 seconds:
+
+- **vibe scores 1/6.** Its `.env` holds the Stripe, OpenAI, Resend and Supabase keys, the dev server runs with every
+  key in its environment, a stand-in Docker socket is mounted, and the network is open.
+- **hardened scores 6/6.** The keys are gone, and five Docker options lock the box down.
+- **regressed scores 5/6.** Someone committed a `.env` again. `compare` says "Got worse" under Secrets and exits 6,
+  so a CI gate fails.
+
+Each run names its `.html` report. [demo/README.md](demo/README.md) walks through all three, and `demo/reports/`
+holds their reports.
 
 ## Check a sandbox
 
 **A box you already have.** Give Sandprobe any command that opens a shell in it:
 
 ```sh
-bin/sandprobe run exec -as agent -y -- docker exec -i my-agent-box sh
-bin/sandprobe run exec -as agent -y -- kubectl exec -i pod/agent -c agent -- sh
-bin/sandprobe run exec -as agent -y -- ssh agent@devbox sh
+sandprobe run exec -as agent -y -- docker exec -i my-agent-box sh
+sandprobe run exec -as agent -y -- kubectl exec -i pod/agent -c agent -- sh
+sandprobe run exec -as agent -y -- ssh agent@devbox sh
 ```
 
 `-as` names the agent's user, and the run stops before any check if the command runs as anyone else. Sandprobe
@@ -39,9 +105,9 @@ creates nothing in your box but a scratch directory, which it removes, and never
 **A throwaway copy.** Sandprobe creates the box, probes it and deletes it:
 
 ```sh
-bin/sandprobe run docker my-agent-image -as agent -y                        # a local Docker image
-SANDPROBE_KUBE_CONTEXT=my-cluster bin/sandprobe run kubernetes -as agent -y  # a pod in your cluster
-bin/sandprobe run sprites -y                                                # a provider adapter
+sandprobe run docker my-agent-image -as agent -y                         # a local Docker image
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as agent -y  # a pod in your cluster
+sandprobe run sprites -y                                                 # a provider adapter
 ```
 
 Every run shows its plan first: what it will create, contact, mark and delete. Without `-y`, or a yes at the prompt,
@@ -51,38 +117,42 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 
 ## Where it runs
 
-| Sandbox | How |
-|-|-|
-| Anything with a shell | `run exec` |
-| Local Docker | `run docker` |
-| Kubernetes, any cluster | `run kubernetes`, a [recipe](recipes/kubernetes.sh) |
-| Fly Sprites, AWS Nitro on EKS, Baseten, E2B, Vercel, Cloudflare Sandboxes, Daytona, Boat, exe.dev | `run <provider>`, native adapters |
-| Modal | a proof of concept (`make poc`) |
+| Sandbox | How | [Status](docs/providers/README.md) |
+|-|-|-|
+| [Anything with a shell](docs/providers/exec.md) | `run exec` | Stable target |
+| [Local Docker](docs/providers/docker.md) | `run docker` | Stable target |
+| [Kubernetes, any cluster](docs/providers/kubernetes.md) | `run kubernetes`, a [recipe](recipes/kubernetes.sh) | Stable target |
+| [E2B](docs/providers/e2b.md), [Daytona](docs/providers/daytona.md), [Vercel Sandbox](docs/providers/vercel.md), [Cloudflare Sandbox](docs/providers/cloudflare.md), [Fly Sprites](docs/providers/sprites.md), [AWS Nitro on EKS](docs/providers/aws-nitro.md) | `run <provider>`, native adapters | Stable target |
+| [Baseten](docs/providers/baseten.md) | `run baseten`, a native adapter | Beta |
+| [Modal](docs/providers/modal.md) | a proof of concept (`make poc`), not in the release build | Beta |
+| [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: needs your provider's written consent |
 
-Read your provider's terms before you probe: some require consent for security testing. For `run exec` and recipes,
-the checks that would contact a provider's own endpoints (cloud metadata, the Kubernetes API, the host over vsock,
-the box's proxy) are off by default. If your provider's terms allow one on your own account, turn it on by name,
-for example `-provider-endpoints SEC-4,AMP-7` to test cloud access: the plan lists each one with your attestation
-before anything runs, and the report records it beside the check. The native adapters' rules for each provider are
-its PRV row in SPEC.md.
+The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/README.md) is the single source for
+it, with each provider's setup, the exact command, what it skips and why, and its terms.
+
+Read your provider's terms before you probe: some require consent for security testing, and Sandprobe never presents
+a run as a provider's permission. Each native adapter skips the checks its provider's terms rule out, as its PRV row
+in SPEC.md says. `run exec` and recipes keep the checks that would contact a provider's own endpoints off by default:
+cloud metadata, the Kubernetes API, the host over vsock and the box's proxy. **New in 0.3.0:** if your provider's
+terms allow one on your own account, turn it on by name, for example `-provider-endpoints SEC-4,AMP-7`; the plan
+lists each one with your attestation before anything runs, and the report records it beside the check.
 
 ## What leaves your machine
 
 - **Test traffic, to a canary.** The probe sends DNS lookups and HTTPS, TCP and UDP attempts that carry only this
   run's random nonces. A way out counts only when the canary logs the nonce, and the host gets that receipt from the
   canary directly, never through the box.
-  - Every run but `run docker` uses the hosted canary at `control.pub.probe.ac0.dev` by default: `run exec`, recipes
-    and the native provider adapters. It is run by Summation and trusted only under the control key this release
-    pins. It sees two addresses. The box's public address, with the nonces its test traffic carries, is kept only for
-    the run's lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and
-    arms the run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log
-    and stores nothing.
+  - Every run but `run docker` uses the hosted canary at `control.pub.probe.ac0.dev` by default. It is run by
+    Summation and trusted only under the control key this release pins. It sees two addresses. The box's public
+    address, with the nonces its test traffic carries, is kept only for the run's lifetime, at most 30 minutes. The
+    public address of the machine running Sandprobe, which reserves and arms the run, is kept in a rate counter for
+    at most an hour. Both stay in memory: the canary writes no access log and stores nothing.
   - `run docker` always starts its own canary container on your machine, and refuses a canary flag.
-  - To use a canary you run yourself instead, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
+  - To use a canary you run yourself, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
     `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No test traffic, with `-no-canary`** (`run exec` and recipes): the probe sends nothing out of the box, and no
-  canary is contacted. Your own command, or the provider's API, is still used to reach the box. Exfiltration is then
-  reported as not tested, and the run can't grade above C.
+  canary is contacted. Your own command, or the provider's API, still reaches the box. Exfiltration is then reported
+  as not tested, and the run can't grade above C.
 - **Your reports stay with you.** Sandprobe uploads no report and has no telemetry.
 - **Your provider's own API**, when Sandprobe creates or reaches a box for you, with your own credentials.
 
@@ -114,33 +184,33 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 
 The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
-and nothing above Info was found. Cloud access asks whether the agent can use your cloud identity: your own cloud
-roles, your own cloud's metadata service, your own Kubernetes API. On a hosted provider whose terms rule out probing
-its own metadata and Kubernetes endpoints, the box holds no cloud identity of yours to check, so Cloud access is not
-applicable: it is never green, the score is out of five, and a line under the score says why. A credential of yours
-injected into the box is still caught under Secrets. `run exec` and recipes leave Cloud access "Not tested", since
-there those endpoints may be yours, until you turn its checks on with `-provider-endpoints`. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its
-structure only: it can't re-verify the run or tell an edited report apart, and each says so.
+and nothing above Info was found.
 
-Current source builds also show catalog-wide measurement coverage (SCR-5): which
-checks have usable or conclusive results, and which remain skipped, missing,
-scoped out, unknown or unproven. The exposure score and coverage answer different
-questions; six green categories do not mean every check was conclusively assessed.
+Cloud access asks whether the agent can use your cloud identity: your own cloud roles, your own cloud's metadata
+service, your own Kubernetes API. On a hosted provider whose terms rule out probing its own metadata and Kubernetes
+endpoints, the box holds no cloud identity of yours to check, so Cloud access is not applicable: it is never green,
+the score is out of five, and a line under the score says why. A credential of yours put into the box is still caught
+under Secrets. `run exec` and recipes leave Cloud access "Not tested", since there those endpoints may be yours.
 
-For a network-enabled model workload, the managed [Nitro](experiments/eks-agent/README.md)
-and [Daytona](experiments/daytona-agent/README.md) guides run the same nine-case coding
-task and collect RC exposure plus a separate configuration assessment. Nitro uses
-guest-side model inference; Daytona uses host-controller inference without guest
-model credentials. Preserve that context when comparing results. Run records
-stay local and must not be committed to this public repository.
+The score sits beside measurement coverage (SCR-5): which checks have usable or conclusive results, and which stayed
+skipped, missing, scoped out, unknown or unproven. They answer different questions: six green categories don't mean
+every check was conclusive. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its structure
+only: it can't re-verify the run or tell an edited report apart, and each says so.
 
 Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 below `-min`, 7 a box not
 confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.
 
+Research harnesses, such as the managed Nitro and Daytona coding evaluations, live in
+[experiments/](experiments/README.md). They aren't part of the product. Their run records stay local and must not be
+committed here.
+
 ## Contributing
 
-[AGENTS.md](AGENTS.md) has the build, the layout and the hard rules, for people and coding agents alike. A behaviour
-change starts in [SPEC.md](SPEC.md) under a rule ID, and comes with its test.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). [AGENTS.md](AGENTS.md) has the build, the layout and the hard rules,
+for people and coding agents alike. A behaviour change starts in [SPEC.md](SPEC.md) under a rule ID, and comes with
+its test. The most useful report you can file is a
+[false pass](https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml): a check that passed when
+it shouldn't have. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Security
 
