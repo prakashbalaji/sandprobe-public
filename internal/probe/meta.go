@@ -20,13 +20,22 @@ import (
 	"sandprobe/internal/obs"
 )
 
-// Metadata addresses SEC-4 may contact (SBX-3). Azure has no listing that gives identity names without an identity
-// call, so it isn't contacted.
+// Metadata addresses SEC-4 may contact (SBX-3), from the catalog's one list, which every plan names (UX-4). Azure has
+// no listing that gives identity names without an identity call, so it isn't contacted.
 const (
-	imdsAddr        = "169.254.169.254:80" // AWS and GCP instance metadata
-	ecsAddr         = "169.254.170.2:80"   // the ECS credential endpoint
-	podIdentityAddr = "169.254.170.23:80"  // EKS Pod Identity
+	imdsAddr        = catalog.MetadataIMDS        // AWS and GCP instance metadata
+	ecsAddr         = catalog.MetadataECS         // the ECS credential endpoint
+	podIdentityAddr = catalog.MetadataPodIdentity // EKS Pod Identity
 )
+
+// imdsHost and podIdentityHost are those addresses without their port: IMDS's Host header, and the host EKS Pod
+// Identity's variable must name.
+var imdsHost, podIdentityHost = hostOf(imdsAddr), hostOf(podIdentityAddr)
+
+func hostOf(addr string) string {
+	h, _, _ := net.SplitHostPort(addr)
+	return h
+}
 
 var (
 	errNoConnect = errors.New("nothing accepted a connection")           // nothing listens: the address is unreachable
@@ -263,13 +272,13 @@ func metaScan(deadline time.Time, request metaRequester, dial metaDialer) obs.Ob
 
 	// IMDSv2: a session token, held in memory for one listing and never recorded.
 	reachable, oddToken := true, false
-	if a, err := request(imdsAddr, "PUT", "/latest/api/token", "169.254.169.254",
+	if a, err := request(imdsAddr, "PUT", "/latest/api/token", imdsHost,
 		map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"}, deadline); err == nil && a.code == 200 && a.body != "" {
 		// The token goes back as a header, so only a token-shaped one does: anything else could smuggle bytes into the
 		// request. The other listings are still asked, and with nothing found SEC-4 is unknown.
 		if token := strings.TrimSpace(a.body); !imdsToken.MatchString(token) {
 			oddToken = true
-		} else if why := ask("AWS IMDSv2", "role", "GET", roles, "169.254.169.254", map[string]string{"X-aws-ec2-metadata-token": token}, always); why != "" {
+		} else if why := ask("AWS IMDSv2", "role", "GET", roles, imdsHost, map[string]string{"X-aws-ec2-metadata-token": token}, always); why != "" {
 			return unknownObs(why)
 		}
 	} else {
@@ -284,7 +293,7 @@ func metaScan(deadline time.Time, request metaRequester, dial metaDialer) obs.Ob
 	}
 	if reachable && !cut {
 		// IMDSv1: the same listing with no token.
-		if why := ask("AWS IMDSv1 (no token needed)", "role", "GET", roles, "169.254.169.254", nil, always); why != "" {
+		if why := ask("AWS IMDSv1 (no token needed)", "role", "GET", roles, imdsHost, nil, always); why != "" {
 			return unknownObs(why)
 		}
 	}
@@ -304,7 +313,7 @@ func metaScan(deadline time.Time, request metaRequester, dial metaDialer) obs.Ob
 		offered    bool
 	}{
 		{ecsAddr, "the ECS credential endpoint (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)", os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != ""},
-		{podIdentityAddr, "EKS Pod Identity (AWS_CONTAINER_CREDENTIALS_FULL_URI)", full != nil && full.Hostname() == "169.254.170.23"},
+		{podIdentityAddr, "EKS Pod Identity (AWS_CONTAINER_CREDENTIALS_FULL_URI)", full != nil && full.Hostname() == podIdentityHost},
 	} {
 		if !ep.offered || cut {
 			continue

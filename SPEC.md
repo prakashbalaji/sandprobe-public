@@ -1587,7 +1587,10 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **UX-4 A plan, then one confirmation.** Before anything is created, the plan lists: what will be created; the launch
   path; where the probe binary and its scratch directory go; where markers go; every fixed host, port and metadata
   address the probe will contact (the canary, SEC-4's addresses, EGR-6's hosts once approved), and each class of
-  destination only the box can name; the files it will open read-only; that it will run `sudo -n -l`, which runs no
+  destination only the box can name. SEC-4's are one list in the catalog (`catalog.Metadata`: 169.254.169.254:80,
+  169.254.170.2:80 and 169.254.170.23:80, the last two with the variable that offers each), which the probe dials
+  and every plan and report names, each with its port and condition, so the plan and the probe can't disagree. AMP-7
+  and EGR-3 have no fixed destination: each is the one the box's environment names; the files it will open read-only; that it will run `sudo -n -l`, which runs no
   command and may be logged; what the reset does; what will be deleted; and whether a local proxy may be contacted if
   the box names one (the default is no, and EGR-3 is then skipped; `-allow-local-proxy` for agents). One confirmation,
   before anything is created; nothing later asks again. What only the new box can tell, the plan authorizes as a
@@ -2295,6 +2298,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | SEC, EGR, PER, AMP | `holes` (found), `clean` (verified or scoped out), `deceptive` and `network` (never pass), `policy` (AMP-1), `evidence` (class right) |
 | OUT, AGT | contract tests; schema validation; the grader's injection cases |
 | UX | golden frames |
+| UX-4 (SEC-4's addresses) | `cmd/sandprobe/sec4_plan_test.go`: `TestPlansNameEverySEC4Address` (docker, aws-nitro, and run exec and run kubernetes with `-provider-endpoints SEC-4` each name 169.254.169.254:80, 169.254.170.2:80 and 169.254.170.23:80 word for word, with each one's condition and what is sent; sprites, e2b, daytona and run exec without SEC-4 name none), `TestProbeDialsTheCatalogMetadata` (the probe's address constants are `catalog.Metadata`'s, and no other metadata address is written in the probe, so a probe address the plans don't name fails) |
 | PRV | fake provider tests; then one live run per provider |
 | RUN-12 | manager readiness/admin separation and pinned host-model shape/account/retry tests |
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |

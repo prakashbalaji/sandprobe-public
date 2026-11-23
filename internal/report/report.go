@@ -372,11 +372,6 @@ func join(xs []string) string {
 	return strings.Join(xs[:len(xs)-1], ", ") + ", and " + xs[len(xs)-1]
 }
 
-// metadata are SEC-4's fixed addresses, each with its condition; it reports what it found, not each attempt.
-var metadata = [][2]string{{"169.254.169.254:80", ""},
-	{"169.254.170.2:80", "only if the agent's environment names the ECS credential endpoint"},
-	{"169.254.170.23:80", "only if the agent's environment names EKS Pod Identity"}}
-
 // lister collects destinations once each.
 type lister struct {
 	seen map[Contact]bool
@@ -420,9 +415,9 @@ func planned(m obs.Manifest) []Contact {
 		l.add(m.KubeAPI, "tcp", "AMP-7")
 	}
 	if _, skipped := m.Skipped["SEC-4"]; !skipped { // skipped by a provider's rules of engagement (PRV-5): not planned
-		for _, a := range metadata {
-			l.add(a[0], "tcp", "SEC-4")
-			l.cs[len(l.cs)-1].When = a[1]
+		for _, a := range catalog.Metadata { // SEC-4's fixed addresses, from the one list the probe dials (UX-4)
+			l.add(a.Addr, "tcp", "SEC-4")
+			l.cs[len(l.cs)-1].When = a.When
 		}
 	}
 	return l.list()

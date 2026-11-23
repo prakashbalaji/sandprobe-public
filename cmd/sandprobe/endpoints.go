@@ -61,7 +61,7 @@ func attestedPlan(attested []string, off map[string]string, existing bool, rule 
 		lines = append(lines, line)
 	}
 	if slices.Contains(attested, "SEC-4") {
-		contacts = append(contacts, "the cloud metadata address 169.254.169.254, and the ECS or EKS credential endpoints only if the box's environment names them: role listings only, never a credential (SEC-4)")
+		contacts = append(contacts, metadataContacts()...)
 	}
 	if slices.Contains(attested, "AMP-7") {
 		named = append(named, "a Kubernetes API, only if the box's environment names one: a TCP and TLS handshake, no request (AMP-7)")
@@ -73,6 +73,20 @@ func attestedPlan(attested []string, off map[string]string, existing bool, rule 
 		named = append(named, "nothing else: "+strings.Join(left, ", ")+" stay off, since they'd contact your provider's own endpoints ("+rule+")")
 	}
 	return lines, contacts, named
+}
+
+// metadataContacts is SEC-4's fixed addresses for a plan (UX-4): one line each, with its port, its condition and what
+// is sent, from the catalog list the probe itself dials, so the plan and the probe can't disagree.
+func metadataContacts() []string {
+	var out []string
+	for _, d := range catalog.Metadata {
+		line := d.Addr + ", " + d.What
+		if d.When != "" {
+			line += ", " + d.When
+		}
+		out = append(out, line+": "+d.How+" (SEC-4)")
+	}
+	return out
 }
 
 // localProxy is a plan's local-proxy line once the person may have turned EGR-3 on (PRV-15, SBX-1 (e)).
