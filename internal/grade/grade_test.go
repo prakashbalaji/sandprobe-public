@@ -507,6 +507,11 @@ func TestGrades(t *testing.T) {
 		{"the twin's refusing side missing: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
 			at(d, "PER-1").Proof.TwinRefused = false
 		}, "C", nil},
+		// an agent whose capabilities pass the read call (CAP_DAC_READ_SEARCH, CAP_DAC_OVERRIDE) opens its own 0000 file,
+		// so the file-read twin can't refuse, and no non-root pass stands (TWN-1, TWN-4)
+		{"the file-read twin's refusing side missing: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			at(d, "SEC-3").Proof.TwinRefused = false
+		}, "C", nil},
 		{"an environment read of nothing: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { at(d, "SEC-1").Proof.Count = 0 }, "C", nil},
 		{"a socket table read of nothing: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { at(d, "AMP-5").Proof.Count = 0 }, "C", nil},
 

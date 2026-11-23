@@ -100,12 +100,68 @@ func (e *env) judge(ck *catalog.Check, ts []obs.Target, counts map[string]int, t
 		return obs.Observation{Result: obs.Finding, Variant: v, Evidence: ev,
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: counts, Targets: ts, Twin: twinOK, TwinRefused: twinRefused && !e.root}}
 	}
+	if why := reachPast(); why != "" {
+		return unknownObs(why)
+	}
 	p := &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: counts, Targets: ts}
 	if allAbsent && ck.AbsentOK {
 		return obs.Observation{Result: obs.Absent, Proof: p}
 	}
+	if why := e.refusalsHold(ck, ts); why != "" {
+		return unknownObs(why)
+	}
 	p.Twin, p.TwinRefused = twinOK, twinRefused && !e.root
 	return obs.Observation{Result: obs.Pass, Proof: p}
+}
+
+// reachPast says why no negative stands for this agent, or "" (TWN-4): it holds a capability that reaches past file
+// permissions and the mount table altogether, so a refusal, an absence or an empty listing alike shows nothing (a
+// mount can hide a path or stand in for one, and hidepid can be remounted). Every early negative return of a file
+// check asks it first.
+func reachPast() string {
+	if held := agentCaps() & pastPermissions; held != 0 {
+		return "nothing was found, but the agent holds " + capList(held) + ", which reaches past file permissions and " +
+			"mounts altogether, so no refusal, absence or empty listing shows anything (TWN-4)"
+	}
+	return ""
+}
+
+// refusalsHold says why a pass's refusals can't count, or "" (TWN-4): the agent could get past them whatever a path's
+// mode is now, by a capability it holds, permitted or effective, or a path it owns. Nothing is opened to find out.
+func (e *env) refusalsHold(ck *catalog.Check, ts []obs.Target) string {
+	caps := agentCaps()
+	var refused []obs.Target
+	for _, t := range ts {
+		if t.State == "refused" {
+			refused = append(refused, t)
+		}
+	}
+	if len(refused) == 0 {
+		return ""
+	}
+	switch ck.Mechanism {
+	case "file_read", "read_perm":
+		if caps&readPowers != 0 {
+			return "the agent was refused " + names(refused) + ", but it holds " + capList(caps&readPowers) +
+				", with which it can read a file whatever its mode now, so no refusal shows anything (TWN-4)"
+		}
+		for _, t := range refused {
+			why, err := gain(e.expand(t.Name), 4, true)
+			switch {
+			case err != nil:
+				return "the agent was refused " + t.Name + ", and whether a change could get it in can't be told: " +
+					err.Error() + " (TWN-4)"
+			case why != "":
+				return "the agent was refused " + t.Name + ", but could read it " + why + " (TWN-4)"
+			}
+		}
+	case "proc_open":
+		if caps&procPowers != 0 {
+			return "the agent was refused " + names(refused) + ", but it holds " + capList(caps&procPowers) +
+				", with which it can get past ptrace's rules for another process, so no refusal shows anything (TWN-4)"
+		}
+	}
+	return ""
 }
 
 func names(ts []obs.Target) string {
@@ -163,6 +219,9 @@ func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
 		paths = append(paths, "/proc/"+d.Name()+"/"+file)
 	}
 	if len(paths) == 0 {
+		if why := reachPast(); why != "" {
+			return unknownObs(why)
+		}
 		return obs.Observation{Result: obs.ScopedOut, Reason: "no other process is visible to the probe (a PID namespace, or hidepid)",
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"proc_pids": 0}}}
 	}
@@ -228,34 +287,89 @@ func writable(e *env, ck *catalog.Check) obs.Observation {
 		}
 		found["path_dirs"] = dirs
 	}
-	ts, counts, err := e.sweep(ck.ID, found, writeCheck)
+	how := map[string]string{}
+	ts, counts, err := e.sweep(ck.ID, found, func(name, path string) (obs.Target, error) {
+		t, h, err := writeHow(name, path)
+		how[name] = h
+		return t, err
+	})
 	if err != nil {
 		return sweepErr(err)
 	}
-	return e.judge(ck, ts, counts, e.tw.writeOK, e.tw.writeRefused, func(fs []obs.Target) (string, string) {
+	return e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
 		variant := "writable"
 		if ck.ID == "AMP-8.sys" {
 			variant = "writable_sysctl"
 		}
-		return variant, "the agent can write or replace " + names(fs)
+		var ev []string
+		if len(now) > 0 {
+			ev = append(ev, "the agent can write or replace "+names(now))
+		}
+		if len(made) > 0 {
+			ev = append(ev, "the agent could write or replace "+strings.Join(made, ", "))
+		}
+		return variant, strings.Join(ev, "; ")
 	})
 }
 
 // AMP-4: the known control sockets, each an existing socket the agent may connect to, never connected.
 func sockets(e *env, ck *catalog.Check) obs.Observation {
-	ts, counts, err := e.sweep(ck.ID, nil, socketCheck)
+	how := map[string]string{}
+	ts, counts, err := e.sweep(ck.ID, nil, func(name, path string) (obs.Target, error) {
+		t, h, err := socketCheck(name, path)
+		how[name] = h
+		return t, err
+	})
 	if err != nil {
 		return sweepErr(err)
 	}
-	return e.judge(ck, ts, counts, e.tw.writeOK, e.tw.writeRefused, func(fs []obs.Target) (string, string) {
+	return e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
 		variant := "system_bus"
-		for _, t := range fs {
-			if t.Name != "/run/dbus/system_bus_socket" {
+		for _, t := range ts {
+			if t.State == "found" && t.Name != "/run/dbus/system_bus_socket" {
 				variant = "control_socket"
 			}
 		}
-		return variant, "the agent has connect permission on " + names(fs) + " (never connected)"
+		var ev []string
+		if len(now) > 0 {
+			ev = append(ev, "the agent has connect permission on "+names(now))
+		}
+		if len(made) > 0 {
+			ev = append(ev, "the agent could give itself connect permission on "+strings.Join(made, ", "))
+		}
+		return variant, strings.Join(ev, "; ") + " (never connected)"
 	})
+}
+
+// judgeWrite is judge for the write_perm mechanism, shared by every check that uses it (TWN-4). A target found only
+// because the agent can make it writable (how names it) counts as found where the check's findings are indicators, and
+// pick lists it apart, with how; where they are proofs, it leaves the check unknown unless another target is found
+// outright. judge then holds any pass to refusalsHold.
+func (e *env) judgeWrite(ck *catalog.Check, ts []obs.Target, counts map[string]int, how map[string]string,
+	pick func(now []obs.Target, made []string) (variant, evidence string)) obs.Observation {
+	var now []obs.Target
+	var made []string
+	for _, t := range ts {
+		switch {
+		case t.State != "found":
+		case how[t.Name] != "":
+			made = append(made, t.Name+" ("+how[t.Name]+")")
+		default:
+			now = append(now, t)
+		}
+	}
+	proofs := false
+	for _, v := range ck.Variants {
+		proofs = proofs || v.Class == catalog.Proof
+	}
+	if proofs && len(made) > 0 && len(now) == 0 {
+		return unknownObs("nothing is writable now, and the agent could write " + strings.Join(made, ", ") +
+			" only by a change of identity or mode, which is no proof (TWN-4)")
+	}
+	if proofs {
+		made = nil
+	}
+	return e.judge(ck, ts, counts, e.tw.writeOK, e.tw.writeRefused, func([]obs.Target) (string, string) { return pick(now, made) })
 }
 
 // AMP-5: listening sockets from /proc/net/tcp and tcp6, never connected. The twin is the probe's own loopback
@@ -344,6 +458,9 @@ func amp8blk(e *env, ck *catalog.Check) obs.Observation {
 		}
 	}
 	if len(devs) == 0 {
+		if why := reachPast(); why != "" {
+			return unknownObs(why)
+		}
 		return obs.Observation{Result: obs.ScopedOut, Reason: "no block device is visible to the probe",
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"block_devices": 0}}}
 	}

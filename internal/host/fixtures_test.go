@@ -94,6 +94,33 @@ var fixtures = []fixture{
 		expect: expectResults(map[string]string{"SEC-2": obs.ScopedOut, "SEC-5": obs.ScopedOut}), opts: func(world) []string {
 			return []string{"--network", "none", "--cap-add", "SYS_ADMIN", "-e", "EVIDENCE=hidepid"}
 		}},
+	// TWN-4: a directory the agent owns at mode 0555, above root's read-only startup files, is one it can make writable
+	// at any time, so PER-1 can't pass; and its own credential file at mode 0000 is one it can make readable, so SEC-3
+	// can't pass either, and nothing is read to find out
+	{name: "evidence-owned", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=owned"}
+	}, expect: func(t *testing.T, w world, r *Run) {
+		expectWritable(map[string]string{"PER-1": "changing the mode of /home/agent, which it owns"})(t, w, r)
+		expectUnknown(map[string]string{"SEC-3": "changing the mode of /home/agent/.aws/credentials, which it owns"})(t, w, r)
+	}},
+	// TWN-4 along the real path: the agent's home is root's link to a 0555 directory the agent owns, which the kernel
+	// traverses, so its owner can make it writable whatever the link's owner
+	{name: "evidence-ownedlink", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=ownedlink"}
+	}, expect: expectWritable(map[string]string{"PER-1": "changing the mode of /review/home, which it owns"})},
+	// TWN-4 across the whole path, one identity at a time: CAP_SETGID joins the group that may search /root and write
+	// the files in it; permitted CAP_DAC_READ_SEARCH, raised, passes a closed home to a file anyone may write. The probe
+	// can't see past either directory, so neither can be a finding: unknown, naming the capability, never a pass
+	{name: "evidence-setgid", image: "evidence", user: "root", settle: time.Second,
+		box:    func(d *DockerBox) Box { d.ProbePath = "/opt/caps/probe"; return d },
+		opts:   func(world) []string { return []string{"--network", "none", "-e", "EVIDENCE=setgid"} },
+		expect: expectUnknown(map[string]string{"PER-1": "CAP_SETGID"})},
+	{name: "evidence-drs", image: "evidence", settle: time.Second,
+		box: func(d *DockerBox) Box { d.ProbePath = "/opt/caps/probe"; return d },
+		opts: func(world) []string {
+			return []string{"--network", "none", "--cap-add", "DAC_READ_SEARCH", "-e", "EVIDENCE=drs"}
+		},
+		expect: expectUnknown(map[string]string{"PER-1": "CAP_DAC_READ_SEARCH"})},
 	{name: "evidence-sockets", image: "evidence", settle: time.Second, expect: expectSockets, opts: func(world) []string {
 		return []string{"--network", "none", "--cap-add", "NET_ADMIN", "-e", "EVIDENCE=sockets"}
 	}},
@@ -179,14 +206,45 @@ var fixtures = []fixture{
 	sudors("owned", "agent", obs.Unknown, "", "/opt/own is owned by uid 1001, not root"),
 	// the agent (uid 1001) holding only CAP_FOWNER, launched through a wrapper that grants it; it redirected the chain
 	// to su while leaving every link root's, so a capability, not a mode, must stop the run
+	// TWN-4 too: CAP_FOWNER changes any file's mode, so no startup, PATH, schedule or config path can pass, and no
+	// credential refusal holds
 	func() fixture {
 		f := sudors("fowner", "root", obs.Unknown, "", "the agent holds CAP_FOWNER, so")
 		f.box = func(d *DockerBox) Box { d.ProbePath = "/opt/fowner/probe"; return d }
+		amp1 := f.expect
+		f.expect = func(t *testing.T, w world, r *Run) {
+			amp1(t, w, r)
+			expectWritable(map[string]string{"PER-1": "CAP_FOWNER", "PER-2": "CAP_FOWNER", "PER-3": "CAP_FOWNER",
+				"PER-4": "CAP_FOWNER"})(t, w, r)
+			expectUnknown(map[string]string{"SEC-3": "CAP_FOWNER"})(t, w, r)
+		}
 		return f
 	}(),
 }
 
 const sudoChain = "/usr/bin/sudo -> /etc/alternatives/sudo -> /usr/lib/cargo/bin/sudo"
+
+// expectUnknown: each check is unknown, saying why, never a pass.
+func expectUnknown(want map[string]string) func(t *testing.T, w world, r *Run) {
+	return func(t *testing.T, w world, r *Run) {
+		for id, says := range want {
+			if o := outcome(r.Report, id); o.Result != obs.Unknown || !strings.Contains(o.Reason, says) {
+				t.Errorf("%s: want unknown saying %q, got %+v", id, says, o)
+			}
+		}
+	}
+}
+
+// expectWritable: each check found a path the agent can write or make writable, saying how, never a pass.
+func expectWritable(want map[string]string) func(t *testing.T, w world, r *Run) {
+	return func(t *testing.T, w world, r *Run) {
+		for id, says := range want {
+			if o := outcome(r.Report, id); o.Result != obs.Finding || !strings.Contains(o.Evidence, says) {
+				t.Errorf("%s: want a finding saying %q, got %+v", id, says, o)
+			}
+		}
+	}
+}
 
 // sudors is a case of the sudors fixture: SUDORS sets it up, and AMP-1 must end as result and variant, saying says.
 // The agent user has NOPASSWD for every command, so a refused case that ran sudo would show as a finding.

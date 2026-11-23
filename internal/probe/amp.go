@@ -48,6 +48,9 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 		return unknownObs(err.Error())
 	}
 	if len(present) == 0 && len(elsewhere) == 0 {
+		if why := reachPast(); why != "" { // a mount can hide a sudo (TWN-4)
+			return unknownObs(why)
+		}
 		return obs.Observation{Result: obs.Absent, Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root,
 			Discovered: map[string]int{"path_sudo": 0}, Targets: ts}}
 	}
