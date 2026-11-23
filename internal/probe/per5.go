@@ -116,8 +116,8 @@ func markerName(root, path, runID string) (string, bool) {
 	return name, runIDShape.MatchString(runID) && filepath.IsAbs(root) && path == filepath.Join(root, name)
 }
 
-// Mark places each planned marker (SBX-1): the root opened O_DIRECTORY|O_NOFOLLOW and confirmed to be the directory
-// the survey saw, then the marker created exclusively, never following a link, holding only the run id.
+// Mark places each planned marker (SBX-1): the root pinned O_PATH|O_DIRECTORY|O_NOFOLLOW and confirmed to be the
+// directory the survey saw, then the marker created exclusively, never following a link, holding only the run id.
 func Mark(in obs.MarkInput) *obs.MarkDoc {
 	d := &obs.MarkDoc{Schema: obs.MarkSchema, RunID: in.RunID, Nonce: in.Nonce, BoxID: in.BoxID, BootID: bootID()}
 	for _, m := range in.Marks {
@@ -134,11 +134,14 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 	if !ok {
 		return 0, 0, "not a marker path this run may create"
 	}
-	dfd, err := syscall.Open(m.Root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	dfd, err := syscall.Open(m.Root, unixOPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0) // no read permission needed
 	if err != nil {
 		return 0, 0, "the root can't be opened: " + errName(errnoOf(err))
 	}
 	defer syscall.Close(dfd)
+	if m.Dev == 0 && m.Ino == 0 {
+		return 0, 0, unlisted(dfd)
+	}
 	var rst syscall.Stat_t
 	if syscall.Fstat(dfd, &rst) != nil || uint64(rst.Dev) != m.Dev || rst.Ino != m.Ino {
 		return 0, 0, "the root isn't the directory the survey saw"
@@ -159,8 +162,25 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 	return st.Ino, st.Size, ""
 }
 
-// Recheck looks for each placed marker after the reset (TWN-3): pinned with O_PATH|O_NOFOLLOW under the root opened
-// O_DIRECTORY|O_NOFOLLOW, read only when it is a regular file with the placed inode and length, and then only the run
+// unlisted says why a planned root the survey didn't list takes no marker (TWN-3). The survey lists only roots the
+// agent can write and search, so the usual answer is that its current permissions refuse; that says nothing of the
+// rest of the root's storage, so it is never the root's negative. Only faccessat on the root, pinned with O_PATH so one
+// the agent can't read is still diagnosed: nothing is created.
+func unlisted(dfd int) string {
+	err := syscall.Faccessat(dfd, ".", 2|1 /* W_OK|X_OK */, atEAccess)
+	switch e := errnoOf(err); {
+	case e == syscall.EACCES || e == syscall.EROFS:
+		return "its current permissions don't let the agent write it (" + errName(e) + "), so the survey didn't list it; " +
+			"that doesn't show the agent can't write elsewhere on its storage"
+	case err == nil:
+		return "the survey didn't list it, though the agent can write it now"
+	default:
+		return "the survey didn't list it, and whether the agent can write it can't be told (" + errName(e) + ")"
+	}
+}
+
+// Recheck looks for each placed marker after the reset (TWN-3): pinned with O_PATH|O_NOFOLLOW under the root pinned
+// O_PATH|O_DIRECTORY|O_NOFOLLOW, read only when it is a regular file with the placed inode and length, and then only the run
 // id and the end after it. Anything else at that name is unknown and unread; absence is ENOENT under the opened root.
 // It also observes PER-1 to PER-4's targets, for the host to judge severity. It removes nothing (SBX-1).
 func Recheck(in obs.RecheckInput) *obs.RecheckDoc {
@@ -191,7 +211,7 @@ func recheck(m obs.Placed, runID string) (string, string) {
 	if !ok {
 		return "unknown", "not this run's marker path"
 	}
-	dfd, err := syscall.Open(m.Root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	dfd, err := syscall.Open(m.Root, unixOPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0) // no read permission needed
 	if err != nil {
 		return "unknown", "the root can't be opened: " + errName(errnoOf(err))
 	}

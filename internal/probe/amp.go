@@ -15,16 +15,20 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
 )
 
 var checkLimit = 10 * time.Second // SBX-7: 10 s per check; a variable so tests can shorten it
 
-// AMP-1: `sudo -n -l`, which lists policy and runs no command (SBX-1 (c)), from a sudo at one of the fixed paths that
-// is a regular, root-owned, setuid file the agent can neither write nor replace. The file is pinned with O_PATH,
-// checked on that descriptor, and executed through it, so the inode checked is the inode that runs. A sudo anywhere
-// else, or one that fails the check, is recorded and never run.
+// AMP-1: `sudo -n -l`, which lists policy and runs no command (SBX-1 (c)), from a sudo at one of the fixed paths: a
+// regular, root-owned, setuid file there, or the one a symlink chain from there ends at (as Debian's alternatives and
+// sudo-rs install it), trusted only by an allow-list of root's ownership along the whole chain, and only for an agent
+// that isn't root and holds no capability. The file is pinned with O_PATH, checked on that descriptor, and executed
+// from it, so the inode checked is the inode that runs. A sudo anywhere else, or one that fails the check, is recorded
+// and never run, and the reason says what failed.
 func amp1(e *env, ck *catalog.Check) obs.Observation {
 	var ts []obs.Target
 	var present []string
@@ -47,19 +51,22 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 		return obs.Observation{Result: obs.Absent, Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root,
 			Discovered: map[string]int{"path_sudo": 0}, Targets: ts}}
 	}
-	var refused []string
-	for _, p := range present {
-		fd, why := pinSudo(p)
-		if why != "" {
-			refused = append(refused, p+" "+why)
-			continue
-		}
-		return sudoList(p, fd)
-	}
 	if len(present) == 0 {
 		return unknownObs("sudo is only off the fixed paths (" + strings.Join(elsewhere, ", ") + "): recorded, never run")
 	}
-	return unknownObs("no sudo at a fixed path can be trusted to run: " + strings.Join(refused, "; "))
+	if why := privileged(); why != "" {
+		return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + why)
+	}
+	var refused []string
+	for _, p := range present {
+		fd, chain, why := pinSudo(p)
+		if why != "" {
+			refused = append(refused, p+": "+why)
+			continue
+		}
+		return sudoList(chain, fd)
+	}
+	return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + strings.Join(refused, "; "))
 }
 
 // pathSudo: sudo in any PATH directory other than the fixed ones. Only lstat; nothing found here ever runs.
@@ -87,48 +94,210 @@ func pathSudo(fixed []string) ([]string, error) {
 	return out, nil
 }
 
-// pinSudo opens p with O_PATH and O_NOFOLLOW and checks, on that descriptor, that it is the file lstat saw, a regular
-// root-owned setuid file (a symlink pins as itself, and fails), which the agent can't write or replace. It returns the
-// descriptor, or why p can't be trusted.
-func pinSudo(p string) (int, string) {
-	var st syscall.Stat_t
-	if err := lstat(p, &st); err != nil {
-		return -1, "can't be checked"
+// pinSudo walks p to the file it names (walk) and trusts the chain only by AMP-1's allow-list: every link on it owned by
+// root, and every directory on the real path to each link and to the file owned by root, not world-writable, and not
+// writable by the agent (rootDir); the file a regular, root-owned, setuid file the agent can't write, named sudo or
+// sudo.ws. The file is pinned with O_PATH and O_NOFOLLOW and checked on that descriptor: the inode the walk ended at,
+// and the inode the kernel reaches from p. It returns the descriptor and the chain as a report shows it, or why p can't
+// be trusted. It assumes an agent that isn't root and holds no capability (privileged).
+func pinSudo(p string) (fd int, chain, why string) {
+	links, steps, real, st, err := walk(p)
+	switch {
+	case err != nil && len(links) == 0:
+		return -1, "", "can't be checked (" + err.Error() + ")"
+	case err != nil:
+		return -1, "", "its links can't be followed to a file (" + err.Error() + ")"
 	}
-	if t, err := writeCheck(p, p); err != nil || t.State != "refused" {
-		return -1, "can be written or replaced by the agent, or its ancestors can"
+	seen := map[string]bool{}
+	for _, q := range append(links, real) {
+		var ls syscall.Stat_t
+		if q != real && (syscall.Lstat(q, &ls) != nil || ls.Uid != 0) {
+			return -1, "", fmt.Sprintf("the link %s isn't root's (uid %d)", q, ls.Uid)
+		}
+		for d := filepath.Dir(q); !seen[d]; d = filepath.Dir(d) {
+			seen[d] = true
+			if why := rootDir(d); why != "" {
+				return -1, "", why
+			}
+		}
 	}
-	fd, err := syscall.Open(p, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	switch {
+	case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		return -1, "", real + " isn't a regular file"
+	}
+	switch err := syscall.Faccessat(unixAtFDCWD, real, 2 /* W_OK */, atEAccess); errnoOf(err) {
+	case syscall.EACCES, syscall.EROFS:
+	case 0:
+		return -1, "", "the agent can write " + real + " itself"
+	default:
+		return -1, "", "whether the agent can write " + real + " can't be told (" + err.Error() + ")"
+	}
+	fd, err = syscall.Open(real, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return -1, "can't be pinned"
+		return -1, "", real + " can't be pinned (" + err.Error() + ")"
 	}
-	var fst syscall.Stat_t
+	var fst, kst syscall.Stat_t
 	switch {
 	case syscall.Fstat(fd, &fst) != nil:
-		syscall.Close(fd)
-		return -1, "can't be checked on its descriptor"
+		why = real + " can't be checked on its descriptor"
 	case fst.Dev != st.Dev || fst.Ino != st.Ino:
-		syscall.Close(fd)
-		return -1, "changed between the check and the pin"
-	case !setuidRoot(fst):
-		syscall.Close(fd)
-		return -1, "isn't a regular, root-owned, setuid file"
+		why = real + " changed between the check and the pin"
+	case syscall.Stat(p, &kst) != nil || kst.Dev != fst.Dev || kst.Ino != fst.Ino:
+		why = "the kernel doesn't reach " + real + " from " + p
+	case fst.Mode&syscall.S_IFMT != syscall.S_IFREG:
+		why = real + " isn't a regular file"
+	case fst.Uid != 0:
+		why = fmt.Sprintf("%s is owned by uid %d, not root", real, fst.Uid)
+	case fst.Mode&syscall.S_ISUID == 0:
+		why = real + " isn't setuid"
+	case !sudoNames[filepath.Base(real)]:
+		why = real + " isn't named sudo or sudo.ws, so it isn't run as one"
 	}
-	return fd, ""
+	if why != "" {
+		syscall.Close(fd)
+		return -1, "", why
+	}
+	return fd, strings.Join(steps, " -> "), ""
 }
 
-func setuidRoot(st syscall.Stat_t) bool {
-	return st.Mode&syscall.S_IFMT == syscall.S_IFREG && st.Uid == 0 && st.Mode&syscall.S_ISUID != 0
+// sudoNames are the files a sudo chain may end at: sudo itself (sudo-rs's included) and Debian's sudo.ws.
+var sudoNames = map[string]bool{"sudo": true, "sudo.ws": true}
+
+// rootDir says why a directory on sudo's chain fails AMP-1's allow-list, or "": owned by root (an owner can make its
+// own directory writable at any time, whatever its mode now), not world-writable, sticky or not, and not writable by
+// the agent.
+func rootDir(d string) string {
+	var st syscall.Stat_t
+	switch {
+	case syscall.Lstat(d, &st) != nil:
+		return "the directory " + d + " can't be checked"
+	case st.Uid != 0:
+		return fmt.Sprintf("%s is owned by uid %d, not root", d, st.Uid)
+	case st.Mode&0o002 != 0:
+		return d + " is writable by anyone"
+	}
+	switch err := syscall.Faccessat(unixAtFDCWD, d, 2 /* W_OK */, atEAccess); errnoOf(err) {
+	case syscall.EACCES, syscall.EROFS:
+		return ""
+	case 0:
+		return "the agent can write " + d
+	default:
+		return "whether the agent can write " + d + " can't be told (" + err.Error() + ")"
+	}
 }
+
+// walk follows p one path component at a time (AMP-1): every symlink on the way, a directory's as well as the last
+// name's, counts against SBX-2's eight hops. It returns each link it followed (a path with no link in it), the whole
+// path after each one, starting with p, as a report shows the chain, and the link-free path it ends at with lstat's
+// answer for it. ".." is taken against that link-free path, as the kernel takes it.
+func walk(p string) (links, steps []string, real string, st syscall.Stat_t, err error) {
+	steps = []string{p}
+	rest := strings.Split(p, "/")
+	cur := "/"
+	for len(rest) > 0 {
+		c := rest[0]
+		rest = rest[1:]
+		switch c {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
+		next := filepath.Join(cur, c)
+		if err := syscall.Lstat(next, &st); err != nil {
+			return links, steps, "", st, fmt.Errorf("%s: %s", next, errName(errnoOf(err)))
+		}
+		if st.Mode&syscall.S_IFMT != syscall.S_IFLNK {
+			cur = next
+			continue
+		}
+		if len(links) == maxHops {
+			return links, steps, "", st, fmt.Errorf("more than %d links on the way", maxHops)
+		}
+		t, err := os.Readlink(next)
+		if err != nil {
+			return links, steps, "", st, fmt.Errorf("%s: %s", next, errName(errnoOf(err)))
+		}
+		links = append(links, next)
+		if filepath.IsAbs(t) {
+			cur = "/"
+		}
+		steps = append(steps, filepath.Join(append([]string{cur, t}, rest...)...))
+		rest = append(strings.Split(t, "/"), rest...)
+	}
+	if err := syscall.Lstat(cur, &st); err != nil {
+		return links, steps, "", st, fmt.Errorf("%s: %s", cur, errName(errnoOf(err)))
+	}
+	return links, steps, cur, st, nil
+}
+
+// privileged says why no sudo chain can be trusted to this agent, or "": AMP-1's allow-list binds only an agent that
+// isn't root and holds no capability, permitted, effective or inheritable. It reads them with geteuid(2) and capget(2),
+// never from /proc, and fails closed.
+func privileged() string {
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return "the agent's capabilities can't be read (" + err.Error() + ")"
+	}
+	var caps uint64
+	for i, d := range data {
+		caps |= uint64(d.Effective|d.Permitted|d.Inheritable) << (32 * i)
+	}
+	return privilegedWhy(syscall.Geteuid(), caps)
+}
+
+func privilegedWhy(euid int, caps uint64) string {
+	var held []string
+	for bit := 0; bit < 64; bit++ {
+		if caps&(1<<bit) == 0 {
+			continue
+		}
+		if bit < len(capNames) {
+			held = append(held, "CAP_"+capNames[bit])
+		} else {
+			held = append(held, fmt.Sprintf("capability %d", bit))
+		}
+	}
+	if n := len(held); n > 8 {
+		held = append(held[:8], fmt.Sprintf("%d more", n-8))
+	}
+	who := ""
+	switch {
+	case euid == 0 && len(held) > 0:
+		who = "the agent is root and holds " + strings.Join(held, ", ")
+	case euid == 0:
+		who = "the agent is root"
+	case len(held) > 0:
+		who = "the agent holds " + strings.Join(held, ", ")
+	default:
+		return ""
+	}
+	return who + ", so it could have replaced, exchanged or re-owned a link or directory on sudo's chain and left it " +
+		"looking like root's; ownership and permissions can't show the chain is out of its reach"
+}
+
+// capNames are the capabilities by bit (linux/capability.h).
+var capNames = []string{"CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID",
+	"SETPCAP", "LINUX_IMMUTABLE", "NET_BIND_SERVICE", "NET_BROADCAST", "NET_ADMIN", "NET_RAW", "IPC_LOCK", "IPC_OWNER",
+	"SYS_MODULE", "SYS_RAWIO", "SYS_CHROOT", "SYS_PTRACE", "SYS_PACCT", "SYS_ADMIN", "SYS_BOOT", "SYS_NICE",
+	"SYS_RESOURCE", "SYS_TIME", "SYS_TTY_CONFIG", "MKNOD", "LEASE", "AUDIT_WRITE", "AUDIT_CONTROL", "SETFCAP",
+	"MAC_OVERRIDE", "MAC_ADMIN", "SYSLOG", "WAKE_ALARM", "BLOCK_SUSPEND", "AUDIT_READ", "PERFMON", "BPF",
+	"CHECKPOINT_RESTORE"}
 
 const unixOPath = 0x200000 // O_PATH
 
 var sudoTag = regexp.MustCompile(`^[A-Z_]+:\s*`)
 
-// sudoList runs `sudo -n -l` through the pinned descriptor (as fexecve does), with an empty stdin and a fixed
-// environment, and classifies what it lists, line by line as it arrives. Only the classification leaves: a rule's
-// commands can carry arguments, and an argument can be a secret (SBX-2). The whole run, output and exit, is bounded by
-// checkLimit (SBX-7): past it sudo is killed and reaped, and AMP-1 is unknown. A NOPASSWD rule is the finding.
+// sudoEnv is sudo's whole environment; a variable only so the tests' stand-ins can be told what to play.
+var sudoEnv = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
+
+// sudoList runs `sudo -n -l` from the pinned descriptor itself, by execveat (spawnFD), never by a path, with an empty
+// stdin and a fixed environment, and classifies what it lists, line by line as it arrives. Only the classification
+// leaves: a rule's commands can carry arguments, and an argument can be a secret (SBX-2). The whole run, output and
+// exit, is bounded by checkLimit (SBX-7): past it sudo is killed and reaped, and AMP-1 is unknown. A NOPASSWD rule is
+// the finding; a run ended by a signal is unknown, since a child that died before its exec looks the same.
 func sudoList(p string, fd int) obs.Observation {
 	pinned := os.NewFile(uintptr(fd), p)
 	defer pinned.Close()
@@ -143,12 +312,16 @@ func sudoList(p string, fd int) obs.Observation {
 		return unknownObs("can't start sudo: " + err.Error())
 	}
 	defer or.Close()
-	proc, err := os.StartProcess("/proc/self/fd/3", []string{"sudo", "-n", "-l"}, &os.ProcAttr{
-		Env: []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}, Files: []*os.File{ir, ow, ow, pinned},
-		Sys: &syscall.SysProcAttr{Setpgid: true}}) // its own group, so a timeout ends anything it started too
+	// its own process group, so a timeout ends anything it started too
+	pid, err := spawnFD(int(pinned.Fd()), []string{"sudo", "-n", "-l"}, sudoEnv, [3]int{int(ir.Fd()), int(ow.Fd()), int(ow.Fd())})
 	ow.Close()
 	if err != nil {
-		return unknownObs("can't run " + p + " through its pinned descriptor: " + err.Error())
+		return unknownObs("can't run " + p + " from its pinned descriptor: " + err.Error())
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		syscall.Kill(-pid, syscall.SIGKILL)
+		return unknownObs("can't follow the sudo it started: " + err.Error())
 	}
 	type tally struct {
 		rules int
@@ -194,6 +367,8 @@ func sudoList(p string, fd int) obs.Observation {
 	switch {
 	case st == nil:
 		return unknownObs("sudo -n -l: no exit status")
+	case st.Sys().(syscall.WaitStatus).Signaled():
+		return unknownObs("sudo -n -l ended by a signal, " + st.Sys().(syscall.WaitStatus).Signal().String())
 	case t.err != nil:
 		return unknownObs("sudo -n -l's listing didn't read as lines: " + t.err.Error())
 	case t.rules == 0:

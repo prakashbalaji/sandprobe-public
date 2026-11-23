@@ -180,6 +180,48 @@ func TestPER5(t *testing.T) {
 	}
 }
 
+// An unknown PER-5 names each gap's cause (TWN-3): the mark's own reason for a root that took no marker, and whether
+// the provider gave a root no identity or a different one. A reason from the box is bounded before it is repeated.
+func TestPER5GapReasons(t *testing.T) {
+	for _, tc := range []struct {
+		name, model string
+		mut         func(pc *per5Case)
+		want        []string
+	}{
+		{"a root that took no marker, with the mark's reason", "recreate", func(pc *per5Case) {
+			pc.refuse(1)
+			pc.check.Marks[0].State = "absent"
+		}, []string{"/cache took no marker: the root can't be opened: EACCES"}},
+		{"restore: no provider identity for any root, every marker gone", "restore", func(pc *per5Case) {
+			pc.reset.RootIdentity = nil
+			pc.check.Marks[0].State = "absent"
+		}, []string{"/data has no identity from the provider", "/cache has no identity from the provider"}},
+		{"restore: a different provider identity", "restore", func(pc *per5Case) {
+			pc.reset.RootIdentity["/cache"] = [2]string{"disk-1", "disk-9"}
+			pc.check.Marks[0].State = "absent"
+		}, []string{"/cache isn't the same storage, by the provider's identity"}},
+		{"a long reason from the box", "recreate", func(pc *per5Case) {
+			pc.refuse(1)
+			pc.mark.Marks[1].Why = strings.Repeat("x", 5000)
+			pc.check.Marks[0].State = "absent"
+		}, []string{"/cache took no marker: xxx", "x..."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pc := per5Base(tc.model)
+			tc.mut(pc)
+			o := outcome(pc.grade(), "PER-5")
+			if o.Result != obs.Unknown || len(o.Reason) > 1024 {
+				t.Fatalf("want a bounded unknown, got %s with a %d-byte reason", o.Result, len(o.Reason))
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(o.Reason, w) {
+					t.Errorf("want the reason to say %q, got %q", w, o.Reason)
+				}
+			}
+		})
+	}
+}
+
 func TestPER5Invalid(t *testing.T) {
 	for name, mut := range map[string]func(pc *per5Case){
 		"the recheck from another box": func(pc *per5Case) { pc.check.BoxID = "box-9" },
