@@ -11,9 +11,11 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sandprobe/internal/strictjson"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var daytonaDrop = strings.Join(WorkloadEnvironment(), " ") + " /usr/bin/setpriv --reuid=10001 --regid=10001 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "
@@ -38,7 +40,7 @@ func (c *DaytonaClient) WorkloadSnapshot(ctx context.Context, id string) (Dayton
 	}
 	return s, nil
 }
-func (c *DaytonaClient) CreateDaytonaWorkload(ctx context.Context, dir, snapshot, network string) (*DaytonaBox, error) {
+func (c *DaytonaClient) CreateDaytonaWorkload(ctx context.Context, dir, snapshot, network string, volumes ...*DaytonaVolume) (*DaytonaBox, error) {
 	if !daytonaID.MatchString(snapshot) {
 		return nil, errors.New("invalid snapshot ID")
 	}
@@ -52,21 +54,22 @@ func (c *DaytonaClient) CreateDaytonaWorkload(ctx context.Context, dir, snapshot
 			return nil, errors.New("invalid workload network")
 		}
 	}
-	return c.createDaytona(ctx, dir, snapshot, network)
+	return c.createDaytona(ctx, dir, snapshot, network, volumes...)
 }
 func daytonaQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
 // WorkloadConfiguration contains API readbacks and declared execution paths, not
 // namespace or image attestation. Owned-home metadata is checked separately.
 type DaytonaWorkloadConfiguration struct {
-	ID               string `json:"id"`
-	SnapshotID       string `json:"snapshot_id"`
-	SnapshotRef      string `json:"snapshot_ref"`
-	NetworkAllowList string `json:"network_allow_list"`
-	User             string `json:"user"`
-	Public           bool   `json:"public"`
-	AgentHome        string `json:"agent_home"`
-	CacheHome        string `json:"cache_home"`
+	ID                string `json:"id"`
+	SnapshotID        string `json:"snapshot_id"`
+	SnapshotRef       string `json:"snapshot_ref"`
+	NetworkAllowList  string `json:"network_allow_list"`
+	User              string `json:"user"`
+	Public            bool   `json:"public"`
+	AgentHome         string `json:"agent_home"`
+	CacheHome         string `json:"cache_home"`
+	WorkspaceVolumeID string `json:"workspace_volume_id,omitempty"`
 }
 
 func (b *DaytonaBox) WorkloadConfiguration(ctx context.Context) (DaytonaWorkloadConfiguration, error) {
@@ -81,7 +84,11 @@ func (b *DaytonaBox) WorkloadConfiguration(ctx context.Context) (DaytonaWorkload
 	if err := b.match(d); err != nil {
 		return out, err
 	}
-	return DaytonaWorkloadConfiguration{ID: b.ID(), SnapshotID: d.SnapshotID, SnapshotRef: d.SnapshotRef, NetworkAllowList: d.NetworkAllowList, User: d.User, Public: *d.Public, AgentHome: WorkloadHome, CacheHome: WorkloadCache}, nil
+	out = DaytonaWorkloadConfiguration{ID: b.ID(), SnapshotID: d.SnapshotID, SnapshotRef: d.SnapshotRef, NetworkAllowList: d.NetworkAllowList, User: d.User, Public: *d.Public, AgentHome: WorkloadHome, CacheHome: WorkloadCache}
+	if b.journal.Volume != nil {
+		out.WorkspaceVolumeID = b.journal.Volume.ID
+	}
+	return out, nil
 }
 
 type DaytonaManagerReadiness struct {
@@ -133,6 +140,10 @@ printf '}'`
 	return nil
 }
 func (b *DaytonaBox) PrepareWorkload(ctx context.Context) error {
+	return b.prepareWorkload(ctx, false)
+}
+
+func (b *DaytonaBox) prepareWorkload(ctx context.Context, preserveWorkspace bool) error {
 	if _, e := b.WorkloadConfiguration(ctx); e != nil {
 		return e
 	}
@@ -145,6 +156,15 @@ func (b *DaytonaBox) PrepareWorkload(ctx context.Context) error {
 		{"prepare-protected-fixture", `set -eu; install -d -m 0755 /opt/sandprobe; test ! -e /opt/sandprobe/protected-marker; (umask 077; printf synthetic-not-a-secret > /opt/sandprobe/protected-marker); chmod 0400 /opt/sandprobe/protected-marker`},
 		{"prepare-workspace", `install -d -o 10001 -g 10001 -m 0700 /workspace`},
 		{"prepare-startup-home", `set -eu; test ! -e /opt/sandprobe/home; test ! -L /opt/sandprobe/home; install -d -o 0 -g 0 -m 0555 /opt/sandprobe/home; install -d -o 10001 -g 10001 -m 0700 /workspace/.cache`},
+	}
+	if preserveWorkspace {
+		// RUN-23: never normalize or repair persisted paths during a reset test.
+		// Recreate only the protected fixture/home on the replacement root disk.
+		steps[2].script = `python3 -I -c 'import os,stat
+for path in ("/workspace","/workspace/.cache"):
+ s=os.stat(path,follow_symlinks=False)
+ if not stat.S_ISDIR(s.st_mode) or s.st_uid!=10001 or s.st_gid!=10001 or stat.S_IMODE(s.st_mode)!=0o700:raise SystemExit(2)'`
+		steps[3].script = `set -eu; test ! -e /opt/sandprobe/home; test ! -L /opt/sandprobe/home; install -d -o 0 -g 0 -m 0555 /opt/sandprobe/home`
 	}
 	for _, step := range steps {
 		b.workloadStage = step.name
@@ -282,10 +302,49 @@ func (c *DaytonaClient) CleanupDaytonaState(ctx context.Context, path string) (s
 	}
 	raw, e := io.ReadAll(io.LimitReader(f, 65537))
 	var j daytonaJournal
-	if e != nil || strictjson.Decode(raw, 65536, &j) != nil || !daytonaID.MatchString(j.ID) || j.Nonce == "" || j.Born == "" || j.Organization == "" {
+	if e != nil || strictjson.Decode(raw, 65536, &j) != nil || !daytonaID.MatchString(j.ID) || j.Nonce == "" || (j.Volume == nil && (j.Born == "" || j.Organization == "")) {
 		return "", "", errors.New("cleanup identity incomplete; retain intent")
 	}
 	b := &DaytonaBox{client: c, journal: j, state: path}
+	if j.Volume != nil {
+		v, err := c.RecoverDaytonaVolume(filepath.Join(filepath.Dir(path), "workspace-volume.state"))
+		if err != nil || j.Volume.ID != v.ID() || j.Volume.MountPath != "/workspace" || j.Volume.Subpath != "" {
+			return j.ID, "", errors.New("persistent cleanup volume binding invalid")
+		}
+		if !regexp.MustCompile(`^n[a-f0-9]{24}$`).MatchString(j.Nonce) || !regexp.MustCompile(`^sandprobe-[a-f0-9]{24}$`).MatchString(j.Name) || j.Requested.IsZero() {
+			return j.ID, "", errors.New("persistent cleanup create intent invalid")
+		}
+		b.volume = v
+		found := false
+		for _, consumer := range v.journal.Consumers {
+			if consumer.ID == j.ID || (consumer.ID == "" && consumer.Journal == path) {
+				b.volumeConsumer = consumer.Journal
+				found = true
+				break
+			}
+		}
+		if !found {
+			return j.ID, "", errors.New("persistent cleanup consumer identity unavailable")
+		}
+		info, err := b.cleanupLookup(ctx)
+		if err != nil {
+			return j.ID, "", err
+		}
+		if !info.Absent {
+			born, parseErr := time.Parse(time.RFC3339Nano, info.Born)
+			if info.ID != j.ID || info.Name != j.Name || info.Labels["sandprobe_run"] != j.Nonce || info.Organization != v.journal.Organization || parseErr != nil || born.Before(j.Requested.Add(-time.Minute)) || born.After(j.Requested.Add(2*time.Minute)) || (j.Born != "" && info.Born != j.Born) || (j.Organization != "" && info.Organization != j.Organization) {
+				return j.ID, "", errors.New("persistent cleanup sandbox creation identity changed")
+			}
+		}
+		// Reconcile only the ID durably returned into this exact sandbox journal.
+		for _, consumer := range v.journal.Consumers {
+			if consumer.Journal == b.volumeConsumer && consumer.ID == "" {
+				if err = v.consumerCreated(consumer.Journal, j.ID); err != nil {
+					return j.ID, "", err
+				}
+			}
+		}
+	}
 	if e = b.Destroy(ctx); e != nil {
 		return j.ID, "", e
 	}
