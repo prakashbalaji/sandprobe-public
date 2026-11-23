@@ -323,6 +323,12 @@ implement or merge is not proof of third-party approval. No CI job uses cloud cr
   than logged; the child receives a minimal environment without SDK credentials. The intended Pod Identity file
   is still in the same sandbox, so this is not a credential-separation claim. Report task success, attempted model
   calls, functional-test result and artifact digest; failure is visible independently of security assessment.
+  In host-controller mode, the one repair receives the validated failing case IDs
+  and their shipped public synthetic inputs/expected outputs. Construct this
+  feedback from trusted CASES, never candidate stdout, exception text or guest
+  strings. Do not change the nine cases, first prompt, model or two-request cap.
+  Failure to validate feedback stops repair; it cannot become a pass.
+
 - **RUN-4 Controlled measurements.** Use only run-owned synthetic fixtures: an agent-owned writable workspace,
   a root-owned unreadable synthetic file built into the task image, an image-root write attempt at a dedicated
   nonexistent fixture path, own identity/capability metadata and a run-owned TCP receiver with a known nonce.

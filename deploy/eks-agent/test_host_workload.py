@@ -42,6 +42,11 @@ class HostWorkloadTests(unittest.TestCase):
             request = json.loads(payload)
             self.assertEqual(request["modelId"], host_workload.MODEL)
             self.assertIn(len(request["messages"]), [1, 3])
+            if len(request["messages"]) == 3:
+                feedback = request["messages"][2]["content"][0]["text"]
+                self.assertIn('"failed_public_examples"', feedback)
+                self.assertIn('"case":9', feedback)
+                self.assertIn('"expected":{"error":"ValueError"}', feedback)
             # This source must never be executed by the host, even during a unit test.
             text = json.dumps({"solution.py": "raise RuntimeError('sandbox only')"})
             return json.dumps({"converse_attempted": True, "response": {"output": {"message": {"content": [{"text": text}]}}}}).encode()
