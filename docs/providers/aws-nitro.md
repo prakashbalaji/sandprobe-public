@@ -43,6 +43,51 @@ PROFILE=<your profile> deploy/eks.sh down      # deletes exactly what up recorde
 
 Confidential mode denies `exec` and stdin, so it isn't supported.
 
+### Exit 5: incomplete is expected
+
+A run on the `isolated` or `network-isolated` pod is expected to finish incomplete, and exit 5. Incomplete means some
+checks ended unknown: the probe couldn't settle them either way, and the report gives each one's reason. The grade
+then carries the count, such as `C (incomplete: 3 unknown)`, and is never A or B (GRD-2). The run still finished: its
+pod was confirmed deleted, since a pod that isn't makes the run exit 7 instead, and its reports were written.
+
+In a script, treat 5 as "ran, with unknowns", and confirm it from the JSON report (`-o json`): `grade.valid` is true,
+`grade.complete` is false, and `grade.unknown` lists the checks. Two other cases exit 5, with no letter: an invalid
+run, whose `grade.valid` is false and whose `grade.invalid` says why, and a run that stopped on an error once its pod
+was deleted, which prints the error instead of a report. A grade below `-min` exits 6, which outranks 5. The README
+lists every exit code under [What it checks](../../README.md#what-it-checks), and SPEC.md's OUT-4 is the rule.
+
+### Cost
+
+The cluster costs money for as long as it's up. EKS charges for the cluster every hour it exists, and for the EC2
+instances Auto Mode launches to run pods: Auto Mode's charge on top of each instance's own price. AWS's
+[EKS pricing](https://aws.amazon.com/eks/pricing/) page has the rates. When you're done, always run
+`PROFILE="$AWS_PROFILE" deploy/eks.sh down`. It deletes exactly what `up` recorded and confirms each is gone.
+
+## Already have a Nitro cluster?
+
+`run aws-nitro` uses only the cluster `deploy/eks.sh up` makes. For a cluster you already run:
+
+- `run kubernetes` creates one throwaway pod in it, probes it and deletes it. Give the pod the `isolated-sandbox`
+  runtime class with an overrides file, as in
+  [AWS Nitro Sandboxes on your own EKS cluster](kubernetes.md#aws-nitro-sandboxes-on-your-own-eks-cluster).
+- `run exec` probes your agent's own pod, already running, through `kubectl exec`, and never resets or deletes it:
+
+```sh
+KUBECONFIG="$HOME/.kube/my-eks.yaml"   # the kubeconfig that holds your cluster's context
+CONTEXT=my-eks                         # that context's name
+POD=my-agent                           # your agent's pod, in the context's namespace
+AGENT_USER=agent                       # set it to the user your agent runs as in the pod
+sandprobe run exec -as "$AGENT_USER" -y -- kubectl --kubeconfig "$KUBECONFIG" --context "$CONTEXT" exec -i "$POD" -- sh
+```
+
+`-as` checks the user and doesn't switch to it. `kubectl exec` runs as the container's user, so the run stops before
+any check if that user isn't `$AGENT_USER`, or if the pod has no such user. `amazonlinux:2023`, the EKS docs'
+example, runs as root. [`run exec`](exec.md#run-it) has the details.
+
+Both commands leave SEC-4, EGR-3, AMP-6 and AMP-7 off by default: each contacts the provider's own endpoints, and
+neither command knows who hosts your cluster. `run aws-nitro` excludes none of them. Read
+[Terms and consent](#terms-and-consent) before you turn any on with `-provider-endpoints`.
+
 ## What's skipped, and why
 
 No check is excluded for this provider. These are skipped:
