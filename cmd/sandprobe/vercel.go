@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
 	"sandprobe/internal/probes"
@@ -33,28 +32,28 @@ func vercelClient(r runFlags) (*host.VercelClient, error) {
 	}
 	return host.NewVercelClient(key, r.vercelTeam, r.vercelProject)
 }
-func vercelPlan(c *host.SSMCanary, r runFlags) planDoc {
+func vercelPlan(c canaryChoice, r runFlags) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	return planDoc{Provider: "vercel",
 		Creates:       []string{"one Vercel universal-image sandbox in team " + r.vercelTeam + ", project " + r.vercelProject + "; two CPU cores, no injected secrets, mounts or ports", "900000ms timeout, persistent=false; private lifecycle journal before one create request"},
 		LaunchPath:    "native HTTPS command stream targeting create-returned session ID; ordinary image user, sudo=false; 95000ms command timeout",
 		Probe:         "existing static Go probe in private random scratch directory, SHA-256 verified before execution",
 		Markers:       "none: PER-5 skipped without resettable run-owned persistent storage",
-		Contacts:      []string{"our canary " + c.Addr + " (" + c.Dom + "): TCP 443, 22, 80, 8080; UDP 53; DNS test markers only"},
+		Contacts:      []string{c.describe},
 		BoxNamed:      []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 excluded by Vercel approved scope (PRV-9)"},
 		OpensReadOnly: append(append([]string{}, sec3.Targets...), "credential-shaped files and other-process accessibility; never read secret values"),
 		Runs:          []string{"sudo policy listing only; architecture, private-directory, upload checksum helpers", "native Go HTTPS; no runtime SDK dependency, no automatic resume or persistence"},
 		Reset:         "none: pause/resume is not a reset; PER-5 skipped",
 		Deletes:       "stop only the immutable session and verify terminal/404; then identity-guarded sandbox-name deletion and GET404; unresolved cleanup exits7",
 		LocalProxy:    "excluded even with -allow-local-proxy", Time: "one CPU sandbox; ten-minute run deadline; independent three-minute cleanup; fifteen-minute automatic timeout",
-		Residual: host.VercelResidual}
+		Residual: withRetention(host.VercelResidual, c)}
 }
 func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	c, canaryErr := r.liveCanary()
-	if c == nil {
-		c = &host.SSMCanary{Addr: "<canary-ip>", Dom: "<canary-domain>"}
+	choice, err := r.chooseCanary() // HCN-5, with no network call
+	if err != nil {
+		return 0, err
 	}
-	p := vercelPlan(c, r)
+	p := vercelPlan(choice, r)
 	if plan {
 		if o.json() {
 			o.emit(p)
@@ -74,9 +73,6 @@ func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		return exitApproval, nil
 	}
-	if canaryErr != nil {
-		return 0, canaryErr
-	}
 	client, err := vercelClient(r)
 	if err != nil {
 		return 0, err
@@ -93,9 +89,11 @@ func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Vercel team/project access and token", exitLogin)
 	}
-	if answer, e := c.Ask(ctx, canary.Request{Op: "status"}); e != nil || !answer.OK {
-		return 0, fail("provider_error", "canary did not answer over SSM", "deploy/canary.sh status", exitPartial)
+	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	if err != nil {
+		return 0, err
 	}
+	defer closeCanary(public, stderr)
 	step := func(s string) {
 		if !o.json() {
 			fmt.Fprintln(stderr, "· "+s)

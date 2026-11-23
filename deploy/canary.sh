@@ -19,7 +19,7 @@
 set -euo pipefail
 PUBLIC=${PUBLIC:-0} ACME_STAGING=${ACME_STAGING:-0}
 PROFILE=${PROFILE:?set PROFILE to the AWS CLI profile for the account the canary runs in} REGION=${REGION:-us-west-2} ZONE=${ZONE:-ac0.dev}
-if [ "$PUBLIC" = 1 ]; then # its own domain, state file (not canary-*.state, which the CLI reads as the operator canary) and namespace
+if [ "$PUBLIC" = 1 ]; then # its own domain, state file (not canary-*.state, an operator canary's, used only when -canary names it) and namespace
   DOMAIN=${DOMAIN:-pub.probe.ac0.dev}
   STATE=${STATE:-$HOME/.config/sandprobe/hosted-canary-$PROFILE-$REGION.state}
   NAME=${SANDPROBE_CANARY_NAME:-sandprobe-canary-00000000000000b1}
