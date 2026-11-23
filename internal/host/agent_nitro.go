@@ -2,26 +2,29 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 // AgentPodBinding is RUN-8's host-created, same-run workload binding. It grants no
 // teardown ownership: the managed runner retains the original Job lifecycle.
 type AgentPodBinding struct {
-	Kubeconfig   string `json:"kubeconfig"`
-	Context      string `json:"context"`
-	Endpoint     string `json:"endpoint"`
-	RunID        string `json:"run_id"`
-	Namespace    string `json:"namespace"`
-	Name         string `json:"name"`
-	UID          string `json:"uid"`
-	JobUID       string `json:"job_uid"`
-	Image        string `json:"image"`
-	ConfigSHA256 string `json:"config_sha256"`
-	ContainerID  string `json:"container_id"`
+	Kubeconfig       string `json:"kubeconfig"`
+	Context          string `json:"context"`
+	Endpoint         string `json:"endpoint"`
+	RunID            string `json:"run_id"`
+	Namespace        string `json:"namespace"`
+	Name             string `json:"name"`
+	UID              string `json:"uid"`
+	JobUID           string `json:"job_uid"`
+	Image            string `json:"image"`
+	ConfigSHA256     string `json:"config_sha256"`
+	ContainerID      string `json:"container_id"`
+	CleanEnvironment bool   `json:"clean_environment,omitempty"` // RUN-18: only the host-controller workload uses this profile.
 }
 
 var agentRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
@@ -90,6 +93,14 @@ func (p *PodBox) checkAgentBinding(ctx context.Context, b AgentPodBinding) error
 	}
 	if got[11] != b.ContainerID || got[9] != "0" || !strings.HasSuffix(got[10], strings.Split(b.Image, "@")[1]) {
 		return errors.New("workload container identity changed")
+	}
+	if b.CleanEnvironment {
+		raw, err := p.run(ctx, nil, "get", "pod", b.Name, "-o", "jsonpath={.spec.containers[0].command}")
+		var command []string
+		want := append(WorkloadEnvironment(), "python", "-I", "-c", "import time;time.sleep(1800)")
+		if err != nil || json.Unmarshal(raw, &command) != nil || !slices.Equal(command, want) {
+			return errors.New("workload clean-environment command changed")
+		}
 	}
 	return nil
 }

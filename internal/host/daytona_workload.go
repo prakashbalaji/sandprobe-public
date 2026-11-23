@@ -16,7 +16,7 @@ import (
 	"syscall"
 )
 
-const daytonaDrop = "env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=" + WorkloadHome + " XDG_CACHE_HOME=" + WorkloadCache + " LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 SANDPROBE_TWIN=1 /usr/bin/setpriv --reuid=10001 --regid=10001 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "
+var daytonaDrop = strings.Join(WorkloadEnvironment(), " ") + " /usr/bin/setpriv --reuid=10001 --regid=10001 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "
 
 type DaytonaSnapshot struct {
 	ID, Name, Ref string

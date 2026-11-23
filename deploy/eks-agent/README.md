@@ -249,3 +249,9 @@ handshake to one public address per name, with no HTTP request or upload. It is
 off by default. Invalid selections stop before provisioning. A reachable intended
 model endpoint remains an exposure indicator in RC scoring; it does not prove an
 upload or a violation of the workload contract. DNS/transport failures remain unknown.
+
+Host-controller workload commands and probes share the explicit clean environment
+in `internal/host/workload_environment.json`; incidental image variables and
+credentials are not inherited. Nitro verifies its original container command uses
+that same prefix before each bound probe. This is a declared workload configuration,
+not a filter applied only while measuring. Legacy guest-identity mode is unchanged.

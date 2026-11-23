@@ -15,6 +15,7 @@ class ExplicitStub:
         return {"output": {"message": {"content": [{"text": json.dumps({"solution.py": source})}]}}}
 
 assert os.getuid() == 10001
+assert "SANDPROBE_TEST_INHERITED_AUTH" not in os.environ
 prepared = subprocess.run([sys.executable, "-I", "/opt/sandprobe/worker.py", "prepare"], check=True, capture_output=True, timeout=10)
 assert json.loads(prepared.stdout) == {"worker_ready": True}
 result = task.perform(ExplicitStub(), "explicit-local-stub", "/workspace")

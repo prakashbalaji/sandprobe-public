@@ -50,6 +50,8 @@ class HostWorkloadTests(unittest.TestCase):
             self.assertEqual(args[:2], ("exec", "-i"))
             self.assertIn("original-pod", args)
             self.assertIn("-I", args)
+            start = args.index("--") + 1
+            self.assertEqual(list(args[start:start + len(host_workload.WORKLOAD_ENVIRONMENT)]), host_workload.WORKLOAD_ENVIRONMENT)
             if "prepare" in args:
                 return b'{"worker_ready":true}'
             if "network" in args:

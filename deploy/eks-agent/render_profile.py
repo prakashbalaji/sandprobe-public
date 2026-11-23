@@ -2,13 +2,16 @@
 import argparse
 import ipaddress
 import json
+from pathlib import Path
 import re
+import runpy
 import sys
 
 REGION = "us-west-2"
 HOSTNAME = f"bedrock-runtime.{REGION}.amazonaws.com"
 LIGHTWEIGHT_MODEL = "mistral.ministral-3-3b-instruct"
-IDLE_COMMAND = ["python", "-I", "-c", "import time;time.sleep(1800)"]
+WORKLOAD_ENVIRONMENT = runpy.run_path(str(Path(__file__).resolve().parents[1] / "workload_environment.py"))["prefix"]()
+IDLE_COMMAND = WORKLOAD_ENVIRONMENT + ["python", "-I", "-c", "import time;time.sleep(1800)"]
 
 
 def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="guest"):
