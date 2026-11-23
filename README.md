@@ -137,8 +137,9 @@ it, with each provider's setup, the exact command, what it skips and why, and it
 
 Read your provider's terms before you probe: some require consent for security testing, and Sandprobe never presents
 a run as a provider's permission. Each native adapter skips the checks its provider's terms rule out, as its PRV row
-in SPEC.md says. `run exec` and recipes keep the checks that would contact a provider's own endpoints off by default:
-cloud metadata, the Kubernetes API, the host over vsock and the box's proxy. **New in 0.3.0:** if your provider's
+in SPEC.md says. `run exec` and recipes keep four checks off by default: SEC-4, EGR-3 and AMP-7, which would contact
+a provider's own endpoints (cloud metadata, the box's proxy and the Kubernetes API), and AMP-6, which only checks for
+a vsock device and connects to nothing. **New in 0.3.0:** if your provider's
 terms allow one on your own account, turn it on by name, for example `-provider-endpoints SEC-4,AMP-7`; the plan
 lists each one with your attestation before anything runs, and the report records it beside the check.
 

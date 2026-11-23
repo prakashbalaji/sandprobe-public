@@ -44,7 +44,7 @@ If `/tmp` isn't writable in the box, name another absolute directory with `-scra
 
 | Check | Why |
 |-|-|
-| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default. Sandprobe doesn't know who hosts the box, and each of these would contact the provider's own endpoints: cloud metadata, the box's proxy, the host over vsock, the Kubernetes API (PRV-15). |
+| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default, since Sandprobe doesn't know who hosts the box (PRV-15). SEC-4, EGR-3 and AMP-7 would contact the provider's own endpoints: cloud metadata, the box's proxy, the Kubernetes API. AMP-6 only checks for a vsock device and connects to nothing, and on an existing box it doesn't run even when turned on. |
 | PER-5 | An existing box gets no markers and is never reset. |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 
