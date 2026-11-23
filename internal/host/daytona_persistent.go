@@ -189,7 +189,7 @@ func (p *DaytonaPersistentBox) Reset(ctx context.Context) (Box, *obs.ResetEviden
 	if configuration != p.configuration {
 		return p, ev, errors.New("replacement workload configuration changed")
 	}
-	if err = next.prepareWorkload(ctx, true); err != nil {
+	if err = next.prepareWorkload(ctx, before.MountPath == "/workspace"); err != nil {
 		return p, ev, err
 	}
 	if err = next.Upload(ctx, p.binary); err != nil {

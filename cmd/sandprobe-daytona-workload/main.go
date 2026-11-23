@@ -333,7 +333,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if o.storageProfile == "" {
 		o.storageProfile = "ephemeral"
 	}
-	if o.storageProfile != "ephemeral" && o.storageProfile != "persistent-workspace" {
+	if o.storageProfile != "ephemeral" && o.storageProfile != "persistent-workspace" && o.storageProfile != "persistent-artifacts" {
 		return errors.New("invalid storage profile")
 	}
 	lock, e := lockManagedFolder(o.folder)
@@ -401,10 +401,14 @@ func execute(ctx context.Context, o options) (err error) {
 	var volume *host.DaytonaVolume
 	var persistent *host.DaytonaPersistentBox
 	storageCleanupRecorded := false
-	if o.storageProfile == "persistent-workspace" {
+	if o.storageProfile != "ephemeral" {
 		stage = "create-storage"
 		storageCreateAttempted = true
-		volume, e = client.CreateDaytonaVolume(ctx, o.folder)
+		mount := "/workspace"
+		if o.storageProfile == "persistent-artifacts" {
+			mount = "/persist"
+		}
+		volume, e = client.CreateDaytonaVolume(ctx, o.folder, mount)
 		if volume != nil {
 			defer func() {
 				if storageCleanupRecorded {
@@ -423,7 +427,7 @@ func execute(ctx context.Context, o options) (err error) {
 		if e != nil {
 			return e
 		}
-		if e = save(o.folder, "storage-profile.json", map[string]any{"storage_profile": o.storageProfile, "volume_id": volume.ID(), "mount_path": "/workspace", "subpath": "", "uid": 10001, "source_commit": sourceCommit}); e != nil {
+		if e = save(o.folder, "storage-profile.json", map[string]any{"storage_profile": o.storageProfile, "volume_id": volume.ID(), "mount_path": volume.MountPath(), "subpath": "", "uid": 10001, "source_commit": sourceCommit}); e != nil {
 			return e
 		}
 	}
@@ -457,7 +461,7 @@ func execute(ctx context.Context, o options) (err error) {
 		defer cancel()
 		cleanup := cleanupResult{ID: b.ID()}
 		if persistent != nil {
-			gone := persistent.Teardown(dctx, []obs.Volume{{ID: volume.ID(), MountPath: "/workspace", Subpath: ""}})
+			gone := persistent.Teardown(dctx, []obs.Volume{{ID: volume.ID(), MountPath: volume.MountPath(), Subpath: ""}})
 			cleanup.Confirmed = gone[""]
 			cleanup.Proof = "see all recorded original/replacement IDs in persistent-cleanup.json"
 			storageCleanupRecorded = true
@@ -482,6 +486,16 @@ func execute(ctx context.Context, o options) (err error) {
 	stage = "prepare-guest"
 	if e = b.PrepareWorkload(ctx); e != nil {
 		return e
+	}
+	if o.storageProfile == "persistent-artifacts" {
+		stage = "storage-agent-preflight"
+		proof, probeErr := b.VerifyArtifactStorage(ctx, o.runID, "preflight", []byte(`{"purpose":"agent_storage_preflight","synthetic":true}`))
+		if e = save(o.folder, "storage-preflight.json", proof); e != nil {
+			return e
+		}
+		if probeErr != nil {
+			return probeErr
+		}
 	}
 	bin, sha, e := probes.Probe(b.Arch)
 	if e != nil {
@@ -547,6 +561,17 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = save(o.folder, "workload.json", task); e != nil {
 		return e
 	}
+	if o.storageProfile == "persistent-artifacts" {
+		stage = "persist-workload-result"
+		payload, _ := json.Marshal(map[string]any{"functional_tests": task.FunctionalTests, "independent_verification": task.Independent, "artifact_sha256": task.SHA, "model_requests": task.ModelRequests})
+		proof, artifactErr := b.VerifyArtifactStorage(ctx, o.runID, "workload-result", payload)
+		if e = save(o.folder, "storage-workload-result.json", proof); e != nil {
+			return e
+		}
+		if artifactErr != nil {
+			return artifactErr
+		}
+	}
 	after, e := b.WorkloadConfiguration(ctx)
 	if e != nil || after != config {
 		return errors.New("frozen native configuration changed")
@@ -598,7 +623,7 @@ func execute(ctx context.Context, o options) (err error) {
 	}
 	d := report.Build(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	if persistent != nil {
-		d.Statement = "Persistent-workspace profile: other checks observed the original workload; PER-5 uses the separately proven recreation. RC exposure and coverage remain separate from the workload configuration assessment."
+		d.Statement = o.storageProfile + " profile: other checks observed the original workload; PER-5 uses the separately proven recreation. RC exposure and coverage remain separate from the workload configuration assessment."
 	}
 	if e = save(o.folder, "legacy-standard-report.json", d); e != nil {
 		return e
@@ -622,7 +647,7 @@ func execute(ctx context.Context, o options) (err error) {
 	stage = "stop-workload-before-final-receiver"
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	if persistent != nil {
-		gone := persistent.Teardown(stopCtx, []obs.Volume{{ID: volume.ID(), MountPath: "/workspace", Subpath: ""}})
+		gone := persistent.Teardown(stopCtx, []obs.Volume{{ID: volume.ID(), MountPath: volume.MountPath(), Subpath: ""}})
 		if !gone[""] || !gone[volume.ID()] {
 			stopCancel()
 			return errors.New("persistent workload cleanup unconfirmed")
@@ -717,13 +742,13 @@ func main() {
 	flag.StringVar(&o.snapshot, "snapshot", "", "CPU snapshot UUID")
 	flag.StringVar(&o.network, "network", "", "fixed regional model IPv4 /32 list")
 	flag.StringVar(&o.uploadHosts, "upload-hosts", "", "explicit comma-separated shipped workload names for TLS-only EGR-6")
-	flag.StringVar(&o.storageProfile, "storage-profile", "ephemeral", "ephemeral or separately labelled persistent-workspace")
+	flag.StringVar(&o.storageProfile, "storage-profile", "ephemeral", "ephemeral, persistent-workspace or persistent-artifacts")
 	flag.StringVar(&o.root, "source-root", ".", "clean exact-source repository")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	budget := 12 * time.Minute
-	if o.storageProfile == "persistent-workspace" {
+	if o.storageProfile == "persistent-workspace" || o.storageProfile == "persistent-artifacts" {
 		budget = 18 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)

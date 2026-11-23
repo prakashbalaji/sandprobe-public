@@ -48,6 +48,8 @@ class RunnerTests(unittest.TestCase):
   self.completed_run()
  def test_persistent_profile_reaches_same_managed_workload(self):
   self.completed_run('persistent-workspace')
+ def test_artifact_profile_reaches_same_managed_workload(self):
+  self.completed_run('persistent-artifacts')
  def test_persistent_recovery_keeps_box_and_storage_outcomes_separate(self):
   with tempfile.TemporaryDirectory() as d:
    folder=Path(d);(folder/'workspace-volume.state').write_text('fixture')

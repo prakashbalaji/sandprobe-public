@@ -9,6 +9,19 @@ import render_profile as profile
 
 
 class ProfileTests(unittest.TestCase):
+    def test_persistent_artifacts_keeps_coding_workspace_cache_and_network(self):
+        args=self.settings();args.update(controller="host",model=profile.LIGHTWEIGHT_MODEL)
+        before=profile.render(**args)
+        plan=profile.render(**args,storage_profile="persistent-artifacts",workspace_volume={"id":"vol-"+"b"*17,"zone":"us-west-2a"})
+        previous=before["kubernetes"]["items"][-1]["spec"]["template"]["spec"]
+        current=plan["kubernetes"]["items"][-1]["spec"]["template"]["spec"]
+        previous["volumes"].append({"name":"artifacts","persistentVolumeClaim":{"claimName":"artifacts"}})
+        previous["containers"][0]["volumeMounts"].append({"name":"artifacts","mountPath":"/persist"})
+        self.assertEqual(current,previous)
+        before_policies=[v for v in before["kubernetes"]["items"] if v["kind"]=="NetworkPolicy"]
+        after_policies=[v for v in plan["kubernetes"]["items"] if v["kind"]=="NetworkPolicy"]
+        self.assertEqual(before_policies,after_policies)
+        self.assertEqual(plan["storage_context"]["mount_path"],"/persist")
     def test_persistent_workspace_preserves_network_and_agent_controls(self):
         args = self.settings()
         args.update(controller="host", model=profile.LIGHTWEIGHT_MODEL)

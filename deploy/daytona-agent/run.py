@@ -240,7 +240,7 @@ def cleanup_owned(folder, args, env):
 
 def main(args):
     storage_profile = getattr(args, "storage_profile", "ephemeral")
-    if storage_profile not in ("ephemeral", "persistent-workspace"):
+    if storage_profile not in ("ephemeral", "persistent-workspace", "persistent-artifacts"):
         raise Failure("unsupported_storage_profile")
     parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
     approved_hosts = parse_hosts(getattr(args, "upload_hosts", ""))
@@ -315,7 +315,7 @@ def main(args):
               "--model-python",args.model_python,"--out", str(folder), "--run-id", run_id, "--snapshot", SNAPSHOT,
               "--network", ",".join(ip + "/32" for ip in network), "--source-root", str(ROOT),
               "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts),
-              "--storage-profile", storage_profile], env, timeout=1500 if storage_profile == "persistent-workspace" else 1000)
+              "--storage-profile", storage_profile], env, timeout=1500 if storage_profile != "ephemeral" else 1000)
     except (Failure, KeyboardInterrupt):
         failed = True
         persist(folder / "execution-failure.json", {"category": "managed_execution_incomplete"})
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     parser.add_argument("--cf-helper", required=True)
     parser.add_argument("--dns-reference", required=True)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
-    parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace"), default="ephemeral")
+    parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace", "persistent-artifacts"), default="ephemeral")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not PROFILE:
         raise Failure("aws_account_and_profile_required")

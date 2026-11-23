@@ -54,7 +54,7 @@ def metadata(s):
 def workload_volume(req):
     value=req.get('volume_binding')
     if value is None:return None
-    if not isinstance(value,dict) or set(value)!=set(('id','mount_path','subpath')) or not isinstance(value['id'],str) or not UUID.fullmatch(value['id']) or value['mount_path']!='/workspace' or value['subpath']!='':
+    if not isinstance(value,dict) or set(value)!=set(('id','mount_path','subpath')) or not isinstance(value['id'],str) or not UUID.fullmatch(value['id']) or value['mount_path'] not in ('/workspace','/persist') or value['subpath']!='':
         raise ValueError('invalid workspace volume binding')
     return dict(value)
 def volumes_match(meta,req):

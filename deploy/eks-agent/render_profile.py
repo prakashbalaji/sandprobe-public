@@ -19,11 +19,11 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
         raise ValueError("host controller requires the fixed regional model")
     if controller not in {"guest", "host"}:
         raise ValueError("invalid controller pattern")
-    if storage_profile not in {"ephemeral", "persistent-workspace"}:
+    if storage_profile not in {"ephemeral", "persistent-workspace", "persistent-artifacts"}:
         raise ValueError("invalid storage profile")
-    if storage_profile == "persistent-workspace" and controller != "host":
+    if storage_profile != "ephemeral" and controller != "host":
         raise ValueError("persistent workspace requires host controller")
-    if storage_profile == "persistent-workspace":
+    if storage_profile != "ephemeral":
         if (not isinstance(workspace_volume, dict) or set(workspace_volume)!={"id","zone"}
                 or not isinstance(workspace_volume["id"], str) or not re.fullmatch(r"vol-[a-f0-9]{17}",workspace_volume["id"])
                 or not isinstance(workspace_volume["zone"], str) or not re.fullmatch(r"us-west-2[a-d]",workspace_volume["zone"])):
@@ -127,10 +127,12 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
         plan["deployment_pattern"] = "host_controller_no_guest_credentials"
         plan["prerequisites"][4] = "Pinned host model client/account; no guest role or identity association"
         plan["limits"][-2] = "Model credentials remain on the trusted controller; no guest identity is assigned."
-    if storage_profile == "persistent-workspace":
+    if storage_profile != "ephemeral":
         # RUN-23: bind the explicit create-returned EBS ID; never rely on an
         # unrecorded dynamic CSI create or adopt a volume through its tags.
-        storage_class = "sandprobe-workspace-" + run_id
+        artifacts=storage_profile=="persistent-artifacts"
+        claim="artifacts" if artifacts else "workspace"
+        storage_class = ("sandprobe-artifacts-" if artifacts else "sandprobe-workspace-") + run_id
         items.insert(1, {"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass",
                          "metadata": {"name": storage_class, "labels": dict(labels)},
                          "provisioner": "ebs.csi.eks.amazonaws.com",
@@ -142,21 +144,24 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
                          "spec": {"capacity":{"storage":"1Gi"},"volumeMode":"Filesystem",
                                   "accessModes":["ReadWriteOnce"],"persistentVolumeReclaimPolicy":"Retain",
                                   "storageClassName":storage_class,
-                                  "claimRef":{"namespace":namespace,"name":"workspace"},
+                                  "claimRef":{"namespace":namespace,"name":claim},
                                   "csi":{"driver":"ebs.csi.eks.amazonaws.com","volumeHandle":workspace_volume["id"],"fsType":"ext4"},
                                   "nodeAffinity":{"required":{"nodeSelectorTerms":[{"matchExpressions":[{
                                       "key":"topology.kubernetes.io/zone","operator":"In","values":[workspace_volume["zone"]]}]}]}}}})
         items.insert(3, {"apiVersion": "v1", "kind": "PersistentVolumeClaim",
-                         "metadata": metadata("workspace"),
+                         "metadata": metadata(claim),
                          "spec": {"accessModes": ["ReadWriteOnce"], "volumeMode": "Filesystem",
                                   "storageClassName": storage_class,
                                   "volumeName":storage_class,
                                   "resources": {"requests": {"storage": "1Gi"}}}})
-        pod["spec"]["volumes"][0] = {"name": "workspace",
-                                      "persistentVolumeClaim": {"claimName": "workspace"}}
-        pod["spec"]["securityContext"]["fsGroupChangePolicy"]="OnRootMismatch"
+        if artifacts:
+            pod["spec"]["volumes"].append({"name":"artifacts","persistentVolumeClaim":{"claimName":claim}})
+            container["volumeMounts"].append({"name":"artifacts","mountPath":"/persist"})
+        else:
+            pod["spec"]["volumes"][0] = {"name": "workspace", "persistentVolumeClaim": {"claimName": claim}}
+            pod["spec"]["securityContext"]["fsGroupChangePolicy"]="OnRootMismatch"
         plan["storage_profile"] = storage_profile
-        plan["storage_context"]={"volume_id":workspace_volume["id"],"zone":workspace_volume["zone"],"provenance":"caller_supplied_unverified"}
+        plan["storage_context"]={"volume_id":workspace_volume["id"],"zone":workspace_volume["zone"],"mount_path":"/persist" if artifacts else "/workspace","provenance":"caller_supplied_unverified"}
         plan["prerequisites"].append("Run-owned PVC/PV/EBS identity binding, proven recreation and exact-ID storage cleanup")
         plan["limits"].append("Persistent workspace is a separate profile; this plan alone supplies no reset proof.")
     return plan
