@@ -73,19 +73,19 @@ done
 export STATE="$tmp/cln2/state"
 : >"$LOG"
 out=$(STS_FAULT=1 "$here/eks.sh" up 2>&1) && rc=0 || rc=$?
-check "up with an expired session records nothing" '[ $rc -ne 0 ] && [ ! -e "$STATE" ] && grep -q "recorded and created nothing" <<<"$out"'
+check "up with an expired session exits 3 and records nothing" '[ $rc -eq 3 ] && [ ! -e "$STATE" ] && grep -q "recorded and created nothing" <<<"$out"'
 check "and makes no AWS call but the identity check, printing none of its output" '[ "$(wc -l <"$LOG")" -eq 1 ] && grep -q "sts get-caller-identity" "$LOG" && ! grep -q "Token has expired" <<<"$out"'
 out=$(SUBNET_FAULT=1 "$here/eks.sh" up 2>&1) && rc=0 || rc=$?
-check "a failed read after it leaves a record of no create" '[ $rc -ne 0 ] && [ -f "$STATE" ] && ! grep -Eq "^(crole|nrole|cluster)=" "$STATE"'
+check "a failed read after it leaves a record of no create, and isn't exit 3" '[ $rc -ne 0 ] && [ $rc -ne 3 ] && [ -f "$STATE" ] && ! grep -Eq "^(crole|nrole|cluster)=" "$STATE"'
 : >"$LOG"
 out=$("$here/eks.sh" status 2>&1) && rc=0 || rc=$?
 check "status says nothing was created, with no AWS call" '[ $rc -ne 0 ] && grep -q "records no create" <<<"$out" && [ ! -s "$LOG" ]'
 out=$("$here/eks.sh" up 2>&1) && rc=0 || rc=$?
-check "up refuses the same way, with no AWS call" '[ $rc -ne 0 ] && grep -q "records no create" <<<"$out" && [ ! -s "$LOG" ]'
+check "up refuses the same way, with no AWS call, and not with exit 3" '[ $rc -ne 0 ] && [ $rc -ne 3 ] && grep -q "records no create" <<<"$out" && [ ! -s "$LOG" ]'
 retire=$(sed -n 's/^  //p' <<<"$out")
 check "the retire command names this state file" '[ "$retire" = "$(printf "STATE=%q PROFILE=test-profile REGION=us-west-2 %q down" "$STATE" "$here/eks.sh")" ]'
 out=$(env -u PROFILE -u STATE bash -c "$retire" 2>&1) && rc=0 || rc=$?
 check "run as printed, it retires the record with no AWS call" '[ $rc -eq 0 ] && grep -q "created nothing" <<<"$out" && [ ! -e "$STATE" ] && ls "$STATE".down-* >/dev/null && [ ! -s "$LOG" ]'
 out=$(STS_FAULT=1 "$here/eks.sh" up 2>&1) && rc=0 || rc=$?
-check "and up then gets past its refusal to the identity check" '[ $rc -ne 0 ] && grep -q "recorded and created nothing" <<<"$out"'
+check "and up then gets past its refusal to the identity check" '[ $rc -eq 3 ] && grep -q "recorded and created nothing" <<<"$out"'
 exit $fails

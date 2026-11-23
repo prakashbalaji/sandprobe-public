@@ -77,11 +77,14 @@ up() {
     if created_nothing; then stopped; fi
     fail "a deployment is recorded in $STATE: run status, or down first"
   fi
-  # CLN-2: prove the profile works before anything is recorded. AWS's own output isn't printed.
-  aws sts get-caller-identity >/dev/null 2>&1 ||
-    fail "AWS doesn't answer as profile $PROFILE: sts get-caller-identity failed, so up recorded and created nothing. The first command shows AWS's error; for an SSO profile, the second signs in again. Then run up again:
+  # CLN-2: prove the profile works before anything is recorded. AWS's own output isn't printed. Exit 3 is this refusal
+  # alone, so a caller knows nothing was written or created.
+  if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    echo "eks.sh: AWS doesn't answer as profile $PROFILE: sts get-caller-identity failed, so up recorded and created nothing. The first command shows AWS's error; for an SSO profile, the second signs in again. Then run up again:
   aws sts get-caller-identity --profile $(printf %q "$PROFILE")
-  aws sso login --profile $(printf %q "$PROFILE")"
+  aws sso login --profile $(printf %q "$PROFILE")" >&2
+    exit 3
+  fi
   did=$(openssl rand -hex 4)
   mkdir -p "$(dirname "$STATE")"
   if [ "${DURABLE_STATE:-0}" = 1 ]; then
