@@ -25,5 +25,17 @@ sockets)
   perl -MIO::Socket::INET -e 'my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1:2375", Listen => 5, ReuseAddr => 1) or die $!; while (my $c = $s->accept) { close $c }' &
   iptables -A OUTPUT -o lo -p tcp --dport 2375 -m owner --uid-owner agent -j REJECT --reject-with tcp-reset
   ;;
+owned) # the agent's home is its own at mode 0555 and its startup files are root's and read-only: it can write none
+  # of them now, but as the directory's owner it can make the directory writable at any time, and replace them (TWN-4)
+  chown root:root /home/agent/.bashrc /home/agent/.profile
+  chmod 0444 /home/agent/.bashrc /home/agent/.profile
+  rm -f /home/agent/.bash_logout
+  # and a credential file of its own at mode 0000: refused now, but its owner can make it readable at any time
+  mkdir /home/agent/.aws
+  echo sandprobe-fake > /home/agent/.aws/credentials
+  chown -R agent:agent /home/agent/.aws
+  chmod 0000 /home/agent/.aws/credentials
+  chmod 0555 /home/agent
+  ;;
 esac
 exec sleep infinity

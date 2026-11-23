@@ -24,3 +24,9 @@ echo "== as 0:0 in $image, a fake tree mounted over /proc"
 docker run --rm --network none --user 0:0 --cap-add SYS_ADMIN --security-opt apparmor=unconfined -v "$out:/sp:ro" "$image" sh -c \
   'mkdir -p /fakeproc/self/fd && printf "#!/bin/sh\necho \"    (ALL) NOPASSWD: ALL\"\n" > /fakeproc/self/fd/3 &&
    chmod 0755 /fakeproc/self/fd/3 && mount --bind /fakeproc /proc && exec /sp/probe.test -test.v -test.run "^TestSudoList$"'
+# TWN-1's read twins under a capability that passes the read call itself: as nobody holding CAP_DAC_READ_SEARCH and
+# CAP_DAC_OVERRIDE, the probe's own 0000 file opens, so the refusing side fails and no pass can stand (TWN-4).
+echo "== as 65534:65534 in $image, holding CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE"
+docker run --rm --network none --user 0:0 --cap-add DAC_READ_SEARCH -v "$out:/sp:ro" "$image" setpriv --reuid=65534 \
+  --regid=65534 --clear-groups --inh-caps=-all,+dac_read_search,+dac_override --ambient-caps=-all,+dac_read_search,+dac_override \
+  /sp/probe.test -test.v -test.run '^TestTwinReadPower$'

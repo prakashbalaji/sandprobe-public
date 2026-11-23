@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/grade"
 	"sandprobe/internal/obs"
@@ -213,20 +215,19 @@ func TestSocketCheck(t *testing.T) {
 	file := filepath.Join(dir, "plain")
 	os.WriteFile(file, nil, 0o666)
 
-	if tg, err := socketCheck(sock, sock); err != nil || tg.State != "found" {
-		t.Errorf("a socket the agent may write: want found, got %+v %v", tg, err)
+	if tg, how, err := socketCheck(sock, sock); err != nil || tg.State != "found" || how != "" {
+		t.Errorf("a socket the agent may write: want found, got %+v %q %v", tg, how, err)
 	}
-	if tg, err := socketCheck("missing", filepath.Join(dir, "missing.sock")); err != nil || tg.State != "absent" {
+	if tg, _, err := socketCheck("missing", filepath.Join(dir, "missing.sock")); err != nil || tg.State != "absent" {
 		t.Errorf("a missing socket in a writable directory: want absent, got %+v %v", tg, err)
 	}
-	if _, err := socketCheck(file, file); !errors.Is(err, errUnknowable) {
+	if _, _, err := socketCheck(file, file); !errors.Is(err, errUnknowable) {
 		t.Errorf("a regular file at a socket path: want unknowable, got %v", err)
 	}
-	if !root {
-		os.Chmod(sock, 0)
-		if tg, err := socketCheck(sock, sock); err != nil || tg.State != "refused" || tg.Errno != "EACCES" {
-			t.Errorf("a socket without write permission: want refused, got %+v %v", tg, err)
-		}
+	// the agent's own socket at mode 0: no write permission now, but its owner can give itself one (TWN-4)
+	os.Chmod(sock, 0)
+	if tg, how, err := socketCheck(sock, sock); err != nil || tg.State != "found" || !root && !strings.Contains(how, "as it owns it") {
+		t.Errorf("the agent's own socket at mode 0: want found (as it owns it, unless root writes it outright), got %+v %q %v", tg, how, err)
 	}
 	// AMP-4 over a missing socket whose directory is writable: absent, never a control_socket finding
 	e := testEnv(t, map[string][]string{"AMP-4": {filepath.Join(dir, "docker.sock")}})
@@ -556,5 +557,171 @@ func TestSecretFiles(t *testing.T) {
 	must(os.MkdirAll(filepath.Join(root, "a", "b", "c", "d", "e"), 0o755))
 	if _, err := secretFiles(root); err == nil {
 		t.Error("a directory deeper than the walk covers must fail discovery")
+	}
+}
+
+// write_perm counts a refusal only while the agent can't make the path writable either (TWN-4): a directory it owns,
+// at any mode, or an owner's power over any file, makes the path found, saying how; neither counts in procfs.
+func TestWriteOwnerPower(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	os.Mkdir(home, 0o755)
+	rc := filepath.Join(home, ".bashrc")
+	os.WriteFile(rc, nil, 0o444)
+	os.Chmod(home, 0o555)
+	t.Cleanup(func() { os.Chmod(home, 0o755) })
+	tg, how, err := writeHow("~/.bashrc", rc)
+	switch {
+	case err != nil || tg.State != "found":
+		t.Errorf("a file in the agent's own 0555 directory: want found, got %+v %v", tg, err)
+	case root && how != "": // root can write the directory now, whatever its mode
+		t.Errorf("as root: want found outright, got %q", how)
+	case !root && how != "it can make "+home+" writable, as it owns it":
+		t.Errorf("want found as the directory's owner, got %q", how)
+	}
+	if root {
+		return
+	}
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	for caps, want := range map[uint64]string{
+		0:      "",
+		1 << 3: "it can make /usr/bin writable, as it holds CAP_FOWNER",
+		1 << 0: "it can make /usr/bin writable, as it holds CAP_CHOWN",
+		1 << 7: "it can make /usr/bin writable, as it holds CAP_SETUID",
+		1 << 4: "", // CAP_FSETID changes no mode
+	} {
+		agentCaps = func() uint64 { return caps }
+		tg, how, err := writeHow("/usr/bin/ls", "/usr/bin/ls")
+		if err != nil || how != want || (want == "") != (tg.State == "refused") {
+			t.Errorf("caps %#x: want %q, got %+v %q %v", caps, want, tg, how, err)
+		}
+		// procfs: no mode there can change, so no owner's power makes a kernel setting writable
+		if tg, how, _ := writeHow("/proc/sys/kernel/sysrq", "/proc/sys/kernel/sysrq"); tg.State != "refused" || how != "" {
+			t.Errorf("caps %#x: a kernel setting: want refused, got %+v %q", caps, tg, how)
+		}
+	}
+}
+
+// A sticky directory spares an entry the agent doesn't own, unless the agent owns the directory or holds an owner's
+// power: CAP_FOWNER passes the bit, CAP_CHOWN and CAP_SETUID make the agent the entry's owner.
+func TestStickySpares(t *testing.T) {
+	sticky := syscall.Stat_t{Mode: syscall.S_IFDIR | syscall.S_ISVTX | 0o777, Uid: 0}
+	rootEntry := syscall.Stat_t{Uid: 0}
+	if !stickySpares(sticky, rootEntry, 1000, false) {
+		t.Error("root's entry in root's sticky directory spares an agent with no power")
+	}
+	if stickySpares(sticky, rootEntry, 1000, true) {
+		t.Error("an owner's power passes the sticky bit")
+	}
+	if stickySpares(sticky, syscall.Stat_t{Uid: 1000}, 1000, false) || stickySpares(syscall.Stat_t{Mode: syscall.S_IFDIR | syscall.S_ISVTX, Uid: 1000}, rootEntry, 1000, false) {
+		t.Error("the agent's own entry, or its own sticky directory, spares nothing")
+	}
+	if stickySpares(syscall.Stat_t{Mode: syscall.S_IFDIR | 0o777}, rootEntry, 1000, false) {
+		t.Error("a directory that isn't sticky spares nothing")
+	}
+}
+
+// The shared write_perm judgement (TWN-4): a check that found nothing is unknown while the agent holds a capability
+// that reaches past file permissions; a proof-class check is never found from a mode the agent would first change.
+func TestJudgeWrite(t *testing.T) {
+	if root {
+		t.Skip("root can write the targets outright")
+	}
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	e := testEnv(t, map[string][]string{"PER-3": {"/etc/systemd/system", "/etc/cron.d"}})
+	ck, _ := catalog.Get("PER-3")
+	agentCaps = func() uint64 { return 0 }
+	if o := writable(e, ck); o.Result != obs.Pass {
+		t.Fatalf("no capabilities, root's directories: want a pass, got %+v", o)
+	}
+	agentCaps = func() uint64 { return 1 << 21 }
+	if o := writable(e, ck); o.Result != obs.Unknown || !strings.Contains(o.Reason, "CAP_SYS_ADMIN") {
+		t.Errorf("CAP_SYS_ADMIN: want unknown naming it, got %+v", o)
+	}
+	agentCaps = func() uint64 { return 1 << 3 }
+	if o := writable(e, ck); o.Result != obs.Finding || !strings.Contains(o.Evidence, "as it holds CAP_FOWNER") {
+		t.Errorf("CAP_FOWNER: want a finding saying how, got %+v", o)
+	}
+	sys, _ := catalog.Get("AMP-8.sys")
+	ts := []obs.Target{{Name: "/proc/sys/kernel/sysrq", State: "found"}}
+	o := e.judgeWrite(sys, ts, nil, map[string]string{"/proc/sys/kernel/sysrq": "it can make it writable, as it owns it"},
+		func([]obs.Target, []string) (string, string) { return "writable_sysctl", "x" })
+	if o.Result != obs.Unknown {
+		t.Errorf("a kernel setting the agent could only make writable: want unknown, never a proof, got %+v", o)
+	}
+}
+
+// TWN-4 on the read side: a refusal counts only while the agent can't make the file readable either. Its own file at
+// mode 0000 can't pass, nor anything refused while it holds a read power; an absence stays a fact; a process file's
+// refusal can't pass while the agent holds a power over ptrace's rules. Nothing is read to find out.
+func TestRefusalsHold(t *testing.T) {
+	if root {
+		t.Skip("root opens every file outright")
+	}
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	agentCaps = func() uint64 { return 0 }
+	own := filepath.Join(t.TempDir(), "credentials")
+	os.WriteFile(own, []byte("sandprobe-fake"), 0o600)
+	os.Chmod(own, 0)
+	t.Cleanup(func() { os.Chmod(own, 0o600) })
+	sec3, _ := catalog.Get("SEC-3")
+	e := testEnv(t, nil)
+	judge := func(name, path string) obs.Observation {
+		tg, _, err := readCheck(name, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e.judge(sec3, []obs.Target{tg}, nil, true, true, func([]obs.Target) (string, string) { return "nonempty", "x" })
+	}
+	if o := judge(own, own); o.Result != obs.Unknown || !strings.Contains(o.Reason, "it owns "+own) {
+		t.Errorf("the agent's own file at mode 0000: want unknown, as it owns it, got %+v", o)
+	}
+	if o := judge("/etc/shadow", "/etc/shadow"); o.Result != obs.Pass { // root's, and nothing lets the agent past it
+		t.Errorf("root's /etc/shadow, no capabilities: want a pass, got %+v", o)
+	}
+	for _, caps := range []uint64{capDacReadSearch, capDacOverride, capFowner, capChown, capSetuid, capSetgid, capSysAdmin} {
+		agentCaps = func() uint64 { return caps }
+		if o := judge("/etc/shadow", "/etc/shadow"); o.Result != obs.Unknown || !strings.Contains(o.Reason, capList(caps)) {
+			t.Errorf("caps %#x: want unknown naming %s, got %+v", caps, capList(caps), o)
+		}
+	}
+	agentCaps = func() uint64 { return capSysAdmin }
+	absent := obs.Target{Name: "/nowhere/credentials", State: "absent", Errno: "ENOENT", ParentSearchable: true}
+	if o := e.judge(sec3, []obs.Target{absent}, nil, true, true, nil); o.Result == obs.Unknown {
+		t.Errorf("an absent file stays absent whatever the agent holds: want it judged as before, got %+v", o)
+	}
+	sec2, _ := catalog.Get("SEC-2")
+	refused := obs.Target{Name: "/proc/1/environ", State: "refused", Errno: "EACCES"}
+	for caps, want := range map[uint64]string{0: obs.Pass, capSysPtrace: obs.Unknown, capSetuid: obs.Unknown, capDacReadSearch: obs.Pass} {
+		agentCaps = func() uint64 { return caps }
+		if o := e.judge(sec2, []obs.Target{refused}, nil, true, true, nil); o.Result != want {
+			t.Errorf("a process file refused, caps %#x: want %s, got %+v", caps, want, o)
+		}
+	}
+}
+
+// TWN-1's file-read and read-permission twins under a capability that passes the read call itself: the probe's own
+// 0000 file opens, so the refusing side fails and no non-root pass can stand (GRD-5). test/probe.sh runs this as
+// nobody holding CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE.
+func TestTwinReadPower(t *testing.T) {
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		t.Fatal(err)
+	}
+	if root || data[0].Effective&(capDacReadSearch|capDacOverride) == 0 {
+		t.Skip("needs a non-root agent holding CAP_DAC_READ_SEARCH or CAP_DAC_OVERRIDE")
+	}
+	tw, err := makeTwins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tw.close()
+	if tw.readRefused || tw.permRefused {
+		t.Errorf("the probe's own 0000 file must open for an agent passing the read call: read refused %v, perm refused %v",
+			tw.readRefused, tw.permRefused)
+	}
+	if o := (&env{tw: tw}).judge(&catalog.Check{ID: "SEC-3", Mechanism: "file_read", Kind: catalog.TwoSided}, nil, nil,
+		tw.readOK, tw.readRefused, nil); o.Result == obs.Pass && o.Proof.TwinRefused {
+		t.Errorf("a pass with the refusing twin shown: %+v", o)
 	}
 }
