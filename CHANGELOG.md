@@ -10,8 +10,8 @@ The first release candidate for 0.3.0. Provider statuses are still being validat
 ### Fixed: false passes in 0.2.1
 
 0.2.1 could pass a check it hadn't proven. If you ran 0.2.1, don't trust the passes below: re-run the box with this
-version. A saved 0.2.1 report keeps its old results, because `scorecard`, `compare`, `profile` and `assess` read a
-saved report as it is and never grade it again (ANL-1).
+version. A saved 0.2.1 report keeps its old results: `scorecard`, `compare`, `profile` and `assess` read the results
+saved in it and never grade its observations again (ANL-1).
 
 - **Write and read checks (TWN-4).** 0.2.1 counted a refusal as a pass even when the agent could undo it: by changing
   the mode of a file or directory it owns on the path, or with a capability it holds, permitted or effective, such as
@@ -19,8 +19,9 @@ saved report as it is and never grade it again (ANL-1).
   `CAP_FOWNER`, or owning a 0555 directory above a root-owned startup file, passed PER-1 to PER-4; and an agent's own
   credential file at mode 0000 passed SEC-3. The write checks now report such a path as a finding, or unknown when
   the probe can't see past a closed directory, and SEC-3 reports it unknown. The rule now covers every write and read
-  check. Don't trust a 0.2.1 pass on PER-1 to PER-4 or SEC-3 if the agent owns a file or directory on the checked
-  path, or the report's `identity.cap_prm` isn't all zeros. ([#17](https://github.com/summationai/sandprobe/pull/17))
+  check. Re-run before you trust a 0.2.1 pass on PER-1 to PER-4 or SEC-3, in particular where the agent owns a file or
+  directory on the checked path or the report's `identity.cap_prm` isn't all zeros.
+  ([#17](https://github.com/summationai/sandprobe/pull/17))
 - **AMP-2, root or capabilities.** 0.2.1 graded AMP-2 from the effective capability set alone, so an agent holding a
   capability only in its permitted set passed, though a process can raise a permitted capability into its effective
   set at will. Confirmed: `CAP_DAC_READ_SEARCH`, permitted but not effective, passed; it's now a Critical finding.
@@ -97,8 +98,13 @@ saved report as it is and never grade it again (ANL-1).
 
 - The README leads with install, verifying a download, and a 30-second demo.
 - `docs/providers/` gives each provider's status, setup, command, skipped checks and terms.
-- Boat and exe.dev say a live run needs the operator's own authorization, never represented as the provider's
-  permission (PRV-11, PRV-13).
+- Boat and exe.dev: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev,
+  PRV-13), never represented as provider-written permission.
+
+### Releases
+
+- A release version is `x.y.z`, or `x.y.z-rc.N` for a release candidate. A release candidate publishes as a GitHub
+  pre-release, never marked Latest; `x.y.z` publishes as a full release (REL-2).
 - New: CONTRIBUTING.md, CODE_OF_CONDUCT.md, issue forms (including a false-pass report), a pull request template and
   this changelog.
 
