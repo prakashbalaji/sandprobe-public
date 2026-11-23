@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"sandprobe/internal/obs"
 )
 
 type persistentBoxFixture struct {
@@ -42,11 +44,19 @@ func newPersistentBoxFixture(t *testing.T, mounts ...string) (*DaytonaPersistent
 			if f.creates == 2 && !f.deleted["00000001-1234-1234-1234-123456789abc"] {
 				t.Fatal("replacement created before original deletion")
 			}
+			if f.creates == 2 && f.fault == "refused-create" {
+				return nil, errors.New("fixture rejected create without resource")
+			}
 			boxes[id] = map[string]any{"id": id, "name": in["name"], "born": time.Now().UTC().Format(time.RFC3339Nano), "organization": "fixture-org", "labels": map[string]string{"sandprobe_run": in["nonce"].(string)}, "state": "started", "desired_state": "started", "user": "root", "public": false, "auto_delete": 0, "auto_stop": 15, "auto_pause": 0, "volumes": 1, "volume_bindings": []daytonaVolumeMount{{ID: v.ID(), MountPath: v.MountPath()}}, "snapshot_id": testDaytonaVolumeID, "snapshot_ref": "fixture-snapshot-ref", "network_allow_list": "52.94.0.1/32", "network_block_all": false}
 			if f.creates == 2 && f.fault == "lost-create" {
 				return nil, errors.New("fixed create transport failure")
 			}
 			out = map[string]any{"id": id}
+		case "rejected_create":
+			if f.fault != "refused-create" {
+				return nil, errors.New("fixture has no authenticated rejection")
+			}
+			return json.Marshal(map[string]any{"refused": true, "evidence_sha256": strings.Repeat("e", 64)})
 		case "lookup":
 			id := in["id"].(string)
 			if f.deleted[id] {
@@ -181,6 +191,16 @@ func TestDaytonaPersistentFailureRetainsReplacementAndUnknownCreate(t *testing.T
 			if fault == "original-config" && (f.creates != 1 || len(f.deleted) != 0) {
 				t.Fatal("original drift did not stop recreation")
 			}
+			if fault == "lost-create" {
+				for _, box := range p.boxes {
+					if box.ID() == "" {
+						box.journal.Requested = time.Now().UTC().Add(-3 * time.Minute)
+						if err := box.save(); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			}
 			gone := p.Teardown(context.Background(), st.Volumes)
 			if fault == "lost-create" {
 				if gone[""] || gone[p.volume.ID()] || *f.volumeDeleted {
@@ -236,9 +256,42 @@ func TestDaytonaPersistentFullRecoveryDoesNotWaiveUnknownReplacement(t *testing.
 	if _, _, err := p.Reset(context.Background()); err == nil {
 		t.Fatal("expected unknown replacement create")
 	}
+	// The synthetic create already exhausted its transport budget.
+	for _, box := range p.boxes {
+		if box.ID() == "" {
+			box.journal.Requested = time.Now().UTC().Add(-3 * time.Minute)
+			if err := box.save(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	result, err := p.original.client.CleanupDaytonaPersistentState(context.Background(), p.volume.path)
 	if err == nil || result.Confirmed || result.BoxesConfirmed || result.StorageConfirmed || *f.volumeDeleted || len(f.deleted) != 1 {
 		t.Fatal("unknown replacement was counted as absent", result, err)
+	}
+}
+
+func TestDaytonaPersistentTeardownRetainsRefusedResetAsUnknown(t *testing.T) {
+	p, f := newPersistentBoxFixture(t, "/persist")
+	f.fault = "refused-create"
+	_, reset, err := p.Reset(context.Background())
+	if err == nil || reset.Done {
+		t.Fatal("rejected replacement became a completed reset")
+	}
+	for _, box := range p.boxes {
+		if box.ID() == "" {
+			box.journal.Requested = time.Now().UTC().Add(-3 * time.Minute)
+			if err = box.save(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gone := p.Teardown(context.Background(), []obs.Volume{p.binding()})
+	if !gone[""] || !gone[p.volume.ID()] || !p.volume.CleanupConfirmed() || f.creates != 2 || len(f.deleted) != 1 {
+		t.Fatal("rejected create could not be safely torn down", gone)
+	}
+	if ids := p.BoxIDs(); len(ids) != 1 || ids[0] == "" {
+		t.Fatal("refusal invented a deleted ID", ids)
 	}
 }
 

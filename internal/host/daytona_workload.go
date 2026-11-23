@@ -332,6 +332,14 @@ func (c *DaytonaClient) CleanupDaytonaState(ctx context.Context, path string) (s
 			if j.Born != "" || j.Organization != "" || j.SnapshotID == "" || j.NetworkAllowList == "" {
 				return "", "", errors.New("unresolved create intent invalid")
 			}
+			// RUN-24: never reconcile while the original transport may be live.
+			if delay := time.Until(j.Requested.Add(120 * time.Second)); delay > 0 {
+				select {
+				case <-ctx.Done():
+					return "", "", errors.New("create refusal recovery deadline")
+				case <-time.After(delay):
+				}
+			}
 			var refusal struct {
 				Refused        bool
 				EvidenceSHA256 string `json:"evidence_sha256"`

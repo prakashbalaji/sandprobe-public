@@ -23,7 +23,7 @@ func TestDaytonaRejectedConsumerRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			j := daytonaJournal{Nonce: "n" + strings.Repeat("a", 24), Name: "sandprobe-" + strings.Repeat("b", 24), Requested: time.Now().UTC(), SnapshotID: testDaytonaVolumeID, NetworkAllowList: "52.94.0.1/32", Volume: &daytonaVolumeMount{ID: v.ID(), MountPath: "/persist"}}
+			j := daytonaJournal{Nonce: "n" + strings.Repeat("a", 24), Name: "sandprobe-" + strings.Repeat("b", 24), Requested: time.Now().UTC().Add(-3 * time.Minute), SnapshotID: testDaytonaVolumeID, NetworkAllowList: "52.94.0.1/32", Volume: &daytonaVolumeMount{ID: v.ID(), MountPath: "/persist"}}
 			path := filepath.Join(dir, "daytona-"+j.Nonce+".state")
 			raw, _ := json.Marshal(j)
 			if err = os.WriteFile(path, raw, 0600); err != nil {

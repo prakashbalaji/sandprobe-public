@@ -31,6 +31,17 @@ type DaytonaPersistentCleanup struct {
 func (p *DaytonaPersistentBox) BoxIDs() []string {
 	ids := make([]string, 0, len(p.boxes))
 	for _, box := range p.boxes {
+		if box.ID() == "" {
+			rejected := false
+			for _, consumer := range p.volume.journal.Consumers {
+				if consumer.Journal == box.state && consumer.RefusalSHA256 != "" {
+					rejected = true
+				}
+			}
+			if rejected {
+				continue
+			}
+		}
 		ids = append(ids, box.ID())
 	}
 	return ids
@@ -222,6 +233,12 @@ func (p *DaytonaPersistentBox) Reset(ctx context.Context) (Box, *obs.ResetEviden
 func (p *DaytonaPersistentBox) Teardown(ctx context.Context, volumes []obs.Volume) map[string]bool {
 	gone := map[string]bool{"": true, p.volume.ID(): false}
 	for _, box := range p.boxes {
+		if box.ID() == "" {
+			if _, _, err := box.client.CleanupDaytonaState(ctx, box.state); err != nil {
+				gone[""] = false
+			}
+			continue
+		}
 		if box.Destroy(ctx) != nil || box.ConfirmWorkloadGone(ctx) != nil {
 			gone[""] = false
 		}
@@ -229,6 +246,12 @@ func (p *DaytonaPersistentBox) Teardown(ctx context.Context, volumes []obs.Volum
 	if !gone[""] || len(volumes) != 1 || volumes[0] != p.binding() {
 		return gone
 	}
+	// Reconciliation updates the durable consumer ledger, not a guessed ID.
+	v, err := p.original.client.RecoverDaytonaVolume(p.volume.StatePath())
+	if err != nil || v.ID() != p.volume.ID() {
+		return gone
+	}
+	p.volume.journal = v.journal
 	if p.volume.Destroy(ctx) == nil {
 		gone[p.volume.ID()] = p.volume.CleanupConfirmed()
 	}
