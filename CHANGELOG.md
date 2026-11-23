@@ -50,6 +50,13 @@ saved in it and never grade its observations again (ANL-1).
   adapters included; the proof of concept needs `-canary <state file>`. A canary state file from `deploy/canary.sh`
   is used only when `-canary` names it, any canary flag sets every `SANDPROBE_CANARY*` variable aside, and
   `run docker` refuses canary flags (HCN-5).
+- With no canary named, by flag or `SANDPROBE_CANARY*` variable, `sandprobe canary check` asks the hosted canary under
+  the pin this release ships, the one every run but `run docker` and the Modal proof of concept uses by default, and
+  names it in its output. `-canary-url` with `-canary-pin` still checks a canary you name. An operator canary
+  (`-canary` or `SANDPROBE_CANARY`) is refused, since it answers only over SSM, and `-tls-insecure` now needs
+  `-canary-url` (HCN-7).
+- With no cluster, `plan aws-nitro` and `providers` print `PROFILE="$AWS_PROFILE" deploy/eks.sh up`, a command that
+  runs as pasted; every other `deploy/eks.sh` fix names `PROFILE` the same way.
 - `-no-canary`'s plan and help say only that no test traffic goes to any canary. When `-provider-endpoints` turns on
   checks that don't need a canary, the plan names each connection they still make: SEC-4's metadata addresses and
   AMP-7's TLS handshake. EGR-3 needs a canary, so it doesn't run (HCN-5).
@@ -88,6 +95,17 @@ saved in it and never grade its observations again (ANL-1).
   default palette and `mission` the alternative. `-theme modern`, the retired cyan palette, renders `graphite`, and a
   page that remembered `modern` opens in `graphite` (UX-8). The page still fetches nothing, fonts included (OUT-2).
 
+### AWS Nitro on EKS
+
+- `deploy/eks.sh up` checks that AWS answers as your profile before it records anything, and exits 3 if it doesn't,
+  so an expired session no longer leaves a state file that blocks the next `up`. A state file that records no create
+  makes `status` and `up` print the exact `down` command that retires it, and that `down` makes no AWS call (CLN-2).
+- The AWS Nitro page says a run on the `isolated` or `network-isolated` pod is expected to end incomplete with exit 5,
+  and how a script tells that apart from an invalid run. It also says the cluster costs money for as long as it's up,
+  with a link to AWS's pricing, and how to grade a Nitro cluster you already run with `run kubernetes` or `run exec`.
+- On 23 Nov 2026 the `network-isolated` pod's container had no `/dev/vsock`, so AMP-6 was skipped. The pages now say
+  AMP-6 only checks for a vsock device and connects to nothing.
+
 ### Research harnesses
 
 - The managed Nitro and Daytona coding evaluations moved to `experiments/`, with the TUI prototype. They aren't part
@@ -98,6 +116,8 @@ saved in it and never grade its observations again (ANL-1).
   public test cases, and a completed assessment with unmet configuration requirements is told apart from one that
   didn't complete. A Daytona replacement create rejected before it returned an ID no longer blocks cleanup: the
   rejection is proven from bound audit evidence, and nothing is adopted or deleted by name.
+- The managed Nitro evaluation counts its cluster as never created, with cleanup confirmed, when `eks.sh up` exits 3
+  and left no state file (CLN-2).
 
 ### Documentation
 
@@ -105,13 +125,22 @@ saved in it and never grade its observations again (ANL-1).
 - `docs/providers/` gives each provider's status, setup, command, skipped checks and terms.
 - Boat and exe.dev: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev,
   PRV-13), never represented as provider-written permission.
+- New: CONTRIBUTING.md, CODE_OF_CONDUCT.md, issue forms (including a false-pass report), a pull request template and
+  this changelog.
+- `SANDPROBE_KUBE_OVERRIDES` is the path to a file holding a JSON merge patch, not inline JSON; the Kubernetes page
+  has an example for AWS Nitro Sandboxes' `isolated-sandbox` runtime class, and says to set `KUBECONFIG` when your
+  cluster's context is in another file.
+- The `run exec` and `run kubernetes` examples set `AGENT_USER` and pass `-as "$AGENT_USER"`. `-as` checks the user
+  your command runs as and never switches to it; a user the box doesn't have stops the run before any check.
+- Every command in the README and on the `run exec`, Kubernetes and AWS Nitro pages runs as pasted, with no
+  `<placeholder>` for the shell to read as a redirection.
+- The AWS Nitro page quotes AWS's penetration testing policy and Acceptable Use Policy, read 23 Nov 2026. Amazon EKS
+  isn't on the list of services customers may test without prior approval.
 
 ### Releases
 
 - A release version is `x.y.z`, or `x.y.z-rc.N` for a release candidate. A release candidate publishes as a GitHub
   pre-release, never marked Latest; `x.y.z` publishes as a full release (REL-2).
-- New: CONTRIBUTING.md, CODE_OF_CONDUCT.md, issue forms (including a false-pass report), a pull request template and
-  this changelog.
 
 ## 0.2.1 (2026-11-21)
 
