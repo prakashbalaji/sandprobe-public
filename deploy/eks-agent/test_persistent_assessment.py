@@ -176,9 +176,10 @@ class PersistentAssessmentTests(unittest.TestCase):
             receiver_uid = "6" * 32
             runner.scalar = Mock(side_effect=[receiver_uid, "own-node", "us-west-2a"])
             runner.create = Mock()
-            with patch.object(persistent.EBSWorkspace, "create", return_value={"id": "vol-" + "5" * 17, "zone": "us-west-2a"}) as create:
+            with patch.object(persistent, "binding") as verify, patch.object(persistent.EBSWorkspace, "create", return_value={"id": "vol-" + "5" * 17, "zone": "us-west-2a"}) as create:
                 plan = persistent.install(runner, runner.ns + "-receiver", receiver_uid)
             create.assert_called_once_with("us-west-2a")
+            verify.assert_called_once_with(runner, require_bound=False)
             self.assertEqual([call.args[0]["kind"] for call in runner.create.call_args_list], ["StorageClass", "PersistentVolume", "PersistentVolumeClaim"])
             self.assertEqual(plan["storage_context"]["mount_path"], "/persist")
             claim = runner.create.call_args_list[-1].args[0]
@@ -198,6 +199,32 @@ class PersistentAssessmentTests(unittest.TestCase):
                 delete.assert_called_once()
                 self.assertEqual(confirmed, not refused)
                 self.assertEqual("workspace_volume_cleanup_unconfirmed" in runner.journal.data["cleanup_failures"], refused)
+
+    def test_binding_reads_actual_native_sources_before_release(self):
+        for changed in [None, "csi", "nodeAffinity", "volumeName", "uid"]:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as root:
+                runner = self.fixture(root)
+                name = "sandprobe-artifacts-" + runner.run_id
+                resources = runner.journal.data["resources"]
+                for kind, resource, namespace in [("PersistentVolume", name, ""), ("PersistentVolumeClaim", "artifacts", runner.ns), ("StorageClass", name, "")]:
+                    resources[f"kube:{kind}:{namespace}:{resource}"] = {"status": "created", "uid": "6" * 32}
+                runner.scalar = lambda kind, resource, field, namespace=None: "7" * 32 if changed == "uid" else resources[f"kube:{kind}:{namespace or ''}:{resource}"]["uid"]
+                def projection(kind, resource, field, namespace=None):
+                    if changed and changed in field:
+                        return "unbound source"
+                    return {"{.spec.csi}": {"driver": "ebs.csi.eks.amazonaws.com", "volumeHandle": "vol-" + "5" * 17, "fsType": "ext4"},
+                            "{.spec.nodeAffinity}": {"required": {"nodeSelectorTerms": [{"matchExpressions": [{"key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-west-2a"]}]}]}},
+                            "{.spec.accessModes}": ["ReadWriteOncePod"], "{.spec.volumeName}": name, "{.spec.storageClassName}": name,
+                            "{.status.phase}": "Bound", "{.spec.claimRef.uid}": "6" * 32}[field]
+                runner.projection = projection
+                with patch.object(persistent.EBSWorkspace, "read", return_value={"id": "vol-" + "5" * 17, "zone": "us-west-2a"}):
+                    if changed:
+                        with self.assertRaises(Failure):
+                            persistent.binding(runner)
+                    else:
+                        result = persistent.binding(runner)
+                        self.assertEqual(result["volume_id"], "vol-" + "5" * 17)
+                        self.assertEqual(result["claim_uid"], "6" * 32)
 
 
 if __name__ == "__main__":

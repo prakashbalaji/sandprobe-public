@@ -33,10 +33,11 @@ def install(runner, receiver_ns, receiver_uid):
     for resource in plan["kubernetes"]["items"]:
         if resource["kind"] in {"StorageClass", "PersistentVolume", "PersistentVolumeClaim"}:
             runner.create(resource)
+    binding(runner, require_bound=False)
     return plan
 
 
-def binding(runner):
+def binding(runner, require_bound=True):
     resources = runner.journal.data["resources"]
     def uid(kind, name, namespace=""):
         record = resources.get(f"kube:{kind}:{namespace}:{name}", {})
@@ -48,10 +49,28 @@ def binding(runner):
         return value
     volume = EBSWorkspace(runner).read()
     name = "sandprobe-artifacts-" + runner.run_id
-    return {"storage_profile": "persistent-artifacts", "namespace_uid": uid("Namespace", runner.ns),
-            "claim_uid": uid("PersistentVolumeClaim", "artifacts", runner.ns),
-            "pv_uid": uid("PersistentVolume", name), "class_uid": uid("StorageClass", name),
-            "volume_id": volume["id"], "zone": volume["zone"]}
+    result = {"storage_profile": "persistent-artifacts", "namespace_uid": uid("Namespace", runner.ns),
+              "claim_uid": uid("PersistentVolumeClaim", "artifacts", runner.ns),
+              "pv_uid": uid("PersistentVolume", name), "class_uid": uid("StorageClass", name),
+              "volume_id": volume["id"], "zone": volume["zone"]}
+    # Check the actual sources before scheduling, then require binding before
+    # artifact/model release. Creator UIDs alone do not establish configuration.
+    checks = [("PersistentVolume", name, "{.spec.csi}", None,
+               {"driver": "ebs.csi.eks.amazonaws.com", "volumeHandle": volume["id"], "fsType": "ext4"}),
+              ("PersistentVolume", name, "{.spec.nodeAffinity}", None,
+               {"required": {"nodeSelectorTerms": [{"matchExpressions": [{"key": "topology.kubernetes.io/zone", "operator": "In", "values": [volume["zone"]]}]}]}}),
+              ("PersistentVolume", name, "{.spec.accessModes}", None, ["ReadWriteOncePod"]),
+              ("PersistentVolumeClaim", "artifacts", "{.spec.volumeName}", runner.ns, name),
+              ("PersistentVolumeClaim", "artifacts", "{.spec.storageClassName}", runner.ns, name),
+              ("PersistentVolumeClaim", "artifacts", "{.spec.accessModes}", runner.ns, ["ReadWriteOncePod"])]
+    if require_bound:
+        checks += [("PersistentVolume", name, "{.status.phase}", None, "Bound"),
+                   ("PersistentVolume", name, "{.spec.claimRef.uid}", None, result["claim_uid"]),
+                   ("PersistentVolumeClaim", "artifacts", "{.status.phase}", runner.ns, "Bound")]
+    for kind, resource, field, namespace, wanted in checks:
+        if runner.projection(kind, resource, field, namespace) != wanted:
+            raise Failure("persistent_storage_source_changed")
+    return result
 
 
 def persist(runner, name, value):
