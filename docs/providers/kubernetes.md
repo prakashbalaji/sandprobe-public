@@ -63,8 +63,8 @@ counter for at most an hour, both in memory only. To use a canary you run, name 
 `-canary-url <url> -canary-pin <pin>`, or with `-canary <state file>` for one from `deploy/canary.sh`. With
 `-no-canary`, the probe sends no test traffic to any canary: Exfiltration reads "Not tested", and the run can't
 grade above C. Checks you turn on with `-provider-endpoints` that don't need a canary still make the connections the
-plan names: SEC-4's requests to the cloud metadata addresses, AMP-7's TLS handshake with the Kubernetes API, and
-AMP-6's vsock connects to the host, if the pod has a vsock device. EGR-3 doesn't run, since it needs a canary.
+plan names: SEC-4's requests to the cloud metadata addresses and AMP-7's TLS handshake with the Kubernetes API.
+EGR-3 doesn't run, since it needs a canary, and AMP-6 only checks for a vsock device and connects to nothing.
 Cloud access reads "Not tested" and stays red, since SEC-4 and AMP-7 are off. **New in 0.3.0:** if your host's terms
 allow it on your own account, turn checks on by name with `-provider-endpoints SEC-4,AMP-7`; the plan lists each one
 with your attestation before anything runs, and the report records it beside the check.
