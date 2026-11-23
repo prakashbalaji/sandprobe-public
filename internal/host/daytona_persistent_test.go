@@ -218,3 +218,26 @@ func TestDaytonaPersistentRecoveryReconcilesOnlyRecordedConsumerID(t *testing.T)
 		t.Fatal("recovered storage cleanup failed", err)
 	}
 }
+
+func TestDaytonaPersistentFullRecoveryCoversReplacement(t *testing.T) {
+	p, f := newPersistentBoxFixture(t)
+	if _, _, err := p.Reset(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.original.client.CleanupDaytonaPersistentState(context.Background(), p.volume.path)
+	if err != nil || !result.Confirmed || !result.BoxesConfirmed || !result.StorageConfirmed || len(result.BoxIDs) != 2 || len(f.deleted) != 2 || !*f.volumeDeleted {
+		t.Fatal("recovery missed a resource", result, err)
+	}
+}
+
+func TestDaytonaPersistentFullRecoveryDoesNotWaiveUnknownReplacement(t *testing.T) {
+	p, f := newPersistentBoxFixture(t)
+	f.fault = "lost-create"
+	if _, _, err := p.Reset(context.Background()); err == nil {
+		t.Fatal("expected unknown replacement create")
+	}
+	result, err := p.original.client.CleanupDaytonaPersistentState(context.Background(), p.volume.path)
+	if err == nil || result.Confirmed || result.BoxesConfirmed || result.StorageConfirmed || *f.volumeDeleted || len(f.deleted) != 1 {
+		t.Fatal("unknown replacement was counted as absent", result, err)
+	}
+}

@@ -820,6 +820,10 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   An unknown external-volume create is not resolved by matching names or tags.
   EBS cleanup waits for independent original-cluster absence and no attachments;
   neither cluster teardown nor a successful volume DELETE alone proves it gone.
+  Managed Daytona selects this profile explicitly. Its assessment and recovery
+  take one exclusive run-folder lock, and recovery accounts for every recorded
+  original/replacement consumer before the receiver may be released. Record box,
+  storage and receiver confirmation separately; aggregate cleanup requires all.
 
 - **RUN-15 Protected startup configuration, writable project.** Improve the
   configuration shared by the Nitro and Daytona workload runs: HOME points to an
@@ -2541,7 +2545,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-19 | controller failure-step sanitization and unchanged model budget; contract mismatch metadata and refusal; setgid-workspace Linux smoke with unsafe-existing-cache refusal and nine cases; EGR-6 stage-count sanitization tests |
 | RUN-18 | actual environment-clearing subprocess and original-command/probe binding tests; legacy contract cannot select cleared observations; shared-policy Python workload checks; network-disabled/read-only Linux container with inherited synthetic authority and nine functional cases |
 | RUN-17 | host-controller protocol/remote execution/two-attempt/ambiguous-count and identity-absence tests; schema3 contract refusal matrix and report-version selection; original guest-mode regressions |
-| RUN-23 | `deploy/eks-agent/test_profile.py`: persistent render preserves network/identity controls; `test_persistent_storage.py`: EBS intent/ID durability, no unknown-create retry/adoption, metadata/attachment guards, independent cluster and volume absence, ambiguous-delete recovery and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: durable create/consumer IDs, no adoption or create retries, exact mount/subpath/organization guards, same-volume recreation, structural replacement-home checks, original-context revalidation, unknown-create retention, changed metadata refusals and independent exact-ID cleanup; managed live selection remains disabled pending runner integration and provider validation |
+| RUN-23 | `deploy/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls; `test_persistent_storage.py`: EBS intent/ID durability, no unknown-create retry/adoption, metadata/attachment guards, independent cluster/volume absence and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, mount/ownership guards, same-volume recreation, structural replacement-home checks, original-context revalidation, unknown-create retention and whole-consumer recovery; managed Daytona runner tests cover profile forwarding, separate cleanup outcomes and unknown replacement retention; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |
 | WGR-7 | `TestPortableWorkloadDeclaration`, `TestPortableWorkloadCalibration`; version1 retained Nitro report compatibility test |

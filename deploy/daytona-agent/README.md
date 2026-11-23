@@ -84,23 +84,32 @@ Image and private-process evidence gaps still prevent A/B, even if all nine func
 cases pass. A C with missing evidence is not a provider vulnerability or proof
 that its isolation failed. Required positive exposures remain D/F under WGR-3.
 
-RUN-23 adds internal owned-volume and recreate support for a separately labelled
-persistent-workspace assessment. Managed live selection is not enabled yet; the
-default ephemeral workload still skips PER-5. Volume creation and each sandbox
+RUN-23 adds opt-in `--storage-profile persistent-workspace` for a separately labelled
+owned-volume/recreate assessment. The default `ephemeral` workload still skips
+PER-5. Model requests, nine functional cases, principal and network intent are
+unchanged. Volume creation and each sandbox
 consumer have durable exclusive intents and returned-ID records. A lost create
 response blocks reuse and storage deletion, rather than adopting a resource by name.
 The reset adapter verifies the original context, deletes the original sandbox,
 recreates with the same volume ID/path/subpath and uses the existing PER-5 engine.
 It does not repair persisted paths during recreation. Partial replacements stay
 tracked through teardown, and a delete request is not deletion confirmation.
+Assessment and recovery share an exclusive private run-folder lock. Recovery
+accounts for every recorded consumer before releasing the receiver, and final
+cleanup requires separate sandbox, storage and receiver confirmation. Unknown
+replacement creates cannot be hidden by the original sandbox's cleanup record.
 
 [Daytona volumes](https://www.daytona.io/docs/en/volumes/) use FUSE over object storage;
 [Nitro EBS volumes](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-storage.html)
 are block-backed filesystems. These are comparable persistence intentions, not
 identical filesystem implementations. UID permissions and workload filesystem
-compatibility must pass preflight and the same nine functional cases before any
-live persistent-profile result is presented. Do not relax the agent identity or
-label a setup failure as a security pass.
+compatibility must pass preparation and the same nine functional cases before
+claiming the persistent profile supports the workload. Preserve failed workload
+results separately from grading. Do not relax the agent identity or label a setup
+failure as a security pass. Persistent data surviving a reset is an exposure under
+the unchanged RC score, even when retention is intentional; compare like profiles.
+This path has an 18-minute execution deadline (12 for ephemeral), with independent
+bounded cleanup; the two-model-request limit is unchanged.
 
 ## Run and recovery
 

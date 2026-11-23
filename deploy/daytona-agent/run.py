@@ -51,7 +51,7 @@ def sanitized_environment():
     env.update(AWS_IGNORE_CONFIGURED_ENDPOINT_URLS="true", AWS_MAX_ATTEMPTS="1")
     return env
 
-def call(args, env, timeout=90, data=None):
+def call(args, env, timeout=90, data=None, allowed_returncodes=(0,)):
     # Private file output avoids inherited pipes defeating the deadline.
     with tempfile.TemporaryFile() as output:
         try:
@@ -70,7 +70,7 @@ def call(args, env, timeout=90, data=None):
             if isinstance(problem,KeyboardInterrupt):
                 raise
             raise Failure("managed_subprocess_failed") from None
-        if process.returncode:
+        if process.returncode not in allowed_returncodes:
             raise Failure("managed_subprocess_failed")
         output.seek(0)
         raw=output.read((2 << 20)+1)
@@ -159,9 +159,14 @@ def verify_receiver(env, original):
             "checks": checks, "confirmed": bool(checks) and all(checks.values())}
 
 def recover_sandbox(folder, args, env):
+    if os.path.lexists(folder / "workspace-volume.state"):
+        return recover_persistent(folder, args, env)["boxes_confirmed"]
     cleanup = folder / "sandbox-cleanup.json"
-    if cleanup.is_file() and json.loads(cleanup.read_text()).get("confirmed") is True:
-        return True
+    try:
+        if cleanup.is_file() and json.loads(cleanup.read_text()).get("confirmed") is True:
+            return True
+    except ValueError:
+        pass  # A damaged summary never replaces original-ID recovery.
     candidates = list(folder.glob("daytona-*.state"))
     if not candidates and (folder / "owned-sandbox.json").is_file():
         candidates = [folder / "owned-sandbox.json"]
@@ -181,12 +186,35 @@ def recover_sandbox(folder, args, env):
     except (Failure, ValueError):
         return False
 
+def recover_persistent(folder, args, env):
+    failed = {"boxes_confirmed": False, "storage_confirmed": False, "confirmed": False}
+    try:
+        raw = call([str(folder / "runner"), "--cleanup-persistent-state", str(folder / "workspace-volume.state"),
+                    "--key-file", args.key_file, "--sdk-python", args.sdk_python], env, timeout=480, allowed_returncodes=(0,5))
+        result = json.loads(raw)
+        ids = result.get("box_ids") if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or any(type(result.get(key)) is not bool for key in failed)
+                or not isinstance(ids, list) or len(ids)>2
+                or any(not isinstance(value,str) or (value and not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}",value)) for value in ids)
+                or (result["boxes_confirmed"] and any(not value for value in ids))
+                or (result["storage_confirmed"] and not result["boxes_confirmed"])
+                or result["confirmed"] != (result["boxes_confirmed"] and result["storage_confirmed"])):
+            raise ValueError("invalid persistent cleanup result")
+        persist(folder / "persistent-recovery.json", result)
+        return result
+    except (Failure, ValueError):
+        return failed
+
 def cleanup_owned(folder, args, env):
     receiver = ROOT / "deploy/canary.sh"
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     # Do not release DNS/IP while an unconfirmed guest can still send traffic.
-    sandbox_gone = recover_sandbox(folder, args, env)
+    if os.path.lexists(folder / "workspace-volume.state"):
+        workload = recover_persistent(folder, args, env)
+        sandbox_gone, storage_gone = workload["boxes_confirmed"], workload["storage_confirmed"]
+    else:
+        sandbox_gone, storage_gone = recover_sandbox(folder, args, env), True
     current = state_values(Path(env["STATE"]))
     original = current
     if not original and (folder / "receiver-ownership.json").is_file():
@@ -204,13 +232,16 @@ def cleanup_owned(folder, args, env):
             receiver_gone = verified["confirmed"]
         except (Failure, subprocess.TimeoutExpired, ValueError):
             receiver_gone = False
-    cleanup = {"sandbox_confirmed": sandbox_gone, "receiver_confirmed": receiver_gone,
-               "confirmed": sandbox_gone and receiver_gone}
+    cleanup = {"sandbox_confirmed": sandbox_gone, "storage_confirmed": storage_gone, "receiver_confirmed": receiver_gone,
+               "confirmed": sandbox_gone and storage_gone and receiver_gone}
     persist(folder / "cleanup.json", cleanup)
     print("Cleanup confirmed: " + str(cleanup["confirmed"]), flush=True)
     return cleanup
 
 def main(args):
+    storage_profile = getattr(args, "storage_profile", "ephemeral")
+    if storage_profile not in ("ephemeral", "persistent-workspace"):
+        raise Failure("unsupported_storage_profile")
     parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
     approved_hosts = parse_hosts(getattr(args, "upload_hosts", ""))
     env = sanitized_environment()
@@ -251,7 +282,8 @@ def main(args):
     folder.mkdir(mode=0o700)
     persist(folder / "intent.json", {"schema": "sandprobe.managed-daytona/1", "run_id": run_id,
             "source_commit": source, "model_client_version":model_check["client_version"], "profile": PROFILE, "region": REGION, "account": ACCOUNT,
-            "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials", "upload_hosts": approved_hosts})
+            "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials", "upload_hosts": approved_hosts,
+            "storage_profile": storage_profile})
     print("Managed run: " + run_id, flush=True)
     print("Private records: " + str(folder), flush=True)
     tools = folder / "tools"
@@ -282,7 +314,8 @@ def main(args):
         call([str(folder / "runner"), "--key-file", args.key_file, "--sdk-python", args.sdk_python,
               "--model-python",args.model_python,"--out", str(folder), "--run-id", run_id, "--snapshot", SNAPSHOT,
               "--network", ",".join(ip + "/32" for ip in network), "--source-root", str(ROOT),
-              "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts)], env, timeout=1000)
+              "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts),
+              "--storage-profile", storage_profile], env, timeout=1500 if storage_profile == "persistent-workspace" else 1000)
     except (Failure, KeyboardInterrupt):
         failed = True
         persist(folder / "execution-failure.json", {"category": "managed_execution_incomplete"})
@@ -329,6 +362,7 @@ if __name__ == "__main__":
     parser.add_argument("--cf-helper", required=True)
     parser.add_argument("--dns-reference", required=True)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
+    parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace"), default="ephemeral")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not PROFILE:
         raise Failure("aws_account_and_profile_required")

@@ -17,12 +17,12 @@ spec=importlib.util.spec_from_file_location('daytona_runner',Path(__file__).with
 r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 
 class RunnerTests(unittest.TestCase):
- def test_completed_run_prints_bound_rc_score_without_waiving_incomplete_exit(self):
+ def completed_run(self,storage_profile='ephemeral'):
   with tempfile.TemporaryDirectory() as d:
    home=Path(d);(home/'.config/sandprobe').mkdir(parents=True)
    helper=home/'cf';helper.write_text('fixture')
    key=home/'key';key.write_text('synthetic-not-a-secret');key.chmod(0o600)
-   args=argparse.Namespace(cleanup_run='',model_python='/fixture/model-python',go='/fixture/go',sdk_python='/fixture/python',key_file=str(key),cf_helper=str(helper),dns_reference='fixture')
+   args=argparse.Namespace(cleanup_run='',model_python='/fixture/model-python',go='/fixture/go',sdk_python='/fixture/python',key_file=str(key),cf_helper=str(helper),dns_reference='fixture',storage_profile=storage_profile)
    def call(argv,env,timeout=90,data=None):
     if argv[0]=='/fixture/model-python':return b'{"ready":true,"client_version":"1.44.6"}'
     if argv[:2]==['git','rev-parse']:return b'a'*40
@@ -31,6 +31,8 @@ class RunnerTests(unittest.TestCase):
     if argv[0]=='bash' and argv[-1]=='up':Path(env['STATE']).write_text('profile='+r.PROFILE+'\nregion='+r.REGION+'\ninstance=i-fixture\n')
     if argv[0].endswith('/runner'):
      folder=Path(argv[argv.index('--out')+1]);run=argv[argv.index('--run-id')+1]
+     self.assertEqual(argv[argv.index('--storage-profile')+1],storage_profile)
+     self.assertEqual(json.loads((folder/'intent.json').read_text())['storage_profile'],storage_profile)
      assessment={'run_id':'rfixture123','box_id':'original-box','configuration_grade':'C','complete':False,'benchmark_requirements_met':False}
      exposure={'schema':'sandprobe.workload-exposure/1','run_id':'rfixture123','box_id':'original-box','valid':True,'score':3,'of':6}
      r.persist(folder/'evaluation.json',{'source_commit':'a'*40,'managed_run_id':run,'primary_assessment':'rc_exposure_scorecard','configuration_assessment':assessment,'exposure_scorecard':exposure,'functional_workload':{'independent_verification':'passed','functional_tests':9,'model_requests':2}})
@@ -42,6 +44,32 @@ class RunnerTests(unittest.TestCase):
    result=json.loads(output.getvalue().splitlines()[-1])
    self.assertEqual(result['primary_assessment'],'rc_exposure_scorecard');self.assertEqual(result['exposure_scorecard']['score'],3)
    self.assertTrue(result['workload_passed']);self.assertFalse(result['complete'])
+ def test_completed_run_prints_bound_rc_score_without_waiving_incomplete_exit(self):
+  self.completed_run()
+ def test_persistent_profile_reaches_same_managed_workload(self):
+  self.completed_run('persistent-workspace')
+ def test_persistent_recovery_keeps_box_and_storage_outcomes_separate(self):
+  with tempfile.TemporaryDirectory() as d:
+   folder=Path(d);(folder/'workspace-volume.state').write_text('fixture')
+   args=argparse.Namespace(key_file='fixture-key-file',sdk_python='/fixture/python')
+   result={'box_ids':['12345678-1234-1234-1234-123456789abc'],'boxes_confirmed':True,'storage_confirmed':False,'confirmed':False}
+   with patch.object(r,'call',return_value=json.dumps(result).encode()) as call:
+    self.assertEqual(r.recover_persistent(folder,args,{}),result)
+    self.assertEqual(call.call_args.kwargs['allowed_returncodes'],(0,5))
+    self.assertTrue(r.recover_sandbox(folder,args,{}))
+   bad=dict(result,boxes_confirmed=False,storage_confirmed=True)
+   with patch.object(r,'call',return_value=json.dumps(bad).encode()):
+    self.assertFalse(r.recover_persistent(folder,args,{})['boxes_confirmed'])
+ def test_unknown_replacement_blocks_receiver_release(self):
+  with tempfile.TemporaryDirectory() as d:
+   folder=Path(d);(folder/'workspace-volume.state').write_text('fixture')
+   state=folder/'canary.state';state.write_text('instance=fixture\n')
+   args=argparse.Namespace(key_file='fixture-key-file',sdk_python='/fixture/python')
+   pending={'box_ids':[''],'boxes_confirmed':False,'storage_confirmed':False,'confirmed':False}
+   with patch.object(r,'recover_persistent',return_value=pending),patch.object(r,'call') as call,patch.object(r.signal,'signal'):
+    result=r.cleanup_owned(folder,args,{'STATE':str(state)})
+   self.assertFalse(result['confirmed']);self.assertFalse(result['receiver_confirmed'])
+   call.assert_not_called()
  def test_timeout_kills_provisioning_descendants(self):
   with tempfile.TemporaryDirectory() as d:
    marker=Path(d)/'must-not-appear'
