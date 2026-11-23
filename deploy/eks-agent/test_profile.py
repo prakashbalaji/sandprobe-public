@@ -9,6 +9,36 @@ import render_profile as profile
 
 
 class ProfileTests(unittest.TestCase):
+    def test_persistent_workspace_preserves_network_and_agent_controls(self):
+        args = self.settings()
+        args.update(controller="host", model=profile.LIGHTWEIGHT_MODEL)
+        baseline = profile.render(**args)
+        plan = profile.render(**args, storage_profile="persistent-workspace")
+        self.assertEqual(plan["storage_profile"], "persistent-workspace")
+        before = {v["kind"] + ":" + v["metadata"]["name"]: v for v in baseline["kubernetes"]["items"]}
+        after = {v["kind"] + ":" + v["metadata"]["name"]: v for v in plan["kubernetes"]["items"]}
+        for name in ("NetworkPolicy:deny-by-default", "NetworkPolicy:model-task-egress"):
+            self.assertEqual(after[name], before[name])
+        old = copy.deepcopy(before["Job:model-task"])
+        old["spec"]["template"]["spec"]["volumes"][0] = {
+            "name": "workspace", "persistentVolumeClaim": {"claimName": "workspace"}}
+        self.assertEqual(after["Job:model-task"], old)
+        sc = after["StorageClass:sandprobe-workspace-0123456789abcdef"]
+        self.assertEqual(sc["provisioner"], "ebs.csi.eks.amazonaws.com")
+        self.assertEqual(sc["parameters"], {"type": "gp3", "encrypted": "true"})
+        self.assertEqual((sc["reclaimPolicy"], sc["volumeBindingMode"]), ("Retain", "WaitForFirstConsumer"))
+        claim = after["PersistentVolumeClaim:workspace"]
+        self.assertEqual(claim["metadata"]["namespace"], "sandprobe-agent-0123456789abcdef")
+        self.assertEqual(claim["spec"]["storageClassName"], sc["metadata"]["name"])
+        self.assertNotIn("volumeName", claim["spec"])
+        self.assertNotIn("selector", claim["spec"])
+        self.assertEqual((plan["live_status"], plan["security_grade"]), ("not_executed", "not_assessed"))
+
+    def test_persistent_workspace_rejects_unrecognized_or_guest_profile(self):
+        for value in ("persistent-workspace", "existing-production-claim", "../claim", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                profile.render(**self.settings(), storage_profile=value)
+
     def settings(self):
         run = "0123456789abcdef"
         return dict(run_id=run, image=f"111122223333.dkr.ecr.us-west-2.amazonaws.com/sandprobe-agent-{run}@sha256:" + "a" * 64,

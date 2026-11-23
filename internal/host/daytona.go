@@ -122,16 +122,23 @@ type daytonaInfo struct {
 	AutoPause                                        *int `json:"auto_pause"`
 	Volumes                                          *int
 	Absent                                           bool
-	SnapshotID                                       string `json:"snapshot_id"`
-	SnapshotRef                                      string `json:"snapshot_ref"`
-	NetworkAllowList                                 string `json:"network_allow_list"`
-	NetworkBlockAll                                  *bool  `json:"network_block_all"`
-	DomainAllowList                                  string `json:"domain_allow_list"`
+	SnapshotID                                       string               `json:"snapshot_id"`
+	SnapshotRef                                      string               `json:"snapshot_ref"`
+	NetworkAllowList                                 string               `json:"network_allow_list"`
+	NetworkBlockAll                                  *bool                `json:"network_block_all"`
+	DomainAllowList                                  string               `json:"domain_allow_list"`
+	VolumeBindings                                   []daytonaVolumeMount `json:"volume_bindings"`
+}
+type daytonaVolumeMount struct {
+	ID        string `json:"id"`
+	MountPath string `json:"mount_path"`
+	Subpath   string `json:"subpath"`
 }
 type daytonaJournal struct {
 	Nonce, Name, ID, Born, Organization string
 	Requested                           time.Time
 	SnapshotID, NetworkAllowList        string
+	Volume                              *daytonaVolumeMount `json:",omitempty"`
 }
 type DaytonaBox struct {
 	client                                     *DaytonaClient
@@ -144,6 +151,8 @@ type DaytonaBox struct {
 	managerPrefix                              string
 	managerReadiness                           *DaytonaManagerReadiness
 	workloadChecks                             map[string]bool
+	volume                                     *DaytonaVolume
+	volumeConsumer                             string
 }
 
 func (b *DaytonaBox) call(ctx context.Context, op string, in map[string]any, out any) error {
@@ -189,7 +198,18 @@ func syncDaytonaDirectory(dir string) error {
 func (c *DaytonaClient) CreateDaytona(ctx context.Context, dir string) (*DaytonaBox, error) {
 	return c.createDaytona(ctx, dir, "", "")
 }
-func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, network string) (*DaytonaBox, error) {
+func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, network string, volumes ...*DaytonaVolume) (*DaytonaBox, error) {
+	if len(volumes) > 1 || (len(volumes) == 1 && (volumes[0] == nil || volumes[0].client != c || snapshot == "")) {
+		return nil, errors.New("Daytona persistent workspace selection invalid")
+	}
+	if len(volumes) == 1 {
+		if err := volumes[0].Verify(ctx); err != nil {
+			return nil, err
+		}
+		if filepath.Dir(volumes[0].path) != dir {
+			return nil, errors.New("Daytona volume belongs to another run directory")
+		}
+	}
 	if os.MkdirAll(dir, 0700) != nil {
 		return nil, errors.New("Daytona journal directory unavailable")
 	}
@@ -202,6 +222,10 @@ func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, networ
 		return nil, errors.New("Daytona journal directory not owned")
 	}
 	b := &DaytonaBox{client: c, journal: daytonaJournal{Nonce: token("n"), Name: token("sandprobe-"), Requested: time.Now().UTC(), SnapshotID: snapshot, NetworkAllowList: network}}
+	if len(volumes) == 1 {
+		b.volume = volumes[0]
+		b.journal.Volume = &daytonaVolumeMount{ID: b.volume.ID(), MountPath: "/workspace", Subpath: ""}
+	}
 	b.state = filepath.Join(dir, "daytona-"+b.journal.Nonce+".state")
 	f, e := os.OpenFile(b.state, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if e != nil {
@@ -216,12 +240,20 @@ func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, networ
 	if e != nil || ce != nil || syncDaytonaDirectory(dir) != nil {
 		return b, errors.New("Daytona intent write failed")
 	}
+	if b.volume != nil {
+		if e = b.volume.consumerIntent(b.state); e != nil {
+			return b, e
+		}
+	}
 	var raw json.RawMessage
 	create := map[string]any{"name": b.journal.Name, "nonce": b.journal.Nonce}
 	if snapshot != "" {
 		create["workload"] = true
 		create["snapshot_id"] = snapshot
 		create["network_allow_list"] = network
+	}
+	if b.journal.Volume != nil {
+		create["volume_binding"] = b.journal.Volume
 	}
 	if e = b.call(ctx, "create", create, &raw); e != nil {
 		return b, e
@@ -233,6 +265,11 @@ func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, networ
 	b.journal.ID = minimal.ID
 	if e = b.save(); e != nil {
 		return b, e
+	}
+	if b.volume != nil {
+		if e = b.volume.consumerCreated(b.state, b.ID()); e != nil {
+			return b, e
+		}
 	}
 	var d daytonaInfo
 	if json.Unmarshal(raw, &d) != nil {
@@ -274,7 +311,11 @@ func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, networ
 	}
 }
 func (b *DaytonaBox) params() map[string]any {
-	return map[string]any{"id": b.ID(), "nonce": b.journal.Nonce, "born": b.journal.Born, "organization": b.journal.Organization, "boot": b.boot}
+	p := map[string]any{"id": b.ID(), "nonce": b.journal.Nonce, "born": b.journal.Born, "organization": b.journal.Organization, "boot": b.boot}
+	if b.journal.Volume != nil {
+		p["volume_binding"] = b.journal.Volume
+	}
+	return p
 }
 func (b *DaytonaBox) lookup(ctx context.Context) (daytonaInfo, error) {
 	var d daytonaInfo
@@ -285,7 +326,14 @@ func (b *DaytonaBox) match(d daytonaInfo) error {
 	if d.Absent || d.ID != b.ID() || d.Name != b.journal.Name || d.Born != b.journal.Born || d.Organization != b.journal.Organization || d.Labels["sandprobe_run"] != b.journal.Nonce {
 		return errors.New("Daytona ownership mismatch")
 	}
-	if d.Public == nil || *d.Public || d.AutoDelete == nil || *d.AutoDelete != 0 || d.AutoStop == nil || *d.AutoStop != 15 || d.AutoPause == nil || *d.AutoPause != 0 || d.Volumes == nil || *d.Volumes != 0 {
+	volumeCount := 0
+	if b.journal.Volume != nil {
+		volumeCount = 1
+		if b.volume == nil || b.journal.Volume.ID != b.volume.ID() || d.Organization != b.volume.journal.Organization || len(d.VolumeBindings) != 1 || d.VolumeBindings[0] != *b.journal.Volume {
+			return errors.New("Daytona persistent workspace binding changed")
+		}
+	}
+	if d.Public == nil || *d.Public || d.AutoDelete == nil || *d.AutoDelete != 0 || d.AutoStop == nil || *d.AutoStop != 15 || d.AutoPause == nil || *d.AutoPause != 0 || d.Volumes == nil || *d.Volumes != volumeCount || len(d.VolumeBindings) != volumeCount {
 		return errors.New("Daytona lifecycle/private policy mismatch")
 	}
 	if b.journal.SnapshotID != "" {
@@ -398,6 +446,8 @@ func (b *DaytonaBox) Probe(ctx context.Context, args []string, input []byte) ([]
 		suffix = " -survey"
 	} else if len(args) == 1 && args[0] == "-receiver" {
 		suffix = " -receiver"
+	} else if len(args) == 1 && (args[0] == "-mark" || args[0] == "-recheck") && b.journal.Volume != nil {
+		suffix = " " + args[0]
 	} else if len(args) != 0 {
 		return nil, errors.New("Daytona probe mode invalid")
 	}
@@ -476,6 +526,11 @@ func (b *DaytonaBox) Destroy(ctx context.Context) error {
 	}
 }
 func (b *DaytonaBox) retire() error {
+	if b.volume != nil {
+		if err := b.volume.consumerGone(b); err != nil {
+			return err
+		}
+	}
 	if os.Remove(b.state) != nil {
 		return errors.New("Daytona journal retirement failed")
 	}

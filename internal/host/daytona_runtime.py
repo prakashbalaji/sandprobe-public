@@ -49,11 +49,21 @@ def timestamp(value):
     if parsed.tzinfo is None:raise ValueError("creation timezone missing")
     return text
 def metadata(s):
-    return {'id':s.id,'name':s.name,'organization':s.organization_id,'born':timestamp(s.created_at),'state':str(s.state.value),'desired_state':str(s.desired_state.value) if s.desired_state is not None else '','labels':s.labels or {},'user':s.user,'public':s.public,'auto_delete':s.auto_delete_interval,'auto_stop':s.auto_stop_interval,'auto_pause':s.auto_pause_interval,'proxy':s.toolbox_proxy_url,'volumes':len(s.volumes or []),'snapshot':getattr(s,'snapshot',None),'network_allow_list':getattr(s,'network_allow_list',None),'network_block_all':getattr(s,'network_block_all',None),'domain_allow_list':getattr(s,'domain_allow_list',None)}
+    mounts=[{'id':v.volume_id,'mount_path':v.mount_path,'subpath':v.subpath or ''} for v in (s.volumes or [])]
+    return {'id':s.id,'name':s.name,'organization':s.organization_id,'born':timestamp(s.created_at),'state':str(s.state.value),'desired_state':str(s.desired_state.value) if s.desired_state is not None else '','labels':s.labels or {},'user':s.user,'public':s.public,'auto_delete':s.auto_delete_interval,'auto_stop':s.auto_stop_interval,'auto_pause':s.auto_pause_interval,'proxy':s.toolbox_proxy_url,'volumes':len(mounts),'volume_bindings':mounts,'snapshot':getattr(s,'snapshot',None),'network_allow_list':getattr(s,'network_allow_list',None),'network_block_all':getattr(s,'network_block_all',None),'domain_allow_list':getattr(s,'domain_allow_list',None)}
+def workload_volume(req):
+    value=req.get('volume_binding')
+    if value is None:return None
+    if not isinstance(value,dict) or set(value)!=set(('id','mount_path','subpath')) or not isinstance(value['id'],str) or not UUID.fullmatch(value['id']) or value['mount_path']!='/workspace' or value['subpath']!='':
+        raise ValueError('invalid workspace volume binding')
+    return dict(value)
+def volumes_match(meta,req):
+    expected=workload_volume(req)
+    return (meta['volumes']==1 and meta['volume_bindings']==[expected]) if expected else (meta['volumes']==0 and meta['volume_bindings']==[])
 def bound(client,req):
     s=client._sandbox_api.get_sandbox(req['id'],_request_timeout=25)
     m=metadata(s)
-    if m['id']!=req['id'] or m['labels'].get('sandprobe_run')!=req['nonce'] or m['born']!=req['born'] or m['organization']!=req['organization'] or m['public'] or m['auto_delete']!=0 or m['auto_stop']!=15 or m['auto_pause']!=0 or m['volumes']!=0:raise ValueError('identity/policy mismatch')
+    if m['id']!=req['id'] or m['labels'].get('sandprobe_run')!=req['nonce'] or m['born']!=req['born'] or m['organization']!=req['organization'] or m['public'] or m['auto_delete']!=0 or m['auto_stop']!=15 or m['auto_pause']!=0 or not volumes_match(m,req):raise ValueError('identity/policy mismatch')
     return s,m
 
 def create_identity(response):
@@ -66,6 +76,38 @@ def create_identity(response):
         return {'id':value['id']}
     finally:response.close()
 
+def volume_metadata(volume):
+    # RUN-23: select ownership fields only; no error_reason or provider options.
+    if not UUID.fullmatch(volume.id):raise ValueError('volume identity unavailable')
+    return {'id':volume.id,'name':volume.name,'organization':volume.organization_id,
+            'born':timestamp(volume.created_at),'state':str(volume.state.value)}
+
+def volume_operation(client,req):
+    # The trusted host must journal the create-returned ID before lookup/mount.
+    # Never get-or-create, adopt by name, enumerate or delete a guessed ID.
+    from daytona_api_client import VolumesApi,CreateVolume
+    api=VolumesApi(client._api_client)
+    if req['op']=='volume_create':
+        if not re.fullmatch(r'sandprobe-volume-[a-f0-9]{24}',req.get('name','')):
+            raise ValueError('invalid volume name')
+        return create_identity(api.create_volume_without_preload_content(CreateVolume(name=req['name']),_request_timeout=60))
+    volume_id=req.get('volume_id','')
+    if not UUID.fullmatch(volume_id):raise ValueError('invalid volume ID')
+    try:volume=api.get_volume(volume_id,_request_timeout=25)
+    except Exception as e:
+        if getattr(e,'status',None)==404:return {'id':volume_id,'absent':True}
+        raise
+    value=volume_metadata(volume)
+    if value['id']!=volume_id:raise ValueError('volume identity changed')
+    if req['op']=='volume_lookup':return value
+    if req['op']!='volume_delete':raise ValueError('unsupported volume operation')
+    if not re.fullmatch(r'sandprobe-volume-[a-f0-9]{24}',req.get('name','')):
+        raise ValueError('invalid volume name')
+    for key in ('name','organization','born'):
+        if not req.get(key) or value[key]!=req[key]:raise ValueError('volume cleanup ownership mismatch')
+    api.delete_volume(volume_id,_request_timeout=60)
+    return {'id':volume_id,'deleted_request':True}
+
 def dispatch(req):
     if importlib.metadata.version('daytona')!='0.198.0':raise ValueError('unsupported SDK')
     if req['op']=='check':return {'version':'0.198.0'}
@@ -77,6 +119,8 @@ def dispatch(req):
     client=Daytona(DaytonaConfig(api_key=req['key'],api_url=API,target='us'))
     # Disable SDK retries, with origin/redirect guards also enforced at transport.
     client._api_client.configuration.retries=0
+    if req['op'] in ('volume_create','volume_lookup','volume_delete'):
+        return volume_operation(client,req)
     if req['op']=='available':
         client._sandbox_api.list_sandboxes(limit=1,_request_timeout=25)
         return {'available':True}
@@ -87,13 +131,19 @@ def dispatch(req):
         return {'id':snapshot.id,'name':snapshot.name,'image_name':snapshot.image_name,'ref':snapshot.ref,'cpu':snapshot.cpu,'memory':snapshot.mem}
     if req['op']=='create':
         extra={}
+        mounts=[]
+        volume=workload_volume(req)
+        if volume:
+            if req.get('workload') is not True:raise ValueError('persistent workspace requires workload mode')
+            from daytona_api_client.models.sandbox_volume import SandboxVolume
+            mounts=[SandboxVolume(volume_id=volume['id'],mount_path=volume['mount_path'])]
         if req.get('workload'):
             import ipaddress
             if not UUID.fullmatch(req['snapshot_id']):raise ValueError('invalid snapshot')
             nets=req['network_allow_list'].split(',')
             if not 1<=len(nets)<=16 or any(not ipaddress.ip_network(n).is_global or ipaddress.ip_network(n).prefixlen!=32 for n in nets):raise ValueError('invalid workload network')
             extra={'snapshot':req['snapshot_id'],'user':'root','network_allow_list':req['network_allow_list']}
-        response=client._sandbox_api.create_sandbox_without_preload_content(CreateSandbox(name=req['name'],target='us',env={},labels={'sandprobe_run':req['nonce']},public=False,auto_delete_interval=0,auto_stop_interval=15,auto_pause_interval=0,volumes=[],secrets=[],**extra),_request_timeout=60)
+        response=client._sandbox_api.create_sandbox_without_preload_content(CreateSandbox(name=req['name'],target='us',env={},labels={'sandprobe_run':req['nonce']},public=False,auto_delete_interval=0,auto_stop_interval=15,auto_pause_interval=0,volumes=mounts,secrets=[],**extra),_request_timeout=60)
         # No generated optional model parsing before the host journals ID.
         return create_identity(response)
     if req['op']=='lookup':
