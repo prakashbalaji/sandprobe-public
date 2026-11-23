@@ -352,6 +352,17 @@ func TestCanaryCheckDefaultsToTheHostedCanary(t *testing.T) {
 	}
 }
 
+// HCN-7: canary check's refusal of an operator canary prints a fix that is the command alone and works when pasted:
+// deploy/canary.sh status, handed AWS_PROFILE's value as PROFILE, and refused by the real script when that is unset.
+func TestOperatorCanaryFixRunsAsPasted(t *testing.T) {
+	stray := strayState(t)
+	var out, errs bytes.Buffer
+	if code := run([]string{"canary", "check", "-canary", stray}, &out, &errs); code != exitUsage || !strings.Contains(errs.String(), "answers only over SSM") {
+		t.Fatalf("exit %d, %s", code, errs.String())
+	}
+	fixRunsAsPasted(t, printedFix(t, errs.String()), "canary.sh", "status")
+}
+
 // HCN-5: the command line beats the environment. A stale SANDPROBE_CANARY never outranks an explicit -canary-url and
 // -canary-pin; once any canary flag is given, every SANDPROBE_CANARY* value is set aside; with none, they stand in.
 func TestCanaryFlagsBeatTheEnvironment(t *testing.T) {
