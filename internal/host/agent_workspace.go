@@ -57,6 +57,9 @@ func (p *PodBox) checkWorkspaceBinding(ctx context.Context, b AgentPodBinding) e
 	if !validAgentWorkspace(b) {
 		return errors.New("persistent workspace declaration invalid")
 	}
+	if err := p.checkWorkspacePodStorage(ctx, b); err != nil {
+		return err
+	}
 	w := b.Workspace
 	if err := p.workspaceFields(ctx, "namespace", b.Namespace,
 		[]string{".metadata.uid", `.metadata.labels.sandprobe\.run`, ".metadata.deletionTimestamp"},

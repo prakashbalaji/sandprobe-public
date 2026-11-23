@@ -34,11 +34,13 @@ func TestAgentWorkspaceReadbacksRefuseReplacementAndConfigurationDrift(t *testin
 		t.Run(profile, func(t *testing.T) {
 			b, fields := workspaceBindingFixture(profile)
 			p := &PodBox{Kubeconfig: b.Kubeconfig, Context: b.Context, Namespace: b.Namespace}
+			podReads := 0
 			var changedKind string
 			changedIndex := -1
 			p.kubectl = func(_ context.Context, _ io.Reader, out, errOut io.Writer, args ...string) error {
 				command := strings.Join(args, " ")
 				if strings.Contains(command, " get pod ") {
+					podReads++
 					volumes := []map[string]any{{"name": "workspace", "emptyDir": map[string]any{"sizeLimit": "64Mi"}}, {"name": "scratch", "emptyDir": map[string]any{"sizeLimit": "64Mi"}}}
 					mounts := []map[string]any{{"name": "workspace", "mountPath": "/workspace"}, {"name": "scratch", "mountPath": "/tmp"}}
 					if profile == "persistent-artifacts" {
@@ -68,6 +70,9 @@ func TestAgentWorkspaceReadbacksRefuseReplacementAndConfigurationDrift(t *testin
 			}
 			if err := p.checkWorkspaceBinding(context.Background(), b); err != nil {
 				t.Fatal(err)
+			}
+			if podReads != 2 {
+				t.Fatal("storage guard did not inspect actual pod volumes and mounts")
 			}
 			for kind, values := range fields {
 				for index := range values {
