@@ -148,15 +148,35 @@ publiccheck() {
   fail "control.$d never gave a status signed by $cpin"
 }
 
+# RUN-20: dynamically scoped to up; manual status never writes the journal.
+readiness() { [ "${track_readiness:-0}" != 1 ] || put readiness_stage "$1"; }
+
 # outside checks from here, against the fixed IP: the TLS key is the instance's pin, and each plain port answers health.
 outside() {
-  local ip=$1 pin=$2 got p
-  got=$(openssl s_client -connect "$ip:443" -servername "health.canary.$(get domain)" </dev/null 2>/dev/null |
-    openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER | shasum -a 256 | cut -d' ' -f1)
-  [ "$got" = "$pin" ] || fail "$ip serves pin $got, the instance's canary has $pin"
+  local ip=$1 pin=$2 got p transport_ok
+  readiness tls
+  if ! got=$(openssl s_client -connect "$ip:443" -servername "health.canary.$(get domain)" </dev/null 2>/dev/null |
+    openssl x509 -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | shasum -a 256 | cut -d' ' -f1); then
+    # A client/pipeline exit is not proof the peer was unreachable.
+    if [ "$got" = "$pin" ]; then readiness tls_command_failed_matching_pin
+    else readiness tls_command_failed; fi
+    fail "receiver TLS verification command failed"
+  fi
+  if [ "$got" != "$pin" ]; then
+    readiness tls_pin_mismatch
+    fail "receiver TLS pin mismatch"
+  fi
   for p in 22 80 8080; do
-    [ "$(printf 'health\n' | nc -w 4 "$ip" $p)" = sandprobe:health ] || fail "no health on $ip:$p"
+    readiness "tcp${p}"
+    transport_ok=1
+    got=$(printf 'health\n' | nc -w 4 "$ip" "$p" 2>/dev/null) || transport_ok=0
+    if [ "$got" != sandprobe:health ]; then
+      if [ "$transport_ok" = 0 ]; then readiness "tcp${p}_transport_failed"
+      else readiness "tcp${p}_health_mismatch"; fi
+      fail "receiver TCP health unproven on port $p"
+    fi
   done
+  readiness ready
 }
 
 status() {
@@ -166,6 +186,7 @@ status() {
   owned instance "$id"
   st=$(aws ec2 describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].State.Name' --output text)
   [ "$st" = running ] || fail "instance $id is $st"
+  readiness internal
   out=$(inside)
   sum=$(sed -n 1p <<<"$out")
   read -r pin ok < <(sed -n 2p <<<"$out")
@@ -243,7 +264,7 @@ EOF
 }
 
 up() {
-  local did b bin sum url vpc sg ami id vol alloc ip z rec t n c r itype=t4g.nano recs
+  local did b bin sum url vpc sg ami id vol alloc ip z rec t n c r itype=t4g.nano recs track_readiness=1
   [ "$PUBLIC" = 1 ] && itype=t4g.small # the hosted canary serves anyone
   [ ! -f "$STATE" ] || fail "a deployment is recorded in $STATE: run status, or down first"
   [ -z "$(aws ec2 describe-instances --filters "Name=tag:Name,Values=$NAME" \
