@@ -2487,7 +2487,10 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
   checkouts of the same commit, and publishes only if every file matches byte for byte and both checksum files
   match the files they list (the binaries' after decompressing every archive). It does the same on every pull
   request, publishing nothing. A release publishes the CLI's own `Version` as the tag `v<Version>`, from `main`, and
-  stops if the version asked for, the CLI's `version` output and the probe's `BuildVersion` don't all agree.
+  stops if the version asked for, the CLI's `version` output and the probe's `BuildVersion` don't all agree. A
+  version is `x.y.z`, or `x.y.z-rc.N` for a release candidate, each part digits; the release stops on anything else,
+  before anything is published. An `x.y.z-rc.N` version publishes as a GitHub pre-release, never marked Latest. An
+  `x.y.z` version publishes as a full release, which GitHub marks Latest by its own rule (newest by date and version).
 - **REL-3 Provenance.** Each published `.gz`, and both checksum files, carry a GitHub build attestation for the
   workflow run that built them. Verifying one binds it to this repository's release workflow, on `main`, at the
   release's commit:
@@ -2531,7 +2534,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 
 | Extension rule | Tests |
 | --- | --- |
-| REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing; on a release, the version check before anything is published, then the attestation |
+| REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing, and `.github/release-version_test.sh` (REL-2's version grammar: `x.y.z` publishes as a full release, `x.y.z-rc.N` as a pre-release never marked Latest, and everything else is refused, a leading `v`, another suffix, a missing part, a second line and an empty version among them); on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
 | SCR-5 | synthetic six-category coverage partition and malformed/missing/unknown/scoped-out cases, unchanged RC scores, invalid/historical coverage absence, terminal/HTML/workload coverage visibility and count validation |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression |
