@@ -284,7 +284,7 @@ func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 			result.Stage = ""
 			return result
 		}
-		previous, _ = json.Marshal(map[string]string{"previous": source.Previous})
+		previous, _ = json.Marshal(map[string]any{"previous": source.Previous, "verification": json.RawMessage(raw)})
 	}
 	return result
 }

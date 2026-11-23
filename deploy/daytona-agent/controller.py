@@ -18,8 +18,11 @@ def main():
     if mode == "request":
         messages = [{"role": "user", "content": [{"text": coding.PROMPT}]}]
         if value:
+            if set(value) != {"previous", "verification"} or not isinstance(value["previous"], str) or len(value["previous"].encode()) > 16384:
+                raise ValueError()
+            feedback = coding.repair_feedback(value["verification"])
             messages.extend([{"role": "assistant", "content": [{"text": value["previous"]}]},
-                             {"role": "user", "content": [{"text": "The fixed functional checks failed. Return corrected solution.py JSON only."}]}])
+                             {"role": "user", "content": [{"text": feedback}]}])
         return coding.converse_request("mistral.ministral-3-3b-instruct", messages)
     if mode == "diagnostic":
         return coding.validated_verification_diagnostic(value)

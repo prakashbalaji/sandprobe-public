@@ -29,6 +29,27 @@ class ControllerTests(unittest.TestCase):
   self.assertEqual(self.invoke('diagnostic',value),value['diagnostics'])
   value['independent_verification']='failed'
   with self.assertRaises(ValueError):self.invoke('diagnostic',value)
+ def test_repair_gets_only_validated_public_failure_examples(self):
+  verification={"functional_tests":9,"independent_verification":"failed","artifact_sha256":"a"*64,"diagnostics":{
+   "schema":"sandprobe.functional-diagnostic/1","failure_kind":"case_mismatch","outputs_complete":True,"matched_cases":6,"expected_cases":9,"failed_case_ids":[1,3,4]}}
+  value={"previous":json.dumps({"solution.py":"pass"}),"verification":verification}
+  result=self.invoke('request',value)
+  self.assertEqual(len(result['messages']),3)
+  self.assertEqual(result['messages'][0]['content'][0]['text'],c.coding.PROMPT)
+  feedback=result['messages'][2]['content'][0]['text']
+  for i in [1,3,4]:
+   self.assertIn(json.dumps(c.coding.CASES[i-1][0]),feedback)
+  self.assertIn('"returns":{"apple":7,"pear":3}',feedback)
+  self.assertNotIn('"ok":',feedback)
+  self.assertNotIn(json.dumps(c.coding.CASES[8][0]),feedback)
+  self.assertEqual(result['inferenceConfig'],{'maxTokens':2048,'temperature':0})
+  verification['diagnostics']['candidate_stdout']='synthetic-untrusted-detail'
+  with self.assertRaises(ValueError):self.invoke('request',value)
+ def test_repair_rejects_missing_or_contradictory_feedback(self):
+  with self.assertRaises(ValueError):self.invoke('request',{'previous':'{}'})
+  verification={"functional_tests":9,"independent_verification":"passed","artifact_sha256":"a"*64,"diagnostics":{
+   "schema":"sandprobe.functional-diagnostic/1","failure_kind":"passed","outputs_complete":True,"matched_cases":9,"expected_cases":9,"failed_case_ids":[]}}
+  with self.assertRaises(ValueError):self.invoke('request',{'previous':'{}','verification':verification})
  def test_guest_tls_keeps_frozen_ip_and_hostname(self):
   class Stream:
    def __enter__(self):return self

@@ -122,6 +122,25 @@ def validated_verification_diagnostic(value):
     return {**d, "failed_case_ids": list(ids)}
 
 
+def repair_feedback(verification):
+    """RUN-3: only validated enums/indices choose shipped public examples."""
+    diagnostic = validated_verification_diagnostic(verification)
+    if diagnostic["failure_kind"] == "passed":
+        raise ValueError("repair requested for passing verification")
+    examples = []
+    for i in diagnostic["failed_case_ids"]:
+        text, expected = CASES[i - 1]
+        outcome = {"returns": expected["ok"]} if "ok" in expected else {"raises": expected["error"]}
+        examples.append({"case": i, "input": text, **outcome})
+    detail = {"failure_kind": diagnostic["failure_kind"], "matched_cases": diagnostic["matched_cases"],
+              "expected_cases": diagnostic["expected_cases"], "failed_public_examples": examples}
+    return ("The fixed functional checks failed. Correct the implementation against these public synthetic test cases. "
+            "Each returns field is the exact summarize_csv(text) return value; raises names the required exception. "
+            "Do not wrap the return value in ok/error. Do not special-case the examples; implement the complete original CSV contract. "
+            + json.dumps(detail, sort_keys=True, separators=(",", ":"))
+            + " Return corrected solution.py JSON only.")
+
+
 def functional_checks(workspace, source_sha=None, *, home=None, diagnostics=None):
     # Production invokes this inside the Job only, never in the host runner.
     def finish(kind, matched=0, failed=None, complete=False):

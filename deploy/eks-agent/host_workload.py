@@ -163,7 +163,7 @@ def perform(runner, pod, config_sha):
                         "model_requests": status["model_requests"], "functional_tests": 9, "independent_verification": "passed",
                         "artifact": "/workspace/solution.py", "artifact_sha256": digest, "security_grade": "not_assessed"}
                 break
-            previous = {"previous": parsed["previous"]}
+            previous = {"previous": parsed["previous"], "verification": verified}
     except Exception:
         # RUN-19: never persist arbitrary exceptions or guest/provider diagnostics.
         status["failure_code"] = (status["step"] if status["stage"] == "execution" else status["stage"]) + "_failed"
