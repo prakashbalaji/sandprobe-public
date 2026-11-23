@@ -192,8 +192,9 @@ func writeCheck(name, path string) (obs.Target, error) {
 }
 
 // writeHow is the write_perm mechanism: the path is found if the agent can write it, or replace it, or any hop of its
-// symlink chain, through an ancestor directory it can write, or if it can make the path or such a directory writable
-// whatever its mode now (TWN-4); how then says so. Nothing is ever opened for writing.
+// symlink chain, through a real directory on the way it can write; the kernel answers that, for the agent as it is.
+// Failing that, it is found if a change of identity or mode could get the write (TWN-4's model, gain); how then says
+// so. Nothing is ever opened for writing.
 func writeHow(name, path string) (t obs.Target, how string, err error) {
 	t = obs.Target{Name: name}
 	n, err := resolve(path)
@@ -201,35 +202,58 @@ func writeHow(name, path string) (t obs.Target, how string, err error) {
 		return t, "", err
 	}
 	for _, h := range n.hops {
-		if dir, why := replacer(h); dir != "" {
+		dir, err := replacer(h)
+		if err != nil {
+			return t, "", err
+		}
+		if dir != "" {
 			t.State = "found"
-			if why != "" {
-				how = "it can make " + dir + " writable, as " + why
-			}
-			return t, how, nil
+			return t, "", nil
 		}
 	}
 	switch n.errno {
 	case syscall.ENOENT, syscall.ENOTDIR:
-		return absentTarget(name, n), "", nil
+		t = absentTarget(name, n)
 	case syscall.EACCES:
 		t.State, t.Errno = "refused", "EACCES"
-		return t, "", nil
-	}
-	err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
-	switch e := errnoOf(err); {
-	case err == nil:
-		t.State = "found"
-	case e == syscall.EACCES || e == syscall.EROFS:
-		if why := ownerPower(n.final, &n.st); why != "" {
-			t.State = "found"
-			return t, "it can make " + n.final + " writable, as " + why, nil
-		}
-		t.State, t.Errno = "refused", errName(e)
 	default:
-		return t, "", err
+		err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
+		switch e := errnoOf(err); {
+		case err == nil:
+			t.State = "found"
+			return t, "", nil
+		case e == syscall.EACCES || e == syscall.EROFS:
+			t.State, t.Errno = "refused", errName(e)
+		default:
+			return t, "", err
+		}
+	}
+	for _, h := range n.hops {
+		why, err := gain(h, 2, false)
+		if err != nil || why != "" {
+			if err == nil {
+				t = obs.Target{Name: name, State: "found"}
+			}
+			return t, why, err
+		}
 	}
 	return t, "", nil
+}
+
+// gain asks TWN-4's model whether a change could get the agent want (2 write, 4 read) on p, which the kernel refused
+// it as it is: how, when it can; an error the check makes unknown, when the model can't tell. follow: p's own link is
+// followed (a read, or a socket), rather than judged as an entry to replace; onlyOpen: only opening it counts.
+func gain(p string, want uint32, onlyOpen bool) (string, error) {
+	v, how, err := modelGain(p, want == 4 || onlyOpen, want, onlyOpen)
+	switch {
+	case err != nil:
+		return "", unknowable("%s: %v", p, err)
+	case v == cantTell:
+		return "", unknowable("%s", how)
+	case v == can:
+		return how, nil
+	}
+	return "", nil
 }
 
 // Capabilities that let the agent past a refusal whatever a path's mode is now (TWN-4), by bit.
@@ -284,97 +308,31 @@ func capList(caps uint64) string {
 	return strings.Join(held, ", ")
 }
 
-// modeCanChange: path isn't on a read-only mount, nor in procfs or sysfs, where no mode can change. When the
-// filesystem can't be told, it can (TWN-4).
-func modeCanChange(path string) bool {
-	var fs syscall.Statfs_t
-	return syscall.Statfs(path, &fs) != nil ||
-		fs.Flags&1 /* ST_RDONLY */ == 0 && fs.Type != 0x9fa0 /* PROC_SUPER_MAGIC */ && fs.Type != 0x62656572 /* SYSFS_MAGIC */
-}
-
-// ownerPower says why the agent could make path writable whatever its mode now, or "" (TWN-4): it owns it, holds an
-// owner's power over any file, or holds CAP_SETGID where a group may write it; none of them where no mode can change.
-func ownerPower(path string, st *syscall.Stat_t) string {
-	if !modeCanChange(path) {
-		return ""
+// replacer: some real directory on the way to p lets the agent as it is create, rename or remove p (or the directory
+// leading to it): writable and searchable, by the kernel's own check; not protected by a sticky bit, which spares
+// entries the agent doesn't own unless it holds CAP_FOWNER; not procfs or sysfs, where nothing is created; and not the
+// parent of a mount point. Every link on the way is followed first, so each directory judged is the one the kernel
+// traverses (TWN-4). It returns that directory, or "".
+func replacer(p string) (string, error) {
+	ns, err := pathNodes(p, false)
+	if err != nil {
+		return "", unknowable("%v", err)
 	}
-	caps := agentCaps()
-	group := uint32(0o020) // a group may write the file, or write and search the directory
-	if st.Mode&syscall.S_IFMT == syscall.S_IFDIR {
-		group = 0o030
-	}
-	switch {
-	case int(st.Uid) == os.Geteuid():
-		return "it owns it"
-	case caps&ownerPowers != 0:
-		return "it holds " + capList(caps&ownerPowers)
-	case caps&capSetgid != 0 && st.Mode&group == group:
-		return "it holds CAP_SETGID and a group may write it"
-	}
-	return ""
-}
-
-// readPower says why the agent could read path, which refused it, whatever its mode now, or "" (TWN-4): it owns the
-// file (where its mode can change), or a directory on the way that refuses it a search; owning a directory it can
-// already search gives it no read of another's file in it.
-func readPower(path string) string {
-	euid := os.Geteuid()
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err == nil {
-		if int(st.Uid) == euid && modeCanChange(path) {
-			return "it owns " + path
+	euid := uint32(os.Geteuid())
+	fowner := theAgent().eff&capFowner != 0
+	for j := len(ns) - 2; j >= 0; j-- {
+		d, c := ns[j], ns[j+1]
+		if !d.seen || !d.exists || d.noEntries ||
+			syscall.Faccessat(unixAtFDCWD, d.path, 3 /* W_OK|X_OK */, atEAccess) != nil {
+			continue
 		}
-		return ""
+		if c.seen && c.exists && (c.mountPoint ||
+			d.mode&syscall.S_ISVTX != 0 && !fowner && d.uid != euid && c.uid != euid) {
+			continue
+		}
+		return d.path, nil
 	}
-	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
-		var ds syscall.Stat_t
-		if syscall.Stat(dir, &ds) == nil && int(ds.Uid) == euid && modeCanChange(dir) &&
-			syscall.Faccessat(unixAtFDCWD, dir, 1 /* X_OK */, atEAccess) != nil {
-			return "it owns " + dir + ", which refuses it a search, and can change that"
-		}
-		if dir == "/" {
-			return ""
-		}
-	}
-}
-
-// replacer: some ancestor directory of p lets the agent create, rename or remove p (or the directory leading to it):
-// writable and searchable, or one it can make so (ownerPower); not protected by a sticky bit, which spares entries the
-// agent doesn't own unless it holds an owner's power; and not the parent of a mount point. Mount points are told by a
-// device change, which misses a bind mount of the same filesystem; that errs towards a finding, never a pass. It
-// returns that directory, and why the agent can make it writable when it must first, or "" for none.
-func replacer(p string) (dir, how string) {
-	euid := os.Geteuid()
-	powers := agentCaps()&(capChown|capFowner|capSetuid) != 0 // CAP_DAC_OVERRIDE doesn't pass a sticky bit
-	child := p
-	for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
-		var ds, cs syscall.Stat_t
-		if !pseudo(dir) && syscall.Lstat(dir, &ds) == nil {
-			how, ok := "", syscall.Faccessat(unixAtFDCWD, dir, 3 /* W_OK|X_OK */, atEAccess) == nil
-			if !ok {
-				how = ownerPower(dir, &ds)
-				ok = how != ""
-			}
-			if ok {
-				exists := syscall.Lstat(child, &cs) == nil
-				mount := exists && cs.Dev != ds.Dev // a mount point can't be renamed or removed (EBUSY)
-				if !mount && (!exists || !stickySpares(ds, cs, euid, powers)) {
-					return dir, how
-				}
-			}
-		}
-		if dir == "/" {
-			return "", ""
-		}
-		child = dir
-	}
-}
-
-// stickySpares: a sticky directory dir keeps the agent from removing or renaming its existing entry child, which holds
-// only while the agent owns neither and has no power over the entry (CAP_FOWNER passes the sticky bit outright;
-// CAP_CHOWN and CAP_SETUID make the agent the entry's owner).
-func stickySpares(dir, child syscall.Stat_t, euid int, powers bool) bool {
-	return dir.Mode&syscall.S_ISVTX != 0 && !powers && int(dir.Uid) != euid && int(child.Uid) != euid
+	return "", nil
 }
 
 // pseudo: procfs and sysfs directories, where faccessat says root may write but nothing can be created, renamed or
@@ -388,10 +346,10 @@ func pseudo(dir string) bool {
 }
 
 // socketCheck is AMP-4's use of write_perm: a control socket is found only if it exists as a socket and the agent
-// has write permission on it, which is what connect needs, or can give itself that permission (ownerPower, TWN-4; how then
-// says so). A missing socket exposes nothing, however creatable its path; it must be verified absent. Something other
-// than a socket at the path is unknown, and so is one behind a directory the agent can't search but could make
-// searchable.
+// has write permission on it, which is what connect needs, or could give itself that permission by a change of
+// identity or mode (TWN-4's model; how then says so). Rebinding its path is no way to its server, so replacing doesn't
+// count. A missing socket exposes nothing, however creatable its path; it must be verified absent. Something other than
+// a socket at the path is unknown.
 func socketCheck(name, path string) (t obs.Target, how string, err error) {
 	t = obs.Target{Name: name}
 	n, err := resolve(path)
@@ -402,35 +360,28 @@ func socketCheck(name, path string) (t obs.Target, how string, err error) {
 	case syscall.ENOENT, syscall.ENOTDIR:
 		return absentTarget(name, n), "", nil
 	case syscall.EACCES:
-		for dir := filepath.Dir(n.final); ; dir = filepath.Dir(dir) {
-			var ds syscall.Stat_t
-			if syscall.Lstat(dir, &ds) == nil {
-				if why := ownerPower(dir, &ds); why != "" {
-					return t, "", unknowable("%s is behind a directory the agent can't search, but it can make %s searchable, as %s", path, dir, why)
-				}
-			}
-			if dir == "/" {
-				break
-			}
-		}
 		t.State, t.Errno = "refused", "EACCES"
-		return t, "", nil
-	}
-	if n.st.Mode&syscall.S_IFMT != syscall.S_IFSOCK {
-		return t, "", unknowable("%s exists but isn't a socket", path)
-	}
-	err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
-	switch e := errnoOf(err); {
-	case err == nil:
-		t.State = "found"
-	case e == syscall.EACCES || e == syscall.EROFS:
-		if why := ownerPower(n.final, &n.st); why != "" {
-			t.State = "found"
-			return t, "it can make " + n.final + " writable, as " + why, nil
-		}
-		t.State, t.Errno = "refused", errName(e)
 	default:
-		return t, "", err
+		if n.st.Mode&syscall.S_IFMT != syscall.S_IFSOCK {
+			return t, "", unknowable("%s exists but isn't a socket", path)
+		}
+		err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
+		switch e := errnoOf(err); {
+		case err == nil:
+			t.State = "found"
+			return t, "", nil
+		case e == syscall.EACCES || e == syscall.EROFS:
+			t.State, t.Errno = "refused", errName(e)
+		default:
+			return t, "", err
+		}
+	}
+	why, err := gain(path, 2, true)
+	if err != nil || why != "" {
+		if err == nil {
+			t = obs.Target{Name: name, State: "found"}
+		}
+		return t, why, err
 	}
 	return t, "", nil
 }

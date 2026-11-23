@@ -226,7 +226,7 @@ func TestSocketCheck(t *testing.T) {
 	}
 	// the agent's own socket at mode 0: no write permission now, but its owner can give itself one (TWN-4)
 	os.Chmod(sock, 0)
-	if tg, how, err := socketCheck(sock, sock); err != nil || tg.State != "found" || !root && !strings.Contains(how, "as it owns it") {
+	if tg, how, err := socketCheck(sock, sock); err != nil || tg.State != "found" || !root && !strings.Contains(how, "which it owns") {
 		t.Errorf("the agent's own socket at mode 0: want found (as it owns it, unless root writes it outright), got %+v %q %v", tg, how, err)
 	}
 	// AMP-4 over a missing socket whose directory is writable: absent, never a control_socket finding
@@ -560,8 +560,9 @@ func TestSecretFiles(t *testing.T) {
 	}
 }
 
-// write_perm counts a refusal only while the agent can't make the path writable either (TWN-4): a directory it owns,
-// at any mode, or an owner's power over any file, makes the path found, saying how; neither counts in procfs.
+// write_perm counts a refusal only while the agent can't make the path writable either (TWN-4): a mode it can change,
+// a uid it can become, or a capability it can raise makes the path found, saying how. Neither counts in a read-only
+// /proc/sys. TestModelAgainstKernel covers the combinations.
 func TestWriteOwnerPower(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	os.Mkdir(home, 0o755)
@@ -569,54 +570,34 @@ func TestWriteOwnerPower(t *testing.T) {
 	os.WriteFile(rc, nil, 0o444)
 	os.Chmod(home, 0o555)
 	t.Cleanup(func() { os.Chmod(home, 0o755) })
-	tg, how, err := writeHow("~/.bashrc", rc)
-	switch {
-	case err != nil || tg.State != "found":
-		t.Errorf("a file in the agent's own 0555 directory: want found, got %+v %v", tg, err)
-	case root && how != "": // root can write the directory now, whatever its mode
-		t.Errorf("as root: want found outright, got %q", how)
-	case !root && how != "it can make "+home+" writable, as it owns it":
-		t.Errorf("want found as the directory's owner, got %q", how)
+	// under /tmp the agent can replace its own temporary directory outright; the fixture evidence-owned, and the
+	// model's "owned read-only directory" case, show the owner's change of mode where nothing else reaches
+	if tg, _, err := writeHow("~/.bashrc", rc); err != nil || tg.State != "found" {
+		t.Errorf("a file of its own in its own 0555 directory: want found, got %+v %v", tg, err)
 	}
 	if root {
 		return
 	}
 	defer func(f func() uint64) { agentCaps = f }(agentCaps)
 	for caps, want := range map[uint64]string{
-		0:      "",
-		1 << 3: "it can make /usr/bin writable, as it holds CAP_FOWNER",
-		1 << 0: "it can make /usr/bin writable, as it holds CAP_CHOWN",
-		1 << 7: "it can make /usr/bin writable, as it holds CAP_SETUID",
-		1 << 4: "", // CAP_FSETID changes no mode
+		0:              "",
+		capFowner:      "changing the mode of /usr/bin/ls, with CAP_FOWNER",
+		capChown:       "changing the mode of /usr/bin/ls, taking it over with CAP_CHOWN",
+		capDacOverride: "raising CAP_DAC_OVERRIDE",
+		capSetuid:      "as its owner, uid 0 (CAP_SETUID)",
+		capSetgid:      "", // /usr/bin and ls are no group's to write
+		1 << 4:         "", // CAP_FSETID changes no mode
 	} {
 		agentCaps = func() uint64 { return caps }
 		tg, how, err := writeHow("/usr/bin/ls", "/usr/bin/ls")
-		if err != nil || how != want || (want == "") != (tg.State == "refused") {
+		if err != nil || (want == "") != (how == "") || !strings.Contains(how, want) || (want == "") != (tg.State == "refused") {
 			t.Errorf("caps %#x: want %q, got %+v %q %v", caps, want, tg, how, err)
 		}
-		// procfs: no mode there can change, so no owner's power makes a kernel setting writable
-		if tg, how, _ := writeHow("/proc/sys/kernel/sysrq", "/proc/sys/kernel/sysrq"); tg.State != "refused" || how != "" {
-			t.Errorf("caps %#x: a kernel setting: want refused, got %+v %q", caps, tg, how)
+		// a read-only /proc/sys (the usual container) stops every power; TestSetuidProcfs covers a writable one
+		if tg, how, _ := writeHow("/proc/sys/kernel/sysrq", "/proc/sys/kernel/sysrq"); readOnly("/proc/sys/kernel/sysrq") &&
+			(tg.State != "refused" || how != "") {
+			t.Errorf("caps %#x: a kernel setting on a read-only mount: want refused, got %+v %q", caps, tg, how)
 		}
-	}
-}
-
-// A sticky directory spares an entry the agent doesn't own, unless the agent owns the directory or holds an owner's
-// power: CAP_FOWNER passes the bit, CAP_CHOWN and CAP_SETUID make the agent the entry's owner.
-func TestStickySpares(t *testing.T) {
-	sticky := syscall.Stat_t{Mode: syscall.S_IFDIR | syscall.S_ISVTX | 0o777, Uid: 0}
-	rootEntry := syscall.Stat_t{Uid: 0}
-	if !stickySpares(sticky, rootEntry, 1000, false) {
-		t.Error("root's entry in root's sticky directory spares an agent with no power")
-	}
-	if stickySpares(sticky, rootEntry, 1000, true) {
-		t.Error("an owner's power passes the sticky bit")
-	}
-	if stickySpares(sticky, syscall.Stat_t{Uid: 1000}, 1000, false) || stickySpares(syscall.Stat_t{Mode: syscall.S_IFDIR | syscall.S_ISVTX, Uid: 1000}, rootEntry, 1000, false) {
-		t.Error("the agent's own entry, or its own sticky directory, spares nothing")
-	}
-	if stickySpares(syscall.Stat_t{Mode: syscall.S_IFDIR | 0o777}, rootEntry, 1000, false) {
-		t.Error("a directory that isn't sticky spares nothing")
 	}
 }
 
@@ -638,7 +619,7 @@ func TestJudgeWrite(t *testing.T) {
 		t.Errorf("CAP_SYS_ADMIN: want unknown naming it, got %+v", o)
 	}
 	agentCaps = func() uint64 { return 1 << 3 }
-	if o := writable(e, ck); o.Result != obs.Finding || !strings.Contains(o.Evidence, "as it holds CAP_FOWNER") {
+	if o := writable(e, ck); o.Result != obs.Finding || !strings.Contains(o.Evidence, "with CAP_FOWNER") {
 		t.Errorf("CAP_FOWNER: want a finding saying how, got %+v", o)
 	}
 	sys, _ := catalog.Get("AMP-8.sys")
@@ -651,7 +632,7 @@ func TestJudgeWrite(t *testing.T) {
 }
 
 // TWN-4 on the read side: a refusal counts only while the agent can't make the file readable either. Its own file at
-// mode 0000 can't pass, nor anything refused while it holds a read power; an absence stays a fact; a process file's
+// mode 0000 can't pass, nor anything refused while it holds a read power; an absence stays a fact under one; a process file's
 // refusal can't pass while the agent holds a power over ptrace's rules. Nothing is read to find out.
 func TestRefusalsHold(t *testing.T) {
 	if root {
@@ -672,7 +653,7 @@ func TestRefusalsHold(t *testing.T) {
 		}
 		return e.judge(sec3, []obs.Target{tg}, nil, true, true, func([]obs.Target) (string, string) { return "nonempty", "x" })
 	}
-	if o := judge(own, own); o.Result != obs.Unknown || !strings.Contains(o.Reason, "it owns "+own) {
+	if o := judge(own, own); o.Result != obs.Unknown || !strings.Contains(o.Reason, "changing the mode of "+own+", which it owns") {
 		t.Errorf("the agent's own file at mode 0000: want unknown, as it owns it, got %+v", o)
 	}
 	if o := judge("/etc/shadow", "/etc/shadow"); o.Result != obs.Pass { // root's, and nothing lets the agent past it
@@ -684,10 +665,12 @@ func TestRefusalsHold(t *testing.T) {
 			t.Errorf("caps %#x: want unknown naming %s, got %+v", caps, capList(caps), o)
 		}
 	}
-	agentCaps = func() uint64 { return capSysAdmin }
+	// a read power doesn't make a missing file exist; CAP_SYS_ADMIN, which can unmount what hides one, is
+	// TestReachPastEarlyReturns'
+	agentCaps = func() uint64 { return capDacReadSearch | capFowner | capSetuid }
 	absent := obs.Target{Name: "/nowhere/credentials", State: "absent", Errno: "ENOENT", ParentSearchable: true}
 	if o := e.judge(sec3, []obs.Target{absent}, nil, true, true, nil); o.Result == obs.Unknown {
-		t.Errorf("an absent file stays absent whatever the agent holds: want it judged as before, got %+v", o)
+		t.Errorf("an absent file stays absent under a read power: want it judged as before, got %+v", o)
 	}
 	sec2, _ := catalog.Get("SEC-2")
 	refused := obs.Target{Name: "/proc/1/environ", State: "refused", Errno: "EACCES"}
@@ -723,5 +706,68 @@ func TestTwinReadPower(t *testing.T) {
 	if o := (&env{tw: tw}).judge(&catalog.Check{ID: "SEC-3", Mechanism: "file_read", Kind: catalog.TwoSided}, nil, nil,
 		tw.readOK, tw.readRefused, nil); o.Result == obs.Pass && o.Proof.TwinRefused {
 		t.Errorf("a pass with the refusing twin shown: %+v", o)
+	}
+}
+
+// TWN-4's identity powers in procfs (test/probe.sh runs this as nobody in a container whose /proc/sys is writable):
+// no mode can change there, but CAP_SETUID makes the agent uid 0, which proc gives a sysctl's owner bits, so a kernel
+// setting root may write is writable to it. AMP-8's findings are proofs, so that leaves the check unknown, never a
+// pass. On a read-only /proc/sys it stays a pass: the mount stops everyone.
+func TestSetuidProcfs(t *testing.T) {
+	if root {
+		t.Skip("root writes a sysctl outright")
+	}
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	e := testEnv(t, map[string][]string{"AMP-8.sys": {"/proc/sys/kernel/sysrq"}})
+	ck, _ := catalog.Get("AMP-8.sys")
+	agentCaps = func() uint64 { return 0 }
+	if o := writable(e, ck); o.Result != obs.Pass {
+		t.Fatalf("no capabilities: want a pass, got %+v", o)
+	}
+	agentCaps = func() uint64 { return capSetuid }
+	o := writable(e, ck)
+	if readOnly("/proc/sys/kernel/sysrq") {
+		if o.Result != obs.Pass {
+			t.Errorf("CAP_SETUID, /proc/sys read-only: want a pass, got %+v", o)
+		}
+		t.Skip("/proc/sys is read-only here; test/probe.sh runs this with it writable")
+	}
+	if o.Result != obs.Unknown || !strings.Contains(o.Reason, "as uid 0 (CAP_SETUID)") {
+		t.Errorf("CAP_SETUID, /proc/sys writable: want unknown naming it, got %+v", o)
+	}
+}
+
+// TWN-4's everywhere rule comes before every early negative a file check can return: a pass, an allowed absence, a
+// scoped_out, AMP-1's absence. Each one, under CAP_SYS_ADMIN, is unknown naming it; with no capability, the same call
+// returns its negative, so each early return is really reached.
+func TestReachPastEarlyReturns(t *testing.T) {
+	if root {
+		t.Skip("root finds the write targets outright")
+	}
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	chdir(t, t.TempDir())
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("PATH", t.TempDir())
+	e := testEnv(t, map[string][]string{"AMP-4": {missing + ".sock"}, "SEC-3": {missing}, "AMP-1": {missing + "-sudo"},
+		"PER-3": {"/etc/systemd/system"}, "AMP-8.sys": {"/proc/sys/kernel/sysrq"}})
+	get := func(id string) *catalog.Check { ck, _ := catalog.Get(id); return ck }
+	for name, run := range map[string]func() obs.Observation{
+		"AMP-4 absent":         func() obs.Observation { return sockets(e, get("AMP-4")) },
+		"SEC-3 absent":         func() obs.Observation { return sec3(e, get("SEC-3")) },
+		"SEC-2 scoped_out":     func() obs.Observation { return secProc(e, get("SEC-2"), "environ") },
+		"SEC-5 scoped_out":     func() obs.Observation { return secProc(e, get("SEC-5"), "mem") },
+		"AMP-8.blk scoped_out": func() obs.Observation { return amp8blk(e, get("AMP-8.blk")) },
+		"AMP-1 absent":         func() obs.Observation { return amp1(e, get("AMP-1")) },
+		"PER-3 pass":           func() obs.Observation { return writable(e, get("PER-3")) },
+		"AMP-8.sys pass":       func() obs.Observation { return writable(e, get("AMP-8.sys")) },
+	} {
+		agentCaps = func() uint64 { return 0 }
+		if o := run(); o.Result == obs.Unknown || o.Result == obs.Finding {
+			t.Errorf("%s, no capability: want its negative, got %+v", name, o)
+		}
+		agentCaps = func() uint64 { return capSysAdmin }
+		if o := run(); o.Result != obs.Unknown || !strings.Contains(o.Reason, "CAP_SYS_ADMIN") {
+			t.Errorf("%s, CAP_SYS_ADMIN: want unknown naming it, got %+v", name, o)
+		}
 	}
 }

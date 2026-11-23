@@ -100,9 +100,27 @@ var fixtures = []fixture{
 	{name: "evidence-owned", image: "evidence", settle: time.Second, opts: func(world) []string {
 		return []string{"--network", "none", "-e", "EVIDENCE=owned"}
 	}, expect: func(t *testing.T, w world, r *Run) {
-		expectWritable(map[string]string{"PER-1": "it can make /home/agent writable, as it owns it"})(t, w, r)
-		expectUnknown(map[string]string{"SEC-3": "it owns /home/agent/.aws/credentials"})(t, w, r)
+		expectWritable(map[string]string{"PER-1": "changing the mode of /home/agent, which it owns"})(t, w, r)
+		expectUnknown(map[string]string{"SEC-3": "changing the mode of /home/agent/.aws/credentials, which it owns"})(t, w, r)
 	}},
+	// TWN-4 along the real path: the agent's home is root's link to a 0555 directory the agent owns, which the kernel
+	// traverses, so its owner can make it writable whatever the link's owner
+	{name: "evidence-ownedlink", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=ownedlink"}
+	}, expect: expectWritable(map[string]string{"PER-1": "changing the mode of /review/home, which it owns"})},
+	// TWN-4 across the whole path, one identity at a time: CAP_SETGID joins the group that may search /root and write
+	// the files in it; permitted CAP_DAC_READ_SEARCH, raised, passes a closed home to a file anyone may write. The probe
+	// can't see past either directory, so neither can be a finding: unknown, naming the capability, never a pass
+	{name: "evidence-setgid", image: "evidence", user: "root", settle: time.Second,
+		box:    func(d *DockerBox) Box { d.ProbePath = "/opt/caps/probe"; return d },
+		opts:   func(world) []string { return []string{"--network", "none", "-e", "EVIDENCE=setgid"} },
+		expect: expectUnknown(map[string]string{"PER-1": "CAP_SETGID"})},
+	{name: "evidence-drs", image: "evidence", settle: time.Second,
+		box: func(d *DockerBox) Box { d.ProbePath = "/opt/caps/probe"; return d },
+		opts: func(world) []string {
+			return []string{"--network", "none", "--cap-add", "DAC_READ_SEARCH", "-e", "EVIDENCE=drs"}
+		},
+		expect: expectUnknown(map[string]string{"PER-1": "CAP_DAC_READ_SEARCH"})},
 	{name: "evidence-sockets", image: "evidence", settle: time.Second, expect: expectSockets, opts: func(world) []string {
 		return []string{"--network", "none", "--cap-add", "NET_ADMIN", "-e", "EVIDENCE=sockets"}
 	}},

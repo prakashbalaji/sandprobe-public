@@ -30,3 +30,8 @@ echo "== as 65534:65534 in $image, holding CAP_DAC_READ_SEARCH and CAP_DAC_OVERR
 docker run --rm --network none --user 0:0 --cap-add DAC_READ_SEARCH -v "$out:/sp:ro" "$image" setpriv --reuid=65534 \
   --regid=65534 --clear-groups --inh-caps=-all,+dac_read_search,+dac_override --ambient-caps=-all,+dac_read_search,+dac_override \
   /sp/probe.test -test.v -test.run '^TestTwinReadPower$'
+# TWN-4's identity powers in procfs: as nobody in a container whose /proc/sys is writable, a kernel setting root may
+# write leaves AMP-8.sys unknown for an agent holding CAP_SETUID (the test gives it the capability; it holds none).
+echo "== as 65534:65534 in $image, /proc/sys writable"
+docker run --rm --network none --privileged --user 65534:65534 -v "$out:/sp:ro" "$image" /sp/probe.test -test.v \
+  -test.run '^TestSetuidProcfs$'
