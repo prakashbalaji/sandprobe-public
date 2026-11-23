@@ -2478,6 +2478,23 @@ outside v1 ("Not in v1"), so it lives behind a build tag and never ships.
   is the only place that grants `contents: write` or `write-all`; the repository's default workflow permission stays
   read.
 
+## AWS Nitro setup recovery, 23 November 2026
+
+So an expired AWS session can't leave `deploy/eks.sh` stuck behind a state file that records nothing.
+
+- **CLN-2 No record before AWS answers.** `deploy/eks.sh up` asks AWS who the profile is (`aws sts get-caller-identity`,
+  with the profile and region) before it writes its state file. If that fails, such as on an expired SSO session, up
+  stops with a fixed message that names the profile, says nothing was recorded or created, and gives the commands that
+  show AWS's error and sign an SSO profile in again. It prints none of the AWS CLI's own output. `down` makes no such
+  check, so a recorded deployment can be retired while the session is expired. up writes `crole`, `nrole` and
+  `cluster` each before its create, so a state file with none of them records no create: an earlier up stopped before
+  its first one, on a failed read or before this rule. For such a file, `status` and up's refusal say so before any AWS
+  call, and print the command that retires it, then say to run up again. The command names the profile, the region,
+  and the state file when it isn't the default, so it reaches the same file as pasted. `down` on such a file makes no
+  AWS call, keeps the record as `<state>.down-<time>`, as every down does, and says nothing was created. A state file
+  with any of those keys is handled as before: down deletes what it records by ID and confirms each is gone, and a
+  cluster asked for but never seen stays unresolved (PRV-1).
+
 ## Tests
 
 Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
@@ -2639,6 +2656,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | POC-6 | the relay against a local TLS server at a stand-in pinned IP: an owned nonce relayed with bytes counted and the pin intact through it; a non-owned SNI, a missing SNI and a name that would resolve elsewhere each refused, with no SNI and no payload in the log; `ready` only once listening; attribution unknown with a missing or truncated log; `look` against a planted marker, its absence, and a stop at the first sighting with no later row run |
 | POC-7, POC-8 | the summary from fixture reports: every finding bucketed by the table, an unbucketed one refused, no letter grade, the HTML under OUT-2's CSP with hostile strings rendered as text |
 | POC-9 | a fake Modal API: a sandbox terminated and confirmed by ID and tag, a failed terminate reported with its fix |
+| CLN-2 | `deploy/eks_test.sh` with a fake `aws`, run with and without `DURABLE_STATE=1`: up with a failing `sts get-caller-identity` writes no state file, makes no other AWS call and prints none of the fake's error; a failed read after it leaves a state file with no `crole`, `nrole` or `cluster`, and then `status` and up refuse with no AWS call, printing the retire command; that command, run as printed with `PROFILE` and `STATE` unset, retires the record with no AWS call and says nothing was created; and up then gets past its refusal to the identity check |
 
 ## Open questions
 
