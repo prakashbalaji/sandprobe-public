@@ -108,6 +108,49 @@ def volume_operation(client,req):
     api.delete_volume(volume_id,_request_timeout=60)
     return {'id':volume_id,'deleted_request':True}
 
+def rejected_create(client,req):
+    """RUN-24: control-plane refusal + independent absence, never name adoption."""
+    import hashlib
+    from datetime import datetime,timedelta,timezone
+    from daytona_api_client.api.audit_api import AuditApi
+    volume=workload_volume(req)
+    if (not volume or not re.fullmatch(r'sandprobe-[a-f0-9]{24}',req.get('name',''))
+            or not re.fullmatch(r'n[a-f0-9]{24}',req.get('nonce',''))
+            or not UUID.fullmatch(req.get('snapshot_id','')) or not req.get('organization')):
+        raise ValueError('refusal binding invalid')
+    start=datetime.fromisoformat(req['requested'].replace('Z','+00:00'))
+    now=datetime.now(timezone.utc)
+    if start.tzinfo is None or now<start+timedelta(seconds=120):
+        raise ValueError('create may still be in flight')
+    expected={'name':req['name'],'target':'us','env':{},'labels':{'sandprobe_run':req['nonce']},
+        'public':False,'autoDeleteInterval':0,'autoStopInterval':15,'autoPauseInterval':0,
+        'volumes':[{'volumeId':volume['id'],'mountPath':volume['mount_path']}],
+        'snapshot':req['snapshot_id'],'user':'root','networkAllowList':req['network_allow_list']}
+    logs=AuditApi(client._api_client).get_organization_audit_logs(req['organization'],limit=50,
+        var_from=start-timedelta(seconds=1),to=start+timedelta(seconds=110),_request_timeout=25)
+    if logs.next_token or logs.total_pages is None or logs.total_pages>1:
+        raise ValueError('audit incomplete')
+    matches=[]
+    for event in logs.items:
+        body=(event.metadata or {}).get('body')
+        if not isinstance(body,dict):continue
+        labels=body.get('labels')
+        nonce=labels.get('sandprobe_run') if isinstance(labels,dict) else None
+        if body.get('name')!=req['name'] and nonce!=req['nonce']:continue
+        at=datetime.fromisoformat(timestamp(event.created_at).replace('Z','+00:00'))
+        if (event.organization_id!=req['organization'] or event.action!='create'
+                or event.target_type!='sandbox' or event.status_code!=400 or event.target_id
+                or not start-timedelta(seconds=1)<=at<=start+timedelta(seconds=110)
+                or body!=expected or not event.id):
+            raise ValueError('create refusal unproven')
+        matches.append({'id':event.id,'at':timestamp(event.created_at),'organization':event.organization_id,'body':body,'status':400})
+    if len(matches)!=1:raise ValueError('create refusal ambiguous')
+    listing=client._sandbox_api.list_sandboxes(name=req['name'],limit=10,
+        include_errored_deleted=True,_request_timeout=25)
+    if listing.items or listing.next_cursor:raise ValueError('create absence unproven')
+    digest=hashlib.sha256(json.dumps(matches[0],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return {'refused':True,'evidence_sha256':digest}
+
 def dispatch(req):
     if importlib.metadata.version('daytona')!='0.198.0':raise ValueError('unsupported SDK')
     if req['op']=='check':return {'version':'0.198.0'}
@@ -119,6 +162,7 @@ def dispatch(req):
     client=Daytona(DaytonaConfig(api_key=req['key'],api_url=API,target='us'))
     # Disable SDK retries, with origin/redirect guards also enforced at transport.
     client._api_client.configuration.retries=0
+    if req['op']=='rejected_create':return rejected_create(client,req)
     if req['op'] in ('volume_create','volume_lookup','volume_delete'):
         return volume_operation(client,req)
     if req['op']=='available':

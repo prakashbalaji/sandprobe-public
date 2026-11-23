@@ -5,6 +5,41 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('daytona_runtime',Path(__file__).with_name('daytona_runtime.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 SID='12345678-1234-1234-1234-123456789abc'
 class Tests(unittest.TestCase):
+ def test_rejected_create_requires_exact_audit_and_independent_absence(self):
+  import types,copy
+  from datetime import datetime,timedelta,timezone
+  from daytona_api_client.api.audit_api import AuditApi
+  now=datetime.now(timezone.utc);start=now-timedelta(seconds=180)
+  req={'name':'sandprobe-'+'a'*24,'nonce':'n'+'b'*24,'snapshot_id':SID,
+       'organization':'fixture-org','requested':start.isoformat(),'network_allow_list':'52.94.0.1/32',
+       'volume_binding':{'id':SID,'mount_path':'/persist','subpath':''}}
+  body={'name':req['name'],'target':'us','env':{},'labels':{'sandprobe_run':req['nonce']},
+        'public':False,'autoDeleteInterval':0,'autoStopInterval':15,'autoPauseInterval':0,
+        'volumes':[{'volumeId':SID,'mountPath':'/persist'}],'snapshot':SID,'user':'root',
+        'networkAllowList':req['network_allow_list']}
+  event=types.SimpleNamespace(id='audit-fixture',created_at=start+timedelta(seconds=1),
+       organization_id='fixture-org',action='create',target_type='sandbox',target_id=None,
+       status_code=400,metadata={'body':body},error_message='NEVER_EXPORT_AUDIT_TEXT')
+  def run(events=None,listing=None,request=None,pages=1,token=None):
+   logs=types.SimpleNamespace(items=events if events is not None else [event],next_token=token,total_pages=pages)
+   audit=types.SimpleNamespace(get_organization_audit_logs=lambda *a,**kw:logs)
+   sandboxes=types.SimpleNamespace(list_sandboxes=lambda **kw:listing or types.SimpleNamespace(items=[],next_cursor=None))
+   client=types.SimpleNamespace(_api_client=None,_sandbox_api=sandboxes)
+   with patch('daytona_api_client.api.audit_api.AuditApi',return_value=audit):
+    return m.rejected_create(client,request or req)
+  result=run();self.assertTrue(result['refused']);self.assertEqual(set(result),{'refused','evidence_sha256'})
+  self.assertRegex(result['evidence_sha256'],r'^[a-f0-9]{64}$');self.assertNotIn('NEVER_EXPORT',json.dumps(result))
+  for key,value in [('organization_id','other'),('status_code',201),('target_id',SID),('action','delete'),('target_type','volume'),('created_at',now)]:
+   changed=copy.deepcopy(event);setattr(changed,key,value)
+   with self.subTest(key=key),self.assertRaises(ValueError):run([changed])
+  for key,value in [('name','other'),('labels',{'sandprobe_run':'other'}),('snapshot','other'),('networkAllowList','other'),('volumes',[]),('env',{'UNEXPECTED':'never export'})]:
+   changed=copy.deepcopy(event);changed.metadata['body'][key]=value
+   with self.subTest(key=key),self.assertRaises(ValueError):run([changed])
+  for kwargs in [{'events':[]},{'events':[event,event]},{'pages':2},{'token':'next'},
+                 {'listing':types.SimpleNamespace(items=[object()],next_cursor=None)},
+                 {'listing':types.SimpleNamespace(items=[],next_cursor='next')},
+                 {'request':dict(req,requested=now.isoformat())}]:
+   with self.subTest(kwargs=list(kwargs)),self.assertRaises(ValueError):run(**kwargs)
  def test_persistent_mount_uses_exact_sdk_id_path_and_subpath(self):
   import types,daytona
   seen=[]

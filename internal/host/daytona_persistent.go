@@ -45,16 +45,18 @@ func (c *DaytonaClient) CleanupDaytonaPersistentState(ctx context.Context, path 
 		return result, err
 	}
 	for _, consumer := range v.journal.Consumers {
-		result.BoxIDs = append(result.BoxIDs, consumer.ID)
-		if consumer.Gone {
+		if consumer.ID != "" {
+			result.BoxIDs = append(result.BoxIDs, consumer.ID)
+		}
+		if consumer.Gone || consumer.RefusalSHA256 != "" {
 			continue
 		}
 		if _, err = os.Lstat(consumer.Journal); err != nil {
 			return result, errors.New("persistent consumer journal missing; absence unproven")
 		}
 		id, _, cleanupErr := c.CleanupDaytonaState(ctx, consumer.Journal)
-		if id != "" {
-			result.BoxIDs[len(result.BoxIDs)-1] = id
+		if id != "" && consumer.ID == "" {
+			result.BoxIDs = append(result.BoxIDs, id)
 		}
 		if cleanupErr != nil {
 			return result, cleanupErr
@@ -65,6 +67,9 @@ func (c *DaytonaClient) CleanupDaytonaPersistentState(ctx context.Context, path 
 		return result, err
 	}
 	for _, consumer := range v.journal.Consumers {
+		if consumer.RefusalSHA256 != "" {
+			continue
+		}
 		if consumer.ID == "" || !consumer.Gone {
 			return result, errors.New("persistent consumer deletion unconfirmed")
 		}

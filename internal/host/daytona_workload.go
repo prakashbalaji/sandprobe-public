@@ -304,7 +304,7 @@ func (c *DaytonaClient) CleanupDaytonaState(ctx context.Context, path string) (s
 	}
 	raw, e := io.ReadAll(io.LimitReader(f, 65537))
 	var j daytonaJournal
-	if e != nil || strictjson.Decode(raw, 65536, &j) != nil || !daytonaID.MatchString(j.ID) || j.Nonce == "" || (j.Volume == nil && (j.Born == "" || j.Organization == "")) {
+	if e != nil || strictjson.Decode(raw, 65536, &j) != nil || (j.ID != "" && !daytonaID.MatchString(j.ID)) || j.Nonce == "" || (j.Volume == nil && (j.ID == "" || j.Born == "" || j.Organization == "")) {
 		return "", "", errors.New("cleanup identity incomplete; retain intent")
 	}
 	b := &DaytonaBox{client: c, journal: j, state: path}
@@ -327,6 +327,26 @@ func (c *DaytonaClient) CleanupDaytonaState(ctx context.Context, path string) (s
 		}
 		if !found {
 			return j.ID, "", errors.New("persistent cleanup consumer identity unavailable")
+		}
+		if j.ID == "" {
+			if j.Born != "" || j.Organization != "" || j.SnapshotID == "" || j.NetworkAllowList == "" {
+				return "", "", errors.New("unresolved create intent invalid")
+			}
+			var refusal struct {
+				Refused        bool
+				EvidenceSHA256 string `json:"evidence_sha256"`
+			}
+			request := map[string]any{"name": j.Name, "nonce": j.Nonce, "requested": j.Requested.Format(time.RFC3339Nano), "organization": v.journal.Organization, "snapshot_id": j.SnapshotID, "network_allow_list": j.NetworkAllowList, "volume_binding": j.Volume}
+			if err = c.call(ctx, "rejected_create", request, &refusal); err != nil || !refusal.Refused || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(refusal.EvidenceSHA256) {
+				return "", "", errors.New("create refusal and absence unproven")
+			}
+			for i, consumer := range v.journal.Consumers {
+				if consumer.Journal == path && consumer.ID == "" && !consumer.Gone {
+					v.journal.Consumers[i].RefusalSHA256 = refusal.EvidenceSHA256
+					return "", "provider audit rejected create; independent exact request lookup empty", v.save()
+				}
+			}
+			return "", "", errors.New("unresolved create consumer changed")
 		}
 		info, err := b.cleanupLookup(ctx)
 		if err != nil {

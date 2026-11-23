@@ -187,3 +187,12 @@ cases, token/request limits or sandbox security/network controls, and is recorde
 in the workload and identity policy. It never accepts an agreement, subscribes
 to a model, changes region or falls back. Use a model already available to the
 operator's account. [AWS model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-ministral-3-8b.html).
+
+RUN-24 keeps ID-less create intents unresolved unless a supported authenticated
+management audit proves the exact request was rejected with HTTP400 and a complete
+independent exact-name lookup finds no object. Recovery waits beyond the create
+transport budget and binds organization, timestamp, nonce, snapshot, network and
+volume. It records refusal separately from deletion and never adopts or deletes
+a discovered sandbox. The original failed intent stays private and PER-5 remains
+unknown when recreation failed. Missing or ambiguous audit access still blocks
+storage/receiver release.
