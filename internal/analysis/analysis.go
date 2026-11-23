@@ -2,6 +2,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -30,10 +31,37 @@ func Parse(b []byte) (*report.Doc, error) {
 	if strictjson.Decode(b, MaxReport, &d) != nil {
 		return nil, ErrInput
 	}
-	if Validate(&d) != nil {
+	if !canonicalNewFields(b, &d) || Validate(&d) != nil {
 		return nil, ErrInput
 	}
 	return &d, nil
+}
+
+// canonicalNewFields is AGT-6 on bytes the strict decode already took: sandprobe/2's fields appear only as the writer
+// gives them, never present but empty or null, which decoding alone can't tell from absent. So a present one always
+// carries content, and Validate's exact version check then refuses it under sandprobe/1.
+func canonicalNewFields(b []byte, d *report.Doc) bool {
+	var p struct {
+		Manifest struct {
+			SkipKinds json.RawMessage `json:"SkipKinds"`
+			Attested  json.RawMessage `json:"Attested"`
+		} `json:"manifest"`
+		Checks []struct {
+			Attestation json.RawMessage `json:"attestation"`
+		} `json:"checks"`
+	}
+	if json.Unmarshal(b, &p) != nil || len(p.Checks) != len(d.Checks) {
+		return false
+	}
+	if p.Manifest.SkipKinds != nil && len(d.Manifest.SkipKinds) == 0 || p.Manifest.Attested != nil && len(d.Manifest.Attested) == 0 {
+		return false
+	}
+	for i, c := range p.Checks {
+		if c.Attestation != nil && d.Checks[i].Attestation == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func severity(s string) int {
