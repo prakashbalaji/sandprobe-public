@@ -22,6 +22,7 @@ type daytonaVolumeInfo struct {
 }
 
 type daytonaVolumeJournal struct {
+	MountPath                                   string `json:",omitempty"`
 	Schema, Name, ID, Born, Organization, Phase string
 	Requested                                   time.Time
 	Consumers                                   []daytonaVolumeConsumer
@@ -44,7 +45,13 @@ type DaytonaVolume struct {
 var daytonaVolumeName = regexp.MustCompile(`^sandprobe-volume-[a-f0-9]{24}$`)
 var daytonaConsumerName = regexp.MustCompile(`^daytona-n[a-f0-9]{24}\.state$`)
 
-func (v *DaytonaVolume) ID() string             { return v.journal.ID }
+func (v *DaytonaVolume) ID() string { return v.journal.ID }
+func (v *DaytonaVolume) MountPath() string {
+	if v.journal.MountPath == "" {
+		return "/workspace"
+	}
+	return v.journal.MountPath
+}
 func (v *DaytonaVolume) StatePath() string      { return v.path }
 func (v *DaytonaVolume) CleanupConfirmed() bool { return v.journal.Phase == "cleaned" }
 
@@ -135,6 +142,9 @@ func (c *DaytonaClient) RecoverDaytonaVolume(path string) (*DaytonaVolume, error
 			return nil, errors.New("Daytona volume creation identity missing")
 		}
 	}
+	if j.MountPath != "" && j.MountPath != "/workspace" && j.MountPath != "/persist" {
+		return nil, errors.New("Daytona volume mount declaration invalid")
+	}
 	if len(j.Consumers) > 2 || (len(j.Consumers) > 0 && (j.Born == "" || j.Phase == "created")) {
 		return nil, errors.New("Daytona volume consumer limit")
 	}
@@ -148,12 +158,18 @@ func (c *DaytonaClient) RecoverDaytonaVolume(path string) (*DaytonaVolume, error
 	return &DaytonaVolume{client: c, path: path, journal: j}, nil
 }
 
-func (c *DaytonaClient) CreateDaytonaVolume(ctx context.Context, dir string) (*DaytonaVolume, error) {
+func (c *DaytonaClient) CreateDaytonaVolume(ctx context.Context, dir string, mounts ...string) (*DaytonaVolume, error) {
+	if len(mounts) > 1 || (len(mounts) == 1 && mounts[0] != "/workspace" && mounts[0] != "/persist") {
+		return nil, errors.New("Daytona volume mount selection invalid")
+	}
 	if err := privateDaytonaVolumeDirectory(dir); err != nil {
 		return nil, err
 	}
 	v := &DaytonaVolume{client: c, path: filepath.Join(dir, "workspace-volume.state"),
 		journal: daytonaVolumeJournal{Schema: "sandprobe.daytona-volume-state/1", Name: token("sandprobe-volume-"), Requested: time.Now().UTC(), Phase: "create_intent"}}
+	if len(mounts) == 1 && mounts[0] != "/workspace" {
+		v.journal.MountPath = mounts[0]
+	}
 	f, err := os.OpenFile(v.path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, errors.New("Daytona volume intent already exists or cannot be written")
@@ -302,8 +318,9 @@ func (v *DaytonaVolume) consumerGone(b *DaytonaBox) error {
 	return errors.New("Daytona volume consumer identity changed")
 }
 
-// Destroy confirms absence through the exact original ID. A successful DELETE
-// request alone is insufficient. The confirmed journal remains as recovery proof.
+// Destroy confirms the exact original ID absent or terminal deleted with its
+// original birth/organization. A DELETE request alone is insufficient. Deleted
+// metadata may remain under a changed name; active names must still match.
 // Callers must first confirm every sandbox that mounted it has been deleted.
 func (v *DaytonaVolume) Destroy(ctx context.Context) error {
 	if !daytonaID.MatchString(v.ID()) {
@@ -317,43 +334,50 @@ func (v *DaytonaVolume) Destroy(ctx context.Context) error {
 			return errors.New("Daytona volume still has an unresolved sandbox consumer")
 		}
 	}
-	info, err := v.lookup(ctx)
-	if err != nil {
-		return err
-	}
-	if info.Absent {
-		v.journal.Phase = "cleaned"
-		return v.save()
-	}
-	if err = v.bind(info); err != nil {
-		return err
-	}
-	v.journal.Phase = "delete_intent"
-	if err = v.save(); err != nil {
-		return err
-	}
-	var deleted struct {
-		ID        string
-		Requested bool `json:"deleted_request"`
-		Absent    bool
-	}
-	if err = v.client.call(ctx, "volume_delete", map[string]any{"volume_id": v.ID(), "name": v.journal.Name, "born": v.journal.Born, "organization": v.journal.Organization}, &deleted); err != nil {
-		return err
-	}
-	if deleted.ID != v.ID() || (!deleted.Requested && !deleted.Absent) {
-		return errors.New("Daytona volume deletion response invalid")
-	}
+	deleteSent := false
 	for {
-		info, err = v.lookup(ctx)
+		info, err := v.lookup(ctx)
 		if err != nil {
 			return err
 		}
-		if info.Absent {
+		sameCreation := info.ID == v.ID() && v.journal.Born != "" && v.journal.Organization != "" && info.Born == v.journal.Born && info.Organization == v.journal.Organization
+		if info.Absent || (info.State == "deleted" && sameCreation) {
 			v.journal.Phase = "cleaned"
 			return v.save()
 		}
-		if err = v.bind(info); err != nil {
-			return err
+		if info.State == "pending_delete" || info.State == "deleting" {
+			if !sameCreation {
+				return errors.New("Daytona deleting volume identity changed")
+			}
+			// Do not resubmit DELETE while asynchronous deletion is in progress.
+		} else {
+			if err = v.bind(info); err != nil {
+				return err
+			}
+			switch info.State {
+			case "ready", "error":
+				if !deleteSent {
+					v.journal.Phase = "delete_intent"
+					if err = v.save(); err != nil {
+						return err
+					}
+					var deleted struct {
+						ID        string
+						Requested bool `json:"deleted_request"`
+						Absent    bool
+					}
+					if err = v.client.call(ctx, "volume_delete", map[string]any{"volume_id": v.ID(), "name": v.journal.Name, "born": v.journal.Born, "organization": v.journal.Organization}, &deleted); err != nil {
+						return err
+					}
+					if deleted.ID != v.ID() || (!deleted.Requested && !deleted.Absent) {
+						return errors.New("Daytona volume deletion response invalid")
+					}
+					deleteSent = true
+				}
+			case "creating", "pending_create":
+			default:
+				return errors.New("Daytona volume deletion state unavailable")
+			}
 		}
 		select {
 		case <-ctx.Done():

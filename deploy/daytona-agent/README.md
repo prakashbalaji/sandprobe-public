@@ -99,6 +99,18 @@ accounts for every recorded consumer before releasing the receiver, and final
 cleanup requires separate sandbox, storage and receiver confirmation. Unknown
 replacement creates cannot be hidden by the original sandbox's cleanup record.
 
+For native object-backed volumes, use `--storage-profile persistent-artifacts`:
+the coding workspace and private cache remain on local storage, with a separate
+`/persist` mount for durable output. The same agent writes/reads a bounded synthetic
+preflight artifact before any model call, then stores the workload result there.
+PER-5 tests that mount across recreation. The collector does not chmod/chown native
+storage or move its private interpreter cache onto it. This is a distinct profile
+from the older persistent coding workspace, whose POSIX permission requirements
+may be unsupported by the underlying filesystem; preparation failure is not a grade.
+Deleted volume tombstones may remain under a changed name. Cleanup accepts only
+exact-ID absence or terminal `deleted` with the original birth/organization, and
+retains pending/error states without treating a DELETE request as confirmation.
+
 [Daytona volumes](https://www.daytona.io/docs/en/volumes/) use FUSE over object storage;
 [Nitro EBS volumes](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-storage.html)
 are block-backed filesystems. These are comparable persistence intentions, not

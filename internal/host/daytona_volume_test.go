@@ -310,3 +310,29 @@ func TestDaytonaVolumeDeleteRequestIsNotCleanupProof(t *testing.T) {
 		t.Fatal("exact-ID absence did not settle ambiguous delete", err)
 	}
 }
+
+func TestDaytonaVolumeTerminalDeletedMetadataKeepsCreationBinding(t *testing.T) {
+	for _, drift := range []string{"", "born", "organization"} {
+		t.Run(drift, func(t *testing.T) {
+			c, dir, _, _ := volumeFixture(t)
+			v, err := c.CreateDaytonaVolume(context.Background(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.runtime = func(_ context.Context, in map[string]any) ([]byte, error) {
+				if in["op"] != "volume_lookup" {
+					t.Fatal("terminal metadata caused another delete")
+				}
+				value := map[string]any{"id": v.ID(), "name": "provider-deleted-tombstone", "born": v.journal.Born, "organization": v.journal.Organization, "state": "deleted"}
+				if drift != "" {
+					value[drift] = "different-creation"
+				}
+				return json.Marshal(value)
+			}
+			err = v.Destroy(context.Background())
+			if (drift == "") != (err == nil && v.CleanupConfirmed()) {
+				t.Fatal("terminal deletion identity was misclassified", err)
+			}
+		})
+	}
+}

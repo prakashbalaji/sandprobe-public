@@ -61,15 +61,16 @@ func daytonaQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\
 // WorkloadConfiguration contains API readbacks and declared execution paths, not
 // namespace or image attestation. Owned-home metadata is checked separately.
 type DaytonaWorkloadConfiguration struct {
-	ID                string `json:"id"`
-	SnapshotID        string `json:"snapshot_id"`
-	SnapshotRef       string `json:"snapshot_ref"`
-	NetworkAllowList  string `json:"network_allow_list"`
-	User              string `json:"user"`
-	Public            bool   `json:"public"`
-	AgentHome         string `json:"agent_home"`
-	CacheHome         string `json:"cache_home"`
-	WorkspaceVolumeID string `json:"workspace_volume_id,omitempty"`
+	ID                  string `json:"id"`
+	SnapshotID          string `json:"snapshot_id"`
+	SnapshotRef         string `json:"snapshot_ref"`
+	NetworkAllowList    string `json:"network_allow_list"`
+	User                string `json:"user"`
+	Public              bool   `json:"public"`
+	AgentHome           string `json:"agent_home"`
+	CacheHome           string `json:"cache_home"`
+	PersistentVolumeID  string `json:"persistent_volume_id,omitempty"`
+	PersistentMountPath string `json:"persistent_mount_path,omitempty"`
 }
 
 func (b *DaytonaBox) WorkloadConfiguration(ctx context.Context) (DaytonaWorkloadConfiguration, error) {
@@ -86,7 +87,8 @@ func (b *DaytonaBox) WorkloadConfiguration(ctx context.Context) (DaytonaWorkload
 	}
 	out = DaytonaWorkloadConfiguration{ID: b.ID(), SnapshotID: d.SnapshotID, SnapshotRef: d.SnapshotRef, NetworkAllowList: d.NetworkAllowList, User: d.User, Public: *d.Public, AgentHome: WorkloadHome, CacheHome: WorkloadCache}
 	if b.journal.Volume != nil {
-		out.WorkspaceVolumeID = b.journal.Volume.ID
+		out.PersistentVolumeID = b.journal.Volume.ID
+		out.PersistentMountPath = b.journal.Volume.MountPath
 	}
 	return out, nil
 }
@@ -308,7 +310,7 @@ func (c *DaytonaClient) CleanupDaytonaState(ctx context.Context, path string) (s
 	b := &DaytonaBox{client: c, journal: j, state: path}
 	if j.Volume != nil {
 		v, err := c.RecoverDaytonaVolume(filepath.Join(filepath.Dir(path), "workspace-volume.state"))
-		if err != nil || j.Volume.ID != v.ID() || j.Volume.MountPath != "/workspace" || j.Volume.Subpath != "" {
+		if err != nil || j.Volume.ID != v.ID() || j.Volume.MountPath != v.MountPath() || j.Volume.Subpath != "" {
 			return j.ID, "", errors.New("persistent cleanup volume binding invalid")
 		}
 		if !regexp.MustCompile(`^n[a-f0-9]{24}$`).MatchString(j.Nonce) || !regexp.MustCompile(`^sandprobe-[a-f0-9]{24}$`).MatchString(j.Name) || j.Requested.IsZero() {

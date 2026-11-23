@@ -224,7 +224,7 @@ func (c *DaytonaClient) createDaytona(ctx context.Context, dir, snapshot, networ
 	b := &DaytonaBox{client: c, journal: daytonaJournal{Nonce: token("n"), Name: token("sandprobe-"), Requested: time.Now().UTC(), SnapshotID: snapshot, NetworkAllowList: network}}
 	if len(volumes) == 1 {
 		b.volume = volumes[0]
-		b.journal.Volume = &daytonaVolumeMount{ID: b.volume.ID(), MountPath: "/workspace", Subpath: ""}
+		b.journal.Volume = &daytonaVolumeMount{ID: b.volume.ID(), MountPath: b.volume.MountPath(), Subpath: ""}
 	}
 	b.state = filepath.Join(dir, "daytona-"+b.journal.Nonce+".state")
 	f, e := os.OpenFile(b.state, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
