@@ -32,6 +32,13 @@ var (
 // hosted canary.
 var newPublicCanary = host.NewHTTPSCanary
 
+// publicCanaryRetention is HCN-4's retention, the one sentence every plan that names a public canary states before
+// approval (HCN-5): both addresses the canary sees, how long it keeps each, and that it stores nothing.
+const publicCanaryRetention = "That canary sees two addresses and keeps both in memory only: the box's public address, " +
+	"with this run's random nonces, for the run's lifetime, at most 30 minutes; and the public address of the machine " +
+	"running Sandprobe, which reserves and arms the run, in a rate counter for at most an hour. It writes no access log " +
+	"and stores nothing (HCN-4)."
+
 // canaryChoice is the canary a run uses (HCN-5): none (-no-canary), an operator canary from deploy/canary.sh that
 // -canary names, a public one named by -canary-url and pinned by -canary-pin, or the hosted canary.
 type canaryChoice struct {
@@ -66,7 +73,6 @@ func (r *runFlags) settleCanary(given map[string]bool) {
 // never asks: it always starts its own, PRV-14). A canary-*.state file is used only when -canary names it, never found
 // on its own.
 func (r runFlags) chooseCanary() (canaryChoice, error) {
-	retain := "That canary sees the box's public address and this run's random nonces, keeps them in memory for at most 30 minutes, and stores nothing (HCN-4)."
 	if r.noCanary { // HCN-5: the person's own choice, never combined with naming a canary
 		if r.canary != "" || r.canaryURL != "" || r.canaryPin != "" {
 			return canaryChoice{}, fail("usage", "-no-canary can't be combined with -canary, -canary-url or -canary-pin", "pick one", exitUsage)
@@ -96,11 +102,11 @@ func (r runFlags) chooseCanary() (canaryChoice, error) {
 		}
 		return canaryChoice{url: origin, pins: pins,
 			describe:   "the public canary you named at " + origin + ", trusted only under control key " + pins[0][:12] + "…: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces",
-			retainNote: retain}, nil
+			retainNote: publicCanaryRetention}, nil
 	}
 	return canaryChoice{url: hostedCanaryURL, pins: hostedCanaryPins,
 		describe:   "the hosted canary at " + hostedCanaryURL + ", run by Summation and trusted only under the control key this release pins: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53, each carrying only this run's random nonces",
-		retainNote: retain}, nil
+		retainNote: publicCanaryRetention}, nil
 }
 
 func execPlan(box *host.ExecBox, as string, c canaryChoice) planDoc {
@@ -109,10 +115,7 @@ func execPlan(box *host.ExecBox, as string, c canaryChoice) planDoc {
 	if as != "" {
 		user = as + ", checked before any check runs"
 	}
-	residual := host.ExecResidual
-	if c.retainNote != "" {
-		residual += " " + c.retainNote
-	}
+	residual := withRetention(host.ExecResidual, c)
 	return planDoc{Provider: "exec",
 		Creates: []string{"nothing: your existing box, reached by: " + strings.Join(box.Command, " "),
 			"a scratch directory " + box.Scratch + " in the box (mode 700) for each invocation, removed on exit and confirmed gone after each"},

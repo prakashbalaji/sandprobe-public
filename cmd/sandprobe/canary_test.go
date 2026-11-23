@@ -392,3 +392,82 @@ func TestExecReleasesTheSlotAfterACancelledCleanup(t *testing.T) {
 	}
 	slotsFree(t, pub)
 }
+
+// HCN-4, HCN-5: every plan that names a public canary (the hosted one, or one -canary-url names) states both
+// addresses the canary keeps and for how long, from one shared sentence: run exec, a recipe, and each native adapter.
+// A plan on an operator canary, and run docker's, say nothing of it.
+func TestPublicCanaryPlansDiscloseRetention(t *testing.T) {
+	stray := strayState(t)
+	rc, err := shippedRecipe("kubernetes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := host.NewRecipeBox(rc, "kind-test/default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// plans is every plan for one canary choice, named by its flags; each residual comes with what it would be with no
+	// public canary at all.
+	plans := func(flags []string) map[string][2]string {
+		t.Helper()
+		out := map[string][2]string{}
+		r := runFlags{}
+		fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+		r.register(fs)
+		if err := fs.Parse(flags); err != nil {
+			t.Fatal(err)
+		}
+		choice, err := r.chooseCanary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec := host.PodSpec{Image: "i", RuntimeClass: "isolated-sandbox"}
+		out["sprites"] = [2]string{sprPlan("org", choice, r, "").Residual, residual}
+		out["aws-nitro"] = [2]string{nitroPlan("/k", choice, runFlags{variant: "isolated"}, spec).Residual, nitroResidual}
+		out["kubernetes"] = [2]string{recipePlan(box, "", choice).Residual, host.RecipeResidual(rc, box.Target)}
+		for name, base := range map[string]string{"exec": host.ExecResidual, "baseten": host.BasetenResidual, "e2b": host.E2BResidual,
+			"vercel": host.VercelResidual, "cloudflare": host.CloudflareResidual, "boat": host.BoatResidual,
+			"daytona": host.DaytonaResidual, "exe.dev": host.ExedevResidual} {
+			args := append([]string{"plan", name, "-o", "json"}, flags...)
+			if name == "exec" {
+				args = append(args, "--", "sh")
+			}
+			var o, e bytes.Buffer
+			if code := run(args, &o, &e); code != 0 {
+				t.Fatalf("%q: exit %d, %s", args, code, o.String()+e.String())
+			}
+			var p planDoc
+			if err := json.Unmarshal(o.Bytes(), &p); err != nil {
+				t.Fatal(err)
+			}
+			out[name] = [2]string{p.Residual, base}
+		}
+		return out
+	}
+	for _, flags := range [][]string{nil, {"-canary-url", "https://control.sandprobe.test", "-canary-pin", testPin}} {
+		got := plans(flags)
+		if len(got) != 11 {
+			t.Fatalf("%d plans", len(got))
+		}
+		for name, res := range got {
+			if res[0] != res[1]+" "+publicCanaryRetention {
+				t.Errorf("%v %s: the residual isn't its own plus the shared retention: %q", flags, name, res[0])
+			}
+		}
+	}
+	for _, want := range []string{"the box's public address", "with this run's random nonces", "at most 30 minutes",
+		"the public address of the machine running Sandprobe", "in a rate counter for at most an hour", "in memory only", "stores nothing"} {
+		if !strings.Contains(publicCanaryRetention, want) {
+			t.Errorf("the shared retention doesn't say %q", want)
+		}
+	}
+	// An operator canary, and run docker's local one, are unchanged: no public canary's retention.
+	for name, res := range plans([]string{"-canary", stray}) {
+		if res[0] != res[1] {
+			t.Errorf("operator canary, %s: %q", name, res[0])
+		}
+	}
+	if d := dockerPlan("img", "root", nil); d.Residual != dockerResidual || strings.Contains(strings.Join(d.Contacts, " "), "rate counter") {
+		t.Errorf("the docker plan changed: %+v", d)
+	}
+}

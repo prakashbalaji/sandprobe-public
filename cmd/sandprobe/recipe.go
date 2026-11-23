@@ -92,10 +92,7 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice) planDoc {
 	if rc.AddressedBy == "name" {
 		launch += ". Before every invocation sp_whois must name the box the create returned (RCP-2)"
 	}
-	residual := host.RecipeResidual(rc, b.Target)
-	if c.retainNote != "" {
-		residual += " " + c.retainNote
-	}
+	residual := withRetention(host.RecipeResidual(rc, b.Target), c)
 	return planDoc{Provider: rc.Name,
 		Creates: []string{"one box, " + b.Name + ", through the " + rc.Name + " recipe (" + rc.Provider + ") in " + b.Target + "; its ID is what the create returns",
 			"a scratch directory " + b.Scratch + " in the box (mode 700) for each invocation, removed on exit"},
