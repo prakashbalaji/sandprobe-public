@@ -1,5 +1,14 @@
 # Managed network-enabled EKS coding evaluation
 
+Standard probe checks use RC's shared hosted canary at `control.pub.probe.ac0.dev`,
+verified under the control-key pin shipped with the CLI. It keeps the guest IP and
+run nonces in memory for at most 30 minutes and the controller IP in a rate counter
+for at most one hour; it stores no access log. The collector reserves one slot and
+releases it with an independent cleanup budget. An unavailable service stops grading.
+The separate run-owned receiver still supplies independent delivery controls; it is
+disposable and deleted by the recorded IDs after each run. No dedicated canary or
+receiver is kept running between evaluations.
+
 The runner builds a pinned task image and creates a disposable, dedicated Nitro
 configuration with networking enabled. The selected Bedrock model writes a small CSV-processing Python
 module inside the sandbox. A separate interpreter runs it against nine functional

@@ -1,5 +1,14 @@
 # Managed Daytona coding workload
 
+Standard probe checks use RC's shared hosted canary at `control.pub.probe.ac0.dev`,
+verified under the control-key pin shipped with the CLI. It keeps the guest IP and
+run nonces in memory for at most 30 minutes and the controller IP in a rate counter
+for at most one hour; it stores no access log. The collector reserves one slot and
+releases it with an independent cleanup budget. An unavailable service stops grading.
+The separate run-owned receiver still supplies independent delivery controls; it is
+disposable and deleted by the recorded IDs after each run. No dedicated canary or
+receiver is kept running between evaluations.
+
 EVD-5 retains a pre-model `configuration-evidence.json` artifact using the same
 wire format as Nitro. Snapshot metadata and private API visibility do not verify
 runtime image content or process isolation; unavailable readbacks remain unknown.

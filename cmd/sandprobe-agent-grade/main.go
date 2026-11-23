@@ -26,7 +26,7 @@ type request struct {
 	CanaryState string                `json:"canary_state"`
 }
 
-func run(ctx context.Context, in io.Reader, out io.Writer) error {
+func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	var q request
 	raw, err := io.ReadAll(io.LimitReader(in, 65537))
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
@@ -40,6 +40,15 @@ func run(ctx context.Context, in io.Reader, out io.Writer) error {
 	if err != nil || c.Profile == "" || c.Profile != os.Getenv("SANDPROBE_AWS_PROFILE") || c.Region != "us-west-2" || c.Domain() != "agent-"+q.Pod.RunID+".probe.ac0.dev" {
 		return errors.New("invalid run canary binding")
 	}
+	public, err := host.OpenHostedCanary(ctx) // MEAS-5: c remains the separately owned receiver only.
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if host.CloseHostedCanary(public) != nil {
+			err = errors.New("hosted canary release unconfirmed")
+		}
+	}()
 	p, err := host.AttachAgentPod(ctx, q.Pod)
 	if err != nil {
 		return errors.New("workload binding rejected")
@@ -56,7 +65,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) error {
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, p, c, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract})
+	r, err := host.Execute(ctx, p, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}
@@ -64,7 +73,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) error {
 	sanitizeInvalid(r)
 	doc := report.Build(r, report.Meta{Version: "0.1.0", Provider: "aws-nitro", BoxName: q.Pod.Name,
 		CreatedBySandprobe: true, StartedAt: start, Duration: time.Since(start), Calls: p.Calls, Cleanup: "pending",
-		Residual: "RUN-8: workload configuration only; no reset or provider-endpoint assessment. UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner."})
+		Residual: "RUN-8: workload configuration only; no reset or provider-endpoint assessment. UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	doc.Statement = "Legacy generic diagnostic grade. The primary conditional workload configuration assessment is in workload-report.html; it is not a security-assurance verdict."
 	html, err := report.HTML(doc, "dark")
 	if err != nil {

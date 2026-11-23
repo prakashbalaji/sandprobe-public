@@ -26,8 +26,8 @@ var execRunTimeout = 10 * time.Minute
 // The hosted canary (HCN-5, HCN-7): deployed by deploy/canary.sh PUBLIC=1. Its
 // control key was made on its instance; this release trusts exactly that key. A rotation ships a release with both.
 var (
-	hostedCanaryURL  = "https://control.pub.probe.ac0.dev"
-	hostedCanaryPins = []string{"37b7b9ffebd2a547d10eeaf75f791d78a28973c5498d8c6ce2aa521369f620d0"}
+	hostedCanaryURL  = host.HostedCanaryURL
+	hostedCanaryPins = host.HostedCanaryPins()
 )
 
 // newPublicCanary asks a public canary for its signed status (HCN-1). Tests replace it, so no test reaches the real
@@ -36,10 +36,7 @@ var newPublicCanary = host.NewHTTPSCanary
 
 // publicCanaryRetention is HCN-4's retention, the one sentence every plan that names a public canary states before
 // approval (HCN-5): both addresses the canary sees, how long it keeps each, and that it stores nothing.
-const publicCanaryRetention = "That canary sees two addresses and keeps both in memory only: the box's public address, " +
-	"with this run's random nonces, for the run's lifetime, at most 30 minutes; and the public address of the machine " +
-	"running Sandprobe, which reserves and arms the run, in a rate counter for at most an hour. It writes no access log " +
-	"and stores nothing (HCN-4)."
+const publicCanaryRetention = host.PublicCanaryRetention
 
 // canaryChoice is the canary a run uses (HCN-5): none (-no-canary), an operator canary from deploy/canary.sh that
 // -canary names, a public one named by -canary-url and pinned by -canary-pin, or the hosted canary.
