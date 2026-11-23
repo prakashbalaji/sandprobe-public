@@ -76,7 +76,7 @@ func (r runFlags) chooseCanary() (canaryChoice, error) {
 		if r.canary != "" || r.canaryURL != "" || r.canaryPin != "" {
 			return canaryChoice{}, fail("usage", "-no-canary can't be combined with -canary, -canary-url or -canary-pin", "pick one", exitUsage)
 		}
-		return canaryChoice{none: true, describe: "none: you chose -no-canary, so no test traffic leaves the box and the exfiltration checks aren't tested (the run can't grade above C)"}, nil
+		return canaryChoice{none: true, describe: noCanaryLine(nil, false)}, nil
 	}
 	if r.canaryPin != "" && r.canaryURL == "" { // a pin names a canary the person trusts: never quietly use another one
 		return canaryChoice{}, fail("usage", "-canary-pin (or SANDPROBE_CANARY_PIN) needs -canary-url: the canary that pin is for", "-canary-url https://control.<domain> -canary-pin <pin>", exitUsage)
@@ -119,7 +119,10 @@ func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, a
 		residual += " You turned on " + strings.Join(attested, ", ") + " with -provider-endpoints, attesting that your provider's terms allow them on your own account (PRV-15)."
 	}
 	contacts, named := []string{c.describe}, []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are off, since they'd contact your provider's own endpoints (PRV-15)"}
-	lines, extra, boxNamed := attestedPlan(attested, host.ExecExclusions(), true, "PRV-15")
+	if c.none { // HCN-5: the connections the attested checks still make are named, never hidden behind "no canary"
+		contacts[0] = noCanaryLine(attested, true)
+	}
+	lines, extra, boxNamed := attestedPlan(attested, host.ExecExclusions(), true, c.none, "PRV-15")
 	if len(attested) > 0 {
 		contacts, named = append(contacts, extra...), boxNamed
 	}
@@ -136,7 +139,7 @@ func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, a
 		Runs:          []string{"the probe, and sudo -n -l, which runs no command", "the wrapper's sh, mkdir, base64, chmod, rm and uname"},
 		Reset:         "none: your box isn't reset",
 		Deletes:       "nothing of your box; only the scratch directory",
-		LocalProxy:    localProxy(attested, allowLocalProxy),
+		LocalProxy:    localProxy(attested, allowLocalProxy, c.none),
 		Time:          "about a minute, plus your command's own start-up",
 		Residual:      residual,
 	}

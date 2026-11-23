@@ -51,12 +51,16 @@ var endpointNames = map[string]string{"SEC-4": "cloud metadata credentials", "EG
 	"AMP-6": "vsock to the host", "AMP-7": "the Kubernetes API"}
 
 // attestedPlan is what a plan says for PRV-15's attestations, before approval (AGT-3): each attested check, the
-// destinations they add, and the checks still off. existing is run exec's box, where AMP-6 never connects (PRV-1).
-func attestedPlan(attested []string, off map[string]string, existing bool, rule string) (lines, contacts, named []string) {
+// destinations they add, and the checks still off. existing is run exec's box, where AMP-6 never connects (PRV-1);
+// noCanary is HCN-5's -no-canary, under which EGR-3, a canary check, never runs and so names no proxy.
+func attestedPlan(attested []string, off map[string]string, existing, noCanary bool, rule string) (lines, contacts, named []string) {
 	for _, id := range slices.Sorted(slices.Values(attested)) {
 		line := id + " (" + endpointNames[id] + "): you attest your provider's terms allow it on your own account"
 		if id == "AMP-6" && existing {
 			line += "; it still won't run, since an existing box gets no vsock connects (PRV-1)"
+		}
+		if id == "EGR-3" && noCanary {
+			line += "; it still won't run, since it carries its nonce to a canary and -no-canary names none (HCN-5)"
 		}
 		lines = append(lines, line)
 	}
@@ -66,7 +70,7 @@ func attestedPlan(attested []string, off map[string]string, existing bool, rule 
 	if slices.Contains(attested, "AMP-7") {
 		named = append(named, "a Kubernetes API, only if the box's environment names one: a TCP and TLS handshake, no request (AMP-7)")
 	}
-	if slices.Contains(attested, "EGR-3") {
+	if slices.Contains(attested, "EGR-3") && !noCanary {
 		named = append(named, "the proxy the box's environment names, only to carry this run's nonce to the canary (EGR-3)")
 	}
 	if left := slices.Sorted(maps.Keys(lift(off, attested))); len(left) > 0 {
@@ -89,11 +93,40 @@ func metadataContacts() []string {
 	return out
 }
 
+// noCanaryLine is HCN-5's plan line for -no-canary: no test traffic goes to any canary, and each connection the
+// checks turned on with -provider-endpoints still make is named (PRV-15): SEC-4's addresses from the catalog list the
+// probe dials (UX-4), AMP-7's handshake, and AMP-6's vsock connects on a box the run created. EGR-3 needs a canary, so
+// it makes none. existing is run exec's box, where AMP-6 never connects (PRV-1).
+func noCanaryLine(attested []string, existing bool) string {
+	line := "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run can't grade above C)"
+	var still []string
+	for _, id := range slices.Sorted(slices.Values(attested)) {
+		switch {
+		case id == "SEC-4":
+			var addrs []string
+			for _, d := range catalog.Metadata {
+				addrs = append(addrs, d.Addr)
+			}
+			still = append(still, "SEC-4 to the metadata addresses "+strings.Join(addrs, ", ")+", each listed here")
+		case id == "AMP-6" && !existing:
+			still = append(still, "AMP-6's vsock connects to the host, if the box has a vsock device")
+		case id == "AMP-7":
+			still = append(still, "AMP-7's TCP and TLS handshake, with no request, to a Kubernetes API the box's environment names")
+		}
+	}
+	if len(still) > 0 {
+		line += ". The checks you turned on with -provider-endpoints still make their own connections: " + strings.Join(still, "; ")
+	}
+	return line
+}
+
 // localProxy is a plan's local-proxy line once the person may have turned EGR-3 on (PRV-15, SBX-1 (e)).
-func localProxy(attested []string, allow bool) string {
+func localProxy(attested []string, allow, noCanary bool) string {
 	switch {
 	case !slices.Contains(attested, "EGR-3"):
 		return "excluded: EGR-3 is off"
+	case noCanary:
+		return "excluded: EGR-3 needs a canary, and -no-canary names none (HCN-5)"
 	case allow:
 		return "yes: you approved -allow-local-proxy, so EGR-3 may use a proxy on the box's own loopback"
 	}
