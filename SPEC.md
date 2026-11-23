@@ -355,11 +355,14 @@ implement or merge is not proof of third-party approval. No CI job uses cloud cr
   separately reported workload outcome. Missing evidence remains unknown under the standard grader;
   A is never a target achieved by hiding necessary workload access. This grades a tested configuration,
   not every configuration offered by a provider.
-  A fresh standard canary is managed by `deploy/canary.sh` in the private run folder with fresh `agent-<runID>.probe.ac0.dev` DNS, with durable exact-ID
+  A separate calibration receiver is managed by `deploy/canary.sh` in the private run folder with fresh `agent-<runID>.probe.ac0.dev` DNS, with durable exact-ID
   state and pre-create intents; unresolved outcomes retain the deployment and block address release; existing canaries/DNS are never adopted. Its control and health evidence use the existing SSM
-  adapter and standard signed receipts. The workload policy is unchanged for grading: model TLS, intended
-  Pod Identity and cluster DNS remain available; the canary is not added to the allowlist. Probe traffic
-  targets only that run-owned canary. SEC-4, AMP-6, AMP-7 and EGR-3 are explicitly excluded from this
+  adapter. Standard collection uses MEAS-5's shared hosted canary and signed receipts;
+  the owned receiver supplies only independent calibration. The workload policy is unchanged for grading:
+  model TLS and declared DNS remain available, with Pod Identity only in guest-controller mode
+  (RUN-17 removes it in host-controller mode). Neither canary nor receiver is added to the allowlist.
+  Check traffic uses these declared measurement destinations, with approved model-host TLS measured
+  under MEAS-6/7. SEC-4, AMP-6, AMP-7 and EGR-3 are explicitly excluded from this
   defensive configuration-audit scope to avoid provider-owned endpoints; PER-5 remains skipped because
   no reset is performed. Exclusions are printed, never counted as negative proofs. Native DNS canary
   receipts may demonstrate the risk of permitted DNS, and the unchanged grader may return F.

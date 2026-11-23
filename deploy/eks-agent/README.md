@@ -29,13 +29,15 @@ This is a representative small coding loop, not the full Claude Code/Codex CLI o
 a production-agent benchmark. No model-generated code executes on the host.
 
 The workload uses UID/GID10001, no capabilities/privilege escalation, read-only root,
-RuntimeDefault seccomp and ephemeral workspace/tmp. Its Pod Identity role permits
+RuntimeDefault seccomp and ephemeral workspace/tmp. In guest-controller mode, its Pod Identity role permits
 only one regional Bedrock model. The SDK accepts only its intended workload identity,
 never operator/environment/shared-file/IMDS credential fallback. Model credentials
 are authorized workload access; they are not claimed inaccessible to generated code.
+Host-controller mode creates neither that role nor its association and places no
+model credentials in the guest.
 
 The namespace policy allows model endpoint IPv4 addresses on443, actual cluster
-node-local CoreDNS on53, and the Pod Identity surrogate on80. The DNS address is
+node-local CoreDNS on53, and, only in guest-controller mode, the Pod Identity surrogate on80. The DNS address is
 derived from the AWS-described Auto Mode service CIDR plus10, following
 [AWS guidance](https://docs.aws.amazon.com/eks/latest/userguide/auto-net-pol.html).
 No kube-dns Service is required. A dedicated NodeClass/NodePool

@@ -47,9 +47,10 @@ conclusive results and every skipped, missing, scoped-out, unknown or unproven
 check remain visible beside the score. Six green categories do not establish
 that every check was conclusively assessed. Changing ranking does not remove
 missing runtime-image/process proof or authorize additional endpoint checks.
-Nitro's managed profile uses guest-side model inference and an assigned model
-identity; this profile uses host-controller inference. That difference matters
-when comparing exposure scores.
+Nitro's default guest-controller profile uses guest-side model inference and an
+assigned model identity. Select its explicit host-controller mode, described above,
+for the comparable credential-free host-controller workload; label legacy guest-mode
+results separately.
 
 EVD-1 also exports `evidence-coverage.json` and includes an evidence section in
 the primary HTML. It uses the scorecard's six published category names (SCR-1) while
