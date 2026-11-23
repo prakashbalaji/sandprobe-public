@@ -720,6 +720,11 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   provider or become an A–F conversion. Unchanged legacy rendering entry points
   preserve historical output. Shared summary recomputation and the native Daytona
   runner must use identical score rules. Existing exit/cleanup gates remain.
+  Managed runners print a sanitized human completion notice on stderr, keeping
+  stdout JSON and saved report schemas unchanged. Distinguish a completed RC
+  assessment with gaps from an unavailable assessment, unverified workload or
+  unconfirmed cleanup; exit5 alone does not establish a failed execution or an
+  unsafe provider. A valid score never upgrades missing coverage.
 
 - **RUN-22 Functional failure diagnostics.** Keep the same prompt, two-request cap,
   nine functional cases and success criterion. The shared checker may report only
@@ -2492,7 +2497,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-6 | bounded HTTP/error label fixtures, Linux guest protocol tests and diagnostic/grading invariance |
-| SCR-4 | shared score recomputation, primary workload rendering, unknown/not-proven retention, managed output and historical rendering compatibility |
+| SCR-4 | shared managed-completion notice/unchanged exit and JSON tests; shared score recomputation, primary workload rendering, unknown/not-proven retention, managed output and historical rendering compatibility |
 | RUN-15 | protected HOME/project/cache parity, original-home metadata guards, unchanged functional workload and managed original-ID cleanup |
 | RUN-16 | unique receiver namespace, durable phase/terminal outcome fault cases, lost responses and narrowly bound legacy no-create reconciliation |
 | EVD-1 | six-category catalog accounting, grouped missing evidence, invalid input, provider parity and retained Nitro/Daytona grades unchanged |

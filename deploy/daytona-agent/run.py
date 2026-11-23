@@ -18,6 +18,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 # The operator's own AWS profile and account, from the environment. Unset, every account check fails closed.
 PROFILE, REGION, ACCOUNT = os.environ.get("SANDPROBE_AWS_PROFILE", ""), "us-west-2", os.environ.get("SANDPROBE_AWS_ACCOUNT", "")
+completion_message = runpy.run_path(str(ROOT / "deploy/managed_status.py"))["completion_message"]
 SNAPSHOT = "08b45e29-cc9a-40fd-bcf8-511a34c6cb2b"
 HOSTNAME = "bedrock-runtime.us-west-2.amazonaws.com"
 
@@ -288,6 +289,8 @@ def main(args):
     finally:
         cleanup = cleanup_owned(folder, args, env)
     if failed or not cleanup["confirmed"]:
+        # SCR-4: preserve failure/cleanup gates; never infer success from exit5.
+        print(completion_message(None, False, cleanup["confirmed"], exit_code=5, execution_ok=False), file=sys.stderr)
         return 5
     evaluation=json.loads((folder/"evaluation.json").read_text())
     assessment=evaluation["configuration_assessment"]
@@ -309,8 +312,12 @@ def main(args):
                       "functional_tests":workload.get("functional_tests"),"model_requests":workload.get("model_requests"),
                       "model_request_count_uncertain":workload.get("model_request_count_uncertain",False)}))
     if grade in ("D","F"):
-        return 6
-    return 0 if assessment.get("benchmark_requirements_met") is True and workload.get("independent_verification")=="passed" else 5
+        exit_code = 6
+    else:
+        exit_code = 0 if assessment.get("benchmark_requirements_met") is True and workload.get("independent_verification")=="passed" else 5
+    print(completion_message(exposure, workload.get("independent_verification")=="passed", cleanup["confirmed"],
+                             assessment, exit_code), file=sys.stderr)
+    return exit_code
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
