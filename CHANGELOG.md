@@ -40,9 +40,26 @@ saved in it and never grade its observations again (ANL-1).
   is 0; a pass with 1 still holds. On a box without no-new-privileges, Docker's default among them, a re-run ends
   AMP-3 unknown and the run incomplete unless setuid-root files make it a finding; set no-new-privileges to settle
   it. ([#40](https://github.com/summationai/sandprobe/pull/40))
-- **Placeholder, not fixed yet: write checks through a symlink the agent can replace (TWN-4).** Pending
-  [#37](https://github.com/summationai/sandprobe/pull/37), which hasn't merged. Until it does, this false pass is
-  still present, in 0.2.1 and in this candidate.
+- **Paths, symlinks and PATH (SBX-2, TWN-4, AMP-1, PER-2).** 0.2.1 worked some paths out from their text instead of
+  walking them as the kernel does, and missed some entries the agent could move, so a check could judge a different
+  file from the one the agent reaches. Each case was reproduced on the code before the fix, and 0.2.1 handles paths
+  the same way:
+  - A write check (PER-1 to PER-4) passed on a path through a symlink the agent could replace, such as its own link in
+    root's sticky `/tmp`, or through a nested Btrfs subvolume, which the agent could rename but which was taken for a
+    mount point.
+  - A symlink to `../target` reached through a directory link was resolved from the path's text, not from the real
+    directory holding the link, so the write and read checks judged a different file from the kernel's.
+  - HOME and PATH entries were cleaned before checking. With `HOME` and a PATH entry of `/x/link/..`, where `link`
+    leads elsewhere, PER-1 and SEC-3 passed and AMP-1 reported sudo absent, though the kernel let the agent write
+    `~/.bashrc`, read `~/.netrc` and reach a `sudo`.
+  - An empty PATH was ignored, though `execvp` then searches the working directory. With a writable working
+    directory holding `sudo`, PER-2 passed and AMP-1 reported sudo absent. With PATH unset, the probe can't tell
+    where the agent's launcher looks, so PER-2 now ends unknown unless it finds a writable directory anyway, and AMP-1
+    unknown unless a sudo at a fixed path settles it.
+  - SEC-3's read check resolved paths the same way, so it had the mirror cases.
+
+  No field in a saved 0.2.1 report tells these cases apart, so re-run before you trust a 0.2.1 pass on PER-1 to PER-4
+  or SEC-3, or an AMP-1 "absent". ([#37](https://github.com/summationai/sandprobe/pull/37))
 
 ### Canary and score
 
@@ -74,6 +91,15 @@ saved in it and never grade its observations again (ANL-1).
 - Plans name all three SEC-4 metadata addresses the probe dials (UX-4).
 - AMP-1 grades sudo-rs installs instead of ending unknown, and PER-5 names why each root is a gap.
 - Write and read checks no longer pass a refusal the agent could undo through ownership or capabilities (TWN-4).
+- The write, read and sudo checks resolve every path in one walk, as the kernel does: one component at a time on
+  directory descriptors, each path as given, never cleaned, with `..` taken by the kernel. One budget of 8 links
+  covers the whole path, a directory's links included; past it the path is unknown (SBX-2).
+- An entry counts as a mount point, which can't be renamed, only when `statx` reports `STATX_ATTR_MOUNT_ROOT` for it;
+  a change of device alone, which a Btrfs subvolume also shows, no longer spares it (TWN-4).
+- An ACL the probe fails to read, other than as absent or unsupported, counts as an ACL, so a refusal under a power
+  to change identity or mode is unknown (TWN-4).
+- AMP-1 also looks for sudo in relative and empty PATH entries, from the working directory; it used to skip them. A
+  relative entry with no working directory is unknown.
 - AMP-2 counts every capability the agent holds, permitted and ambient as well as effective, since a process raises a
   permitted capability at will. While `NoNewPrivs` is 0, an inheritable capability it doesn't otherwise hold leaves
   AMP-2 unknown. The evidence names each capability.
