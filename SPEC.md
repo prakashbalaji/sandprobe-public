@@ -1488,6 +1488,10 @@ counters, and no history across runs is shown anywhere.
   one is unknown, never a pass. So is a path whose modes alone would let the agent in though the kernel refused it
   (an ACL or a security module decides), and one with an ACL on the way while the agent holds a power to change
   identity or mode.
+  Only groups owning a resolved inode affect this model; unrelated existing groups
+  must not consume its identity-search budget. Group combinations are bounded to
+  ten relevant groups. If more exist, a witnessed access still counts, but a search
+  without a witness is unknown, never a negative proof from an unexplored identity.
   - **Write** (write permission): the agent can make a path, or a directory on it, writable by identity or by mode.
     Identity works with modes as they are, procfs and sysfs included: `CAP_SETUID` makes it any user, so a path its
     owner may write is writable to it (proc gives uid 0 a sysctl's owner bits), and `CAP_SETGID` any group, so a path a

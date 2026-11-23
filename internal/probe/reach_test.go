@@ -326,3 +326,34 @@ func readOnly(p string) bool {
 	var fs syscall.Statfs_t
 	return syscall.Statfs(p, &fs) == nil && fs.Flags&1 != 0
 }
+
+// TWN-4: bounded search is not an exhaustive negative proof.
+func TestIdentitySearchCompleteness(t *testing.T) {
+	a := agentID{uid: 10001, caps: capSetgid}
+	for i := uint32(5000); i < 5020; i++ {
+		a.gids = append(a.gids, i)
+	}
+	ns := toInodes([]kNode{
+		{uid: 0, gid: 0, mode: 0o755, dir: true, exists: true},
+		{uid: 0, gid: 1234, mode: 0o010, dir: true, exists: true},
+		{uid: 0, gid: 1234, mode: 0o020, exists: true},
+	})
+	if got, _ := gains(a, ns, 2, false, true); got != can {
+		t.Fatal("irrelevant existing groups hid a path identity")
+	}
+
+	nodes := []kNode{{uid: 0, gid: 0, mode: 0o755, dir: true, exists: true}}
+	for i := uint32(1); i <= 11; i++ {
+		nodes = append(nodes, kNode{uid: 0, gid: i, mode: 0o755, dir: true, exists: true})
+	}
+	nodes = append(nodes, kNode{uid: 0, gid: 99, mode: 0o020, exists: true})
+	ns = toInodes(nodes)
+	if got, why := gains(a, ns, 2, false, true); got != cantTell || !strings.Contains(why, "bound") {
+		t.Fatal("unexplored group authority became a negative proof", got, why)
+	}
+	// A witnessed access is valid even when other identities remain unexplored.
+	ns[len(ns)-1].gid = 0
+	if got, _ := gains(a, ns, 2, false, true); got != can {
+		t.Fatal("bounded search discarded a witnessed access")
+	}
+}

@@ -205,9 +205,10 @@ func allows(n *inode, id identity, want uint32, opened bool) bool {
 }
 
 // identities are the ones the agent can assume: with CAP_SETUID any uid (the ones that own something here, uid 0, and
-// one that owns nothing), with CAP_SETGID any set of groups among those here and its own. Capabilities stay: an agent
-// can keep them across a change of uid.
-func identities(a agentID, ns []inode) []identity {
+// one that owns nothing), with CAP_SETGID any set of inode-owner groups here. Other groups do not affect DAC.
+// The bool says whether every relevant combination was considered. Capabilities stay across a change of uid.
+func identities(a agentID, ns []inode) ([]identity, bool) {
+	complete := true
 	uids := []uint32{a.uid}
 	if a.caps&capSetuid != 0 {
 		have := map[uint32]bool{a.uid: true}
@@ -236,12 +237,8 @@ func identities(a agentID, ns []inode) []identity {
 	if a.caps&capSetgid != 0 {
 		have := map[uint32]bool{}
 		var rel []uint32
-		for _, g := range a.gids {
-			if !have[g] {
-				have[g] = true
-				rel = append(rel, g)
-			}
-		}
+		// TWN-4: only inode-owner groups affect the DAC group-class choice.
+		// Existing unrelated groups have no effect and must not exhaust the bound.
 		for _, n := range ns {
 			if n.exists && !have[n.gid] {
 				have[n.gid] = true
@@ -249,7 +246,8 @@ func identities(a agentID, ns []inode) []identity {
 			}
 		}
 		if len(rel) > 10 {
-			rel = rel[:10] // more groups than any real path names; the rest stay unexplored
+			rel = rel[:10]
+			complete = false // Unexplored identities cannot justify a refusal.
 		}
 		sets = sets[:0]
 		for mask := 0; mask < 1<<len(rel); mask++ {
@@ -268,7 +266,7 @@ func identities(a agentID, ns []inode) []identity {
 			ids = append(ids, identity{uid: u, gids: s, caps: a.caps})
 		}
 	}
-	return ids
+	return ids, complete
 }
 
 // reach: can identity id resolve the path to ns[i], every directory before it searchable (as it is, or opened)?
@@ -329,8 +327,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 		ids[0].gids[g] = true
 	}
 	opened, why := make([]bool, len(ns)), make([]string, len(ns))
+	complete := true
 	if change {
-		ids = identities(a, ns)
+		ids, complete = identities(a, ns)
 		opened, why = opens(ns, ids, a)
 	}
 	result, how := cannot, ""
@@ -347,6 +346,9 @@ func gains(a agentID, ns []inode, want uint32, onlyOpen, change bool) (verdict, 
 			}
 			result, how = cantTell, "the agent might reach "+ns[last].path+" by "+via+", past a directory the probe can't see into"
 		}
+	}
+	if !complete {
+		return cantTell, "the identity search exceeded its relevant-group bound; access through unexplored identities is unproven"
 	}
 	return result, how
 }
