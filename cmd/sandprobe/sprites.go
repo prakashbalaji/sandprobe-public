@@ -43,6 +43,8 @@ type runFlags struct {
 	scratch, canaryURL, canaryPin              string   // exec: the scratch directory (PRV-15); a public canary and its pin (HCN-5)
 	tlsInsecure                                bool     // canary check: accept a staging certificate; trust rests on the pin
 	noCanary                                   bool     // exec: run without a canary (HCN-5); Exfiltration isn't tested
+	providerEndpoints                          string   // exec and recipes: the checks the person attests (PRV-15)
+	providerEndpointsSet                       bool     // -provider-endpoints was given, even empty
 	keepSandbox                                bool
 	basetenState                               string
 }
@@ -69,12 +71,13 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.outDir, "out", "sandprobe-reports", "where the JSON and web reports go")
 	fs.StringVar(&r.min, "min", "", "exit 6 when the grade is below this letter")
 	fs.StringVar(&r.theme, "theme", "modern", "the web report's palette: modern or mission")
-	fs.BoolVar(&r.allowLocalProxy, "allow-local-proxy", false, "docker and aws-nitro: let EGR-3 use a proxy on the box's own loopback (UX-4); providers that exclude EGR-3 ignore or refuse it")
+	fs.BoolVar(&r.allowLocalProxy, "allow-local-proxy", false, "docker, aws-nitro, and exec or a recipe with -provider-endpoints EGR-3: let EGR-3 use a proxy on the box's own loopback (UX-4); providers that exclude EGR-3 ignore or refuse it")
 	fs.StringVar(&r.setup, "setup", "", "sprites: your sandbox's setup script, run once in the new sprite before the checkpoint (SPR-1)")
 	fs.StringVar(&r.as, "as", "", "docker and exec: the agent's user in the box (docker default: the image's own user, else root)")
 	fs.StringVar(&r.scratch, "scratch", "", "exec: an absolute directory in the box for the probe's scratch (default /tmp)")
 	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "exec: a public canary's control, https://control.<domain> (HCN-5)")
 	fs.BoolVar(&r.noCanary, "no-canary", false, "exec: run without a canary; the exfiltration checks aren't tested, so the run can't grade above C (HCN-5)")
+	fs.StringVar(&r.providerEndpoints, "provider-endpoints", "", "exec and recipes: turn on named checks that contact your provider's own endpoints (SEC-4, EGR-3, AMP-6, AMP-7), attesting your provider's terms allow each on your own account (PRV-15)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
 	fs.StringVar(&r.canaryPin, "canary-pin", os.Getenv("SANDPROBE_CANARY_PIN"), "exec: that canary's control-key pin, or two comma-separated during a rotation (HCN-1)")
 	fs.StringVar(&r.variant, "variant", "isolated", "aws-nitro: isolated, network-isolated, reference-open or reference-network-isolated")
@@ -309,6 +312,7 @@ type planDoc struct {
 	LaunchPath    string   `json:"launch_path"`
 	Probe         string   `json:"probe"`
 	Markers       string   `json:"markers"`
+	Attested      []string `json:"attested,omitempty"` // PRV-15: each check the person attests, before approval (AGT-3)
 	Contacts      []string `json:"contacts"`
 	BoxNamed      []string `json:"box_named_destinations"`
 	OpensReadOnly []string `json:"opens_read_only"`
@@ -388,6 +392,9 @@ func printPlan(w io.Writer, p planDoc) {
 	line("Runs the probe through", p.LaunchPath)
 	line("Puts the probe", p.Probe)
 	line("Marks", p.Markers)
+	if len(p.Attested) > 0 {
+		line("Turns on, on your attestation (-provider-endpoints, PRV-15)", p.Attested...)
+	}
 	line("Contacts", p.Contacts...)
 	line("Contacts only what the box names", p.BoxNamed...)
 	line("Opens read-only, never reading a value", p.OpensReadOnly...)

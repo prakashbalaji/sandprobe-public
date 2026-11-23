@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -293,12 +294,21 @@ func (b *RecipeBox) Delete(ctx context.Context) error {
 }
 
 // RecipeResidual is what a recipe run's report says it can't vouch for (PRV-1, RCP-2, RCP-3, RCP-4).
-func RecipeResidual(r *Recipe, target string) string {
+func RecipeResidual(r *Recipe, target string, attested []string) string {
 	s := "This box was made for this run through the " + r.Name + " recipe in " + target + ", reached through its " +
 		"sp_shell, and deleted only by the ID its create returned. The recipe ran on this machine with your own " +
 		"credentials and permissions. Persistence across a reset (PER-5) isn't tested: the recipe has no reset (RCP-3)."
-	if len(r.Exclusions) > 0 {
-		s += " The checks that would contact your provider's own endpoints (" + strings.Join(r.Exclusions, ", ") + ") were off (RCP-4)."
+	var off []string
+	for _, id := range r.Exclusions {
+		if !slices.Contains(attested, id) {
+			off = append(off, id)
+		}
+	}
+	if len(off) > 0 {
+		s += " The checks that would contact your provider's own endpoints (" + strings.Join(off, ", ") + ") were off (RCP-4)."
+	}
+	if len(attested) > 0 {
+		s += " You turned on " + strings.Join(attested, ", ") + " with -provider-endpoints, attesting that your provider's terms allow them on your own account (PRV-15)."
 	}
 	if r.AddressedBy == "name" {
 		s += " The box is reached by its name: sp_whois confirmed the name still held it before each call, but a box " +

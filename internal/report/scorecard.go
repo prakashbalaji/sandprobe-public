@@ -170,7 +170,7 @@ func Score(d Doc) Card {
 			r.NotApplicable, r.Why, r.Terms = true, NotApplicable, termsReasons(d.Run.Provider, terms)
 			c.Of--
 		case tested == 0 && len(optIn) > 0: // SCR-2: PRV-15's or RCP-4's default, which the person may lift
-			r.Why = "Not tested: run exec and recipes skip provider-owned endpoints by default"
+			r.Why = "Not tested: opt in with -provider-endpoints " + strings.Join(optIn, ",") + " if your provider's terms allow"
 		case tested == 0:
 			r.Why = "Not tested"
 		default:

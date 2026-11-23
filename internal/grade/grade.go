@@ -228,6 +228,12 @@ func manifestSound(m obs.Manifest) error {
 			return fmt.Errorf("%s is skipped without a reason", ck.ID)
 		}
 	}
+	// PRV-15: an attestation names a provider endpoint once, and never one that still carries a skip kind.
+	for i, id := range m.Attested {
+		if _, kind := m.SkipKinds[id]; !catalog.ProviderEndpoints[id] || kind || slices.Contains(m.Attested[:i], id) {
+			return fmt.Errorf("%s has an attestation it can't have (PRV-15)", id)
+		}
+	}
 	// SCR-2: a skip kind names only a provider-endpoint check the host skipped, and only one of the two kinds.
 	for id, kind := range m.SkipKinds {
 		if _, skipped := m.Skipped[id]; !skipped || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) {

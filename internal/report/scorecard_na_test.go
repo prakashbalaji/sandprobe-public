@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"html/template"
 	"maps"
 	"os"
 	"slices"
@@ -73,7 +74,7 @@ func replan(t *testing.T, o host.Options) (obs.Manifest, *obs.Doc, obs.CanaryEvi
 		delete(m.CheckNonces, id)
 		delete(m.Endpoints, id)
 	}
-	m.SkipKinds = plan.SkipKinds
+	m.SkipKinds, m.Attested = plan.SkipKinds, plan.Attested
 	return m, pd, q.Evidence
 }
 
@@ -132,7 +133,7 @@ func TestScoreOptInStaysNotTested(t *testing.T) {
 	for provider, excluded := range map[string]map[string]string{"exec": host.ExecExclusions(), "kubernetes": recipe} {
 		c := Score(replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipOptIn}))
 		r := row(t, c, "Cloud access")
-		if r.NotApplicable || r.Green || r.Why != "Not tested: run exec and recipes skip provider-owned endpoints by default" {
+		if r.NotApplicable || r.Green || r.Why != "Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow" {
 			t.Errorf("%s: Cloud access %+v", provider, r)
 		}
 		if c.Of != 6 || len(c.NotCounted()) != 0 {
@@ -149,7 +150,7 @@ func TestScoreNoCanaryIsNeverNotApplicable(t *testing.T) {
 	if r := row(t, c, "Exfiltration"); r.Green || r.NotApplicable || r.Why != "Not tested: run without a canary" {
 		t.Errorf("Exfiltration: %+v", r)
 	}
-	if d.Grade.Complete || c.Of != 6 || !strings.HasPrefix(row(t, c, "Cloud access").Why, "Not tested: run exec and recipes skip") {
+	if d.Grade.Complete || c.Of != 6 || !strings.HasPrefix(row(t, c, "Cloud access").Why, "Not tested: opt in") {
 		t.Errorf("complete %v, score %d/%d", d.Grade.Complete, c.Score, c.Of)
 	}
 }
@@ -277,6 +278,13 @@ func TestReportSchemaVersions(t *testing.T) {
 	if b, _ := json.Marshal(plain); strings.Contains(string(b), "SkipKinds") {
 		t.Error("a sandprobe/1 report carries SkipKinds")
 	}
+	off := host.ExecExclusions()
+	delete(off, "AMP-7")
+	attested := replanned(t, "exec", host.Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"AMP-7"}, Existing: true})
+	all := replanned(t, "exec", host.Options{Mode: "exec", ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "EGR-3", "AMP-6", "AMP-7"}, Existing: true})
+	if attested.Schema != SchemaSkipKinds || all.Schema != SchemaSkipKinds || len(all.Manifest.SkipKinds) != 0 {
+		t.Errorf("attested reports declare %s, and with every check attested (no kinds) %s", attested.Schema, all.Schema)
+	}
 }
 
 // SCR-2: the native adapters the tests treat as provider-terms are exactly the binary's own policy, and the policy
@@ -295,5 +303,33 @@ func TestNativesAreThePolicy(t *testing.T) {
 		if got := PolicyKinds(provider)["AMP-7"]; got != want {
 			t.Errorf("%q: AMP-7 %q, want %q", provider, got, want)
 		}
+	}
+}
+
+// PRV-15: the report records the person's attestation beside each check -provider-endpoints turned on, and only
+// there, in the JSON and on the page; the checks run as for a provider that allows them and stay find-only.
+func TestReportRecordsAttestation(t *testing.T) {
+	off := host.ExecExclusions()
+	delete(off, "SEC-4")
+	delete(off, "AMP-7")
+	d := replanned(t, "exec", host.Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "AMP-7"}, Existing: true})
+	for _, c := range d.Checks {
+		attested := c.ID == "SEC-4" || c.ID == "AMP-7"
+		if (c.Attestation == Attestation) != attested || !attested && c.Attestation != "" {
+			t.Errorf("%s: attestation %q", c.ID, c.Attestation)
+		}
+		if attested && (c.Result == obs.Pass || c.Result == obs.Absent || c.Result == obs.Skipped) {
+			t.Errorf("%s: %s", c.ID, c.Result)
+		}
+	}
+	if r := row(t, Score(d), "Cloud access"); r.NotApplicable || strings.HasPrefix(r.Why, "Not tested") {
+		t.Errorf("Cloud access: %+v", r)
+	}
+	page, err := HTML(d, "modern")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(page), template.HTMLEscapeString(Attestation)); n != 2 {
+		t.Errorf("the page shows the attestation %d times, want 2", n)
 	}
 }

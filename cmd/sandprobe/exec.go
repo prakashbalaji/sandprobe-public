@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -81,15 +82,23 @@ func (r runFlags) execCanaryChoice() (execCanary, error) {
 		retainNote: retain}, nil
 }
 
-func execPlan(box *host.ExecBox, as string, c execCanary) planDoc {
+func execPlan(box *host.ExecBox, as string, c execCanary, attested []string, allowLocalProxy bool) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	user := "whoever it runs as, which the report calls unconfirmed as the agent's user"
 	if as != "" {
 		user = as + ", checked before any check runs"
 	}
 	residual := host.ExecResidual
+	if len(attested) > 0 {
+		residual += " You turned on " + strings.Join(attested, ", ") + " with -provider-endpoints, attesting that your provider's terms allow them on your own account (PRV-15)."
+	}
 	if c.retainNote != "" {
 		residual += " " + c.retainNote
+	}
+	contacts, named := []string{c.describe}, []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are off, since they'd contact your provider's own endpoints (PRV-15)"}
+	lines, extra, boxNamed := attestedPlan(attested, host.ExecExclusions(), true, "PRV-15")
+	if len(attested) > 0 {
+		contacts, named = append(contacts, extra...), boxNamed
 	}
 	return planDoc{Provider: "exec",
 		Creates: []string{"nothing: your existing box, reached by: " + strings.Join(box.Command, " "),
@@ -97,13 +106,14 @@ func execPlan(box *host.ExecBox, as string, c execCanary) planDoc {
 		LaunchPath:    "your command, as " + user + "; it must start sh reading stdin. It first asks the box's machine type (uname -m) to pick the probe, then who it runs as, before any check",
 		Probe:         "decoded from base64 into the scratch directory, run there, and removed with it",
 		Markers:       "none: an existing box gets no markers and isn't reset, so PER-5 is skipped",
-		Contacts:      []string{c.describe},
-		BoxNamed:      []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are off, since they'd contact your provider's own endpoints (PRV-15)"},
+		Attested:      lines,
+		Contacts:      contacts,
+		BoxNamed:      named,
 		OpensReadOnly: append(append([]string{}, sec3.Targets...), "private SSH keys, /run/secrets and .env files it finds", "/proc/<pid>/environ and /proc/<pid>/mem of other processes"),
 		Runs:          []string{"the probe, and sudo -n -l, which runs no command", "the wrapper's sh, mkdir, base64, chmod, rm and uname"},
 		Reset:         "none: your box isn't reset",
 		Deletes:       "nothing of your box; only the scratch directory",
-		LocalProxy:    "excluded: EGR-3 is off",
+		LocalProxy:    localProxy(attested, allowLocalProxy),
 		Time:          "about a minute, plus your command's own start-up",
 		Residual:      residual,
 	}
@@ -150,7 +160,12 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	p := execPlan(box, r.as, choice)
+	attested, err := providerEndpoints(r.providerEndpoints, r.providerEndpointsSet, host.ExecExclusions())
+	if err != nil {
+		return 0, err
+	}
+	allowLocal := r.allowLocalProxy && slices.Contains(attested, "EGR-3") // SBX-1 (e): only once EGR-3 is on
+	p := execPlan(box, r.as, choice, attested, allowLocal)
 	if planOnly {
 		if o.json() {
 			o.emit(p)
@@ -211,7 +226,8 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 			return err
 		}
 		step("running the probe as uid %d through your command", w.UIDs[1])
-		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, NoCanary: choice.none})
+		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(host.ExecExclusions(), attested),
+			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none})
 		return err
 	}()
 	cctx, ccancel := context.WithTimeout(context.Background(), 2*time.Minute) // even after Ctrl-C
