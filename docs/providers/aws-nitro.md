@@ -33,7 +33,11 @@ PROFILE=<your profile> deploy/eks.sh down      # deletes exactly what up recorde
 
 - `isolated`: the EKS docs' own example, `amazonlinux:2023` as its image's default user.
 - `network-isolated`: the same, with `sandbox.amazonaws.com/network-isolated: "true"`, so it boots with no network
-  device. Its vsock still reaches guest-bound ports.
+  device. AWS's [network isolation](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-network-isolation.html)
+  page, read 23 Nov 2026, says the guest's vsock device "is accessible to all processes inside the guest, including
+  container workloads". A run on 23 Nov 2026 found no `/dev/vsock` in this pod's container, so AMP-6 was skipped with "no vsock
+  device". AMP-6 looks only for that device file, so on this pod it doesn't test the vsock channel AWS describes. The
+  skip isn't a pass: the report lists AMP-6 as skipped, with that reason.
 - `reference-open` and `reference-network-isolated`: an operator-hardened reference pod (user 10001, all
   capabilities dropped, read-only root, no service token).
 
@@ -48,7 +52,7 @@ No check is excluded for this provider. These are skipped:
 | PER-5 | The pod has no persistent volume, so there's nothing a reset could keep. |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 | EGR-3 | Skipped when the pod's environment names no proxy, or names a local one you didn't approve with `-allow-local-proxy`. |
-| AMP-6 | Skipped when the pod has no vsock device. |
+| AMP-6 | Skipped when the pod's container has no `/dev/vsock`. |
 
 ## Terms and consent
 
