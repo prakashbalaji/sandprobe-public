@@ -24,7 +24,7 @@ class MeasurementPolicyTests(unittest.TestCase):
                 parse_hosts(value)
 
     def test_daytona_rejects_before_commands_or_credentials(self):
-        module = runpy.run_path(str(ROOT / "deploy/daytona-agent/run.py"))
+        module = runpy.run_path(str(ROOT / "experiments/daytona-agent/run.py"))
         with patch.dict(module["main"].__globals__, aws=lambda *a: self.fail("cloud call before validation")):
             with self.assertRaisesRegex(ValueError, "^invalid workload host selection$"):
                 module["main"](argparse.Namespace(upload_hosts="169.254.169.254"))

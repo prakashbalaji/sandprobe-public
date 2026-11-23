@@ -74,16 +74,16 @@ does not currently list EKS; the runner does not turn a supplied reference into
 independent AWS authorization. No subscriptions or new model agreements are activated.
 
 ```sh
-python3 deploy/eks-agent/runner.py preflight --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF"
-python3 deploy/eks-agent/runner.py run --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF"
-python3 deploy/eks-agent/runner.py cleanup --run-id "$SANDPROBE_RUN_ID"
+python3 experiments/eks-agent/runner.py preflight --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF"
+python3 experiments/eks-agent/runner.py run --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF"
+python3 experiments/eks-agent/runner.py cleanup --run-id "$SANDPROBE_RUN_ID"
 ```
 
 If the local Docker engine is unavailable, use a successful **main push** run of
 this repository's networked-agent workflow for the exact current clean source SHA:
 
 ```sh
-python3 deploy/eks-agent/runner.py run --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF" --image-run-id "$SANDPROBE_IMAGE_RUN_ID"
+python3 experiments/eks-agent/runner.py run --model "$SANDPROBE_MODEL_ID" --approval-ref "$AWS_EKS_TEST_APPROVAL_REF" --image-run-id "$SANDPROBE_IMAGE_RUN_ID"
 ```
 
 This option requires `gh` and `skopeo` instead of Docker. CI retains the tested
@@ -213,7 +213,7 @@ preflight errors exit2; cleanup exits0 only when confirmed, otherwise5.
 Install hash-locked requirements in an isolated environment, then run:
 
 ```sh
-python -m unittest discover -s deploy/eks-agent -p 'test_*.py'
+python -m unittest discover -s experiments/eks-agent -p 'test_*.py'
 DURABLE_STATE=1 bash deploy/eks_test.sh
 DURABLE_STATE=1 bash deploy/canary_test.sh
 ```

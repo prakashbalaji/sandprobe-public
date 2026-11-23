@@ -1,0 +1,54 @@
+name: Bug report
+description: Sandprobe crashed, refused something it should take, or did something its plan didn't say.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A check that passed when it shouldn't have is a [false pass](https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml): please use that form instead. A security problem goes privately, as [SECURITY.md](https://github.com/summationai/sandprobe/blob/main/SECURITY.md) says.
+
+        **Remove every secret value, credential, token, account ID and private host name** from what you paste.
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The exact command, with its flags. Never paste a key or token.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The output and the exit code. `-o json` gives the error as JSON.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sandprobe version
+      description: The output of `sandprobe version`.
+      placeholder: sandprobe 0.2.1
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Where you ran it
+      description: Your OS and CPU, and the provider or `run` mode.
+      placeholder: macOS arm64, run docker
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed every secret value, credential, token and private name from this report.
+          required: true

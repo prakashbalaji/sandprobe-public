@@ -35,7 +35,7 @@ class HostWorkloadTests(unittest.TestCase):
         def call(args, payload=None, **kwargs):
             if Path(args[2]).name == "controller.py":
                 return subprocess.run(args, input=payload, check=True, capture_output=True, timeout=10).stdout
-            self.assertEqual(args[2:], [str(ROOT / "deploy/daytona-agent/model.py"), "request"])
+            self.assertEqual(args[2:], [str(ROOT / "experiments/daytona-agent/model.py"), "request"])
             r.models += 1
             if model_failure:
                 raise Failure("command_failed")

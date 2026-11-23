@@ -2,7 +2,7 @@ import runpy
 from pathlib import Path
 import unittest
 
-message=runpy.run_path(str(Path(__file__).resolve().parents[1]/"managed_status.py"))["completion_message"]
+message=runpy.run_path(str(Path(__file__).resolve().parents[2]/"deploy"/"managed_status.py"))["completion_message"]
 
 class ManagedCompletionTests(unittest.TestCase):
     def card(self,complete=False):return {"valid":True,"score":4,"of":6,"coverage":{"complete":complete}}

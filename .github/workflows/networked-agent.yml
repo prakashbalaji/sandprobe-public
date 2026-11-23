@@ -2,7 +2,7 @@ name: Networked-agent evaluation
 on:
   pull_request:
     paths:
-      - deploy/eks-agent/**
+      - experiments/eks-agent/**
       - deploy/canary.sh
       - deploy/canary-health/**
       - cmd/sandprobe-agent-grade/**
@@ -35,29 +35,29 @@ jobs:
       - name: Test render and model-response validation with stub SDK replies
         run: |
           python3 -m venv /tmp/agent-test-env
-          /tmp/agent-test-env/bin/pip install --require-hashes -r deploy/eks-agent/requirements.lock
-          /tmp/agent-test-env/bin/python -m unittest discover -s deploy/eks-agent -p 'test_*.py'
+          /tmp/agent-test-env/bin/pip install --require-hashes -r experiments/eks-agent/requirements.lock
+          /tmp/agent-test-env/bin/python -m unittest discover -s experiments/eks-agent -p 'test_*.py'
       - name: Build pinned task image locally
-        run: docker build -t sandprobe-agent-local deploy/eks-agent
+        run: docker build -t sandprobe-agent-local experiments/eks-agent
       - name: Exercise production task with explicit stub in a network-disabled container
         run: |
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
             --memory 256m --cpus 1 \
             --tmpfs /workspace:rw,uid=10001,gid=10001,mode=0700,size=64m \
             --tmpfs /tmp:rw,uid=10001,gid=10001,mode=0700,size=64m \
-            --mount type=bind,src="$PWD/deploy/eks-agent/container_smoke.py",dst=/checks/smoke.py,readonly \
-            --mount type=bind,src="$PWD/deploy/eks-agent/fixtures/solution.py",dst=/checks/solution.py,readonly \
+            --mount type=bind,src="$PWD/experiments/eks-agent/container_smoke.py",dst=/checks/smoke.py,readonly \
+            --mount type=bind,src="$PWD/experiments/eks-agent/fixtures/solution.py",dst=/checks/solution.py,readonly \
             --entrypoint python sandprobe-agent-local -I /checks/smoke.py
       - name: Execute allowed/isolated receiver calibration with immutable-ID cleanup
-        run: python3 deploy/eks-agent/container_network_test.py
+        run: python3 experiments/eks-agent/container_network_test.py
       - name: Exercise the shared clean environment with an inherited synthetic credential
-        run: python3 deploy/eks-agent/container_environment_test.py
+        run: python3 experiments/eks-agent/container_environment_test.py
       - name: Exercise delegated EKS lifecycle with durable state and fake AWS
         run: DURABLE_STATE=1 bash deploy/eks_test.sh
       - name: Exercise standard canary cleanup
         run: DURABLE_STATE=1 bash deploy/canary_test.sh
       - name: Export and verify the tested image archive
-        run: python3 deploy/eks-agent/image_artifact.py create "$RUNNER_TEMP/sandprobe-image" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT"
+        run: python3 experiments/eks-agent/image_artifact.py create "$RUNNER_TEMP/sandprobe-image" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT"
       - name: Retain the verified main image for daemonless evaluations
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

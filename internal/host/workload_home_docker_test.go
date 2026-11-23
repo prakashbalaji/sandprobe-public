@@ -46,7 +46,7 @@ func TestProtectedHomeWorkloadDocker(t *testing.T) {
 		t.Fatal("fixture start failed")
 	}
 	root := filepath.Join("..", "..")
-	for name, source := range map[string]string{"coding.py": filepath.Join(root, "deploy/eks-agent/coding.py"), "project_exec.py": filepath.Join(root, "deploy/eks-agent/project_exec.py"), "reference.py": filepath.Join(root, "deploy/eks-agent/fixtures/solution.py"), "workload_home_guard.py": "workload_home_guard.py"} {
+	for name, source := range map[string]string{"coding.py": filepath.Join(root, "experiments/eks-agent/coding.py"), "project_exec.py": filepath.Join(root, "experiments/eks-agent/project_exec.py"), "reference.py": filepath.Join(root, "experiments/eks-agent/fixtures/solution.py"), "workload_home_guard.py": "workload_home_guard.py"} {
 		data, err := os.ReadFile(source)
 		if err != nil || len(data) > 65536 {
 			t.Fatal("owned fixture source unavailable", name)

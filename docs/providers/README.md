@@ -1,0 +1,43 @@
+# Where Sandprobe runs
+
+This page is the single source for each provider's status. Each provider's own page has its setup, the exact command,
+what it skips and why, its terms, and what the score can and can't reach there.
+
+> **Status for 0.3.0, being validated.** These tiers are a draft. The maintainers will finalise them before 0.3.0
+> ships. "Last validated" fills in as each provider is checked against 0.3.0.
+
+- **Stable target:** meant to be fully supported in 0.3.0.
+- **Beta:** works, with known gaps that its page names.
+- **Experimental:** needs your provider's written consent before you run it.
+
+| Provider | Status | Run | Setup | Checks | Last validated |
+|-|-|-|-|-|-|
+| [Any box with a shell](exec.md) | Stable target | `sandprobe run exec -as <user> -y -- <command>` | None. Your own command reaches the box. | Off by default: SEC-4, EGR-3, AMP-6, AMP-7, since they'd contact your provider's own endpoints (PRV-15). PER-5 skipped: an existing box is never reset. | pending |
+| [Local Docker](docker.md) | Stable target | `sandprobe run docker <image> -as <user> -y` | Docker, with the image already local | No provider exclusions. PER-5 runs: the reset recreates the container (PRV-14). | pending |
+| [Kubernetes](kubernetes.md) | Stable target | `sandprobe run kubernetes -as <user> -y` | `kubectl`; `SANDPROBE_KUBE_CONTEXT` (required), `SANDPROBE_KUBE_NAMESPACE`, `SANDPROBE_KUBE_IMAGE`, `SANDPROBE_KUBE_OVERRIDES` | Off by default: SEC-4, EGR-3, AMP-6, AMP-7, since whoever hosts the cluster has terms the recipe can't know (PRV-16). PER-5 skipped: the recipe has no reset. | pending |
+| [E2B](e2b.md) | Stable target | `sandprobe run e2b -y` | `SANDPROBE_E2B_KEY_FILE` or `E2B_API_KEY`; `SANDPROBE_E2B_PYTHON` | Skips SEC-4, EGR-3, AMP-6, AMP-7: E2B-owned endpoints (PRV-8). PER-5 skipped: no reset. | pending |
+| [Daytona](daytona.md) | Stable target | `sandprobe run daytona -y` | `SANDPROBE_DAYTONA_KEY_FILE` or `DAYTONA_API_KEY`; `SANDPROBE_DAYTONA_PYTHON` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Daytona-owned endpoints (PRV-12). PER-5 skipped: no reset. | pending |
+| [Vercel Sandbox](vercel.md) | Stable target | `sandprobe run vercel -y` | `SANDPROBE_VERCEL_KEY_FILE` or `VERCEL_TOKEN`; `VERCEL_TEAM_ID`; `VERCEL_PROJECT_ID` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Vercel's platform is out of scope (PRV-9). PER-5 skipped: no reset. | pending |
+| [Cloudflare Sandbox](cloudflare.md) | Stable target | `sandprobe run cloudflare -y` | `SANDPROBE_CLOUDFLARE_SETUP`: the journal `deploy/cloudflare/manage.py up` writes | Skips SEC-4, EGR-3, AMP-6, AMP-7: Cloudflare-owned endpoints (PRV-10). PER-5 skipped: no reset. | pending |
+| [Fly Sprites](sprites.md) | Stable target | `sandprobe run sprites -y` | The `sprite` CLI, logged in under `~/.config/sandprobe/sprites`; `SANDPROBE_SPRITES_ORG` if that login holds several orgs | Skips SEC-4, EGR-3, AMP-6, AMP-7: Fly-owned endpoints (the Sprites PRV row). Runs PER-5 through a checkpoint and restore. | pending |
+| [AWS Nitro on EKS](aws-nitro.md) | Stable target | `sandprobe run aws-nitro -variant isolated -y` | The cluster `deploy/eks.sh up` makes, with `PROFILE` set to your AWS CLI profile; `kubectl` | No provider exclusions, so SEC-4 and AMP-7 run. PER-5 skipped: the pod has no persistent volume. | pending |
+| [Modal](modal.md) | Beta: a proof of concept, not in the release build | `bin/sandprobe-poc poc modal run -variant default -canary <state file> -y` | `make poc`; `SANDPROBE_MODAL_WORKSPACE`; the token in `~/.modal.toml`; a canary from `deploy/canary.sh` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Modal-owned endpoints (PRV-5). PER-5 skipped: no reset. | pending |
+| [Baseten](baseten.md) | Beta | `sandprobe run baseten -y` | `SANDPROBE_BASETEN_KEY_FILE` or `BASETEN_API_KEY`; `BASETEN_TEAM_ID` when the key reaches several teams; `BASETEN_REGION` (optional) | Skips SEC-4, EGR-3, AMP-6, AMP-7: Baseten-owned endpoints (PRV-6). PER-5 skipped: suspend and resume isn't a reset. | pending |
+| [Boat](boat.md) | Experimental: needs your provider's written consent ([Boat's terms](https://boat.dev/terms)) | `sandprobe run boat -y` | `SANDPROBE_BOAT_KEY_FILE` or `BOAT_API_KEY` | Skips SEC-4, EGR-3, AMP-6, AMP-7: Boat-owned endpoints (PRV-11). PER-5 skipped: no reset. | pending |
+| [exe.dev](exedev.md) | Experimental: needs your provider's written consent ([exe.dev's terms](https://exe.dev/docs/terms-of-service)) | `sandprobe run exe.dev -y` | `SANDPROBE_EXEDEV_KEY_FILE` (a key file only) | Skips SEC-4, EGR-3, AMP-6, AMP-7: exe.dev's own endpoints (PRV-13). PER-5 skipped: no reset. | pending |
+
+Every check a row doesn't skip runs. Every run also has these skips. Each is listed in the report with its reason,
+and none counts as a pass (GRD-3):
+
+- EGR-6 (upload sites such as GitHub, npm, PyPI or S3), since contacting them isn't approved;
+- EGR-3 when the agent's environment names no proxy, or names a local one you didn't approve with `-allow-local-proxy`;
+- AMP-6 when the box has no vsock device.
+
+Run `sandprobe providers` to see which of these are ready on your machine, and what to set up for the rest. Run
+`sandprobe plan <provider>` to see what a run would create, contact, mark and delete. Nothing is created until you
+approve the plan.
+
+Read your provider's terms before you run anything. Sandprobe never presents a run as the provider's permission.
+The rules behind each row are its PRV row in [SPEC.md](../../SPEC.md).
+
+This page shows coverage only. It holds no grades, scores or results of any provider's real boxes.

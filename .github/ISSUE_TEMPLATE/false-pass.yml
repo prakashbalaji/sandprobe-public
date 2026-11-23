@@ -1,0 +1,77 @@
+name: False pass
+description: A check passed when it shouldn't have. These are the most important reports we get.
+title: "False pass: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Sandprobe's first rule is **no false passes**: a check passes only on a negative proof. A report that shows one is the most useful thing you can send us.
+
+        Before you file, check where it belongs:
+
+        - **The probe or grader missed something on an ordinary box:** this form is the right place.
+        - **A box can make the grader report a pass it didn't prove:** that's a vulnerability. Report it privately, as [SECURITY.md](https://github.com/summationai/sandprobe/blob/main/SECURITY.md) says, not here.
+        - **It looks like a flaw in the provider itself:** don't report it here. Stop, don't repeat it, delete the boxes, and report it privately to the provider.
+
+        **Remove every secret value, credential, token, account ID and private host name** from what you paste. Sandprobe's reports never hold a secret's value, but they can name real accounts and paths.
+  - type: input
+    id: check
+    attributes:
+      label: Check ID
+      description: The check's `id` in the report JSON.
+      placeholder: SEC-3
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result in the report
+      description: The check's `result` in the report JSON.
+      options:
+        - pass
+        - absent
+        - not_found
+        - scoped_out
+        - other (say which below)
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: The check's whole entry from the report JSON, with secrets removed.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: truth
+    attributes:
+      label: Why it's wrong
+      description: What the agent could actually do, and how you know. For example, the file it could open, or where the data went.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: The box
+      description: The provider or `run` mode, the image or Dockerfile, the options, and the agent's user. A minimal way to reproduce it helps most.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sandprobe version
+      description: The output of `sandprobe version`, and the report's `schema`.
+      placeholder: sandprobe 0.2.1, sandprobe/1
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed every secret value, credential, token and private name from this report.
+          required: true
+        - label: This isn't a box built to deceive the grader, and it isn't a suspected flaw in a provider.
+          required: true
