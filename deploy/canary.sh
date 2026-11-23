@@ -157,7 +157,9 @@ outside() {
   readiness tls
   if ! got=$(openssl s_client -connect "$ip:443" -servername "health.canary.$(get domain)" </dev/null 2>/dev/null |
     openssl x509 -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | shasum -a 256 | cut -d' ' -f1); then
-    readiness tls_transport_failed
+    # A client/pipeline exit is not proof the peer was unreachable.
+    if [ "$got" = "$pin" ]; then readiness tls_command_failed_matching_pin
+    else readiness tls_command_failed; fi
     fail "receiver TLS verification command failed"
   fi
   if [ "$got" != "$pin" ]; then
