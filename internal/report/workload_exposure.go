@@ -49,6 +49,9 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 		if row.Name != Categories[i].Name {
 			return false
 		}
+		if !row.NotApplicable && row.Terms != "" {
+			return false
+		}
 		if row.NotApplicable { // SCR-2: never green, never found or unknown, and out of the score
 			if row.Green || len(row.Found) > 0 || len(row.Unknown) > 0 {
 				return false

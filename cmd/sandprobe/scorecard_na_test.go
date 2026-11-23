@@ -69,7 +69,7 @@ func TestExclusionKinds(t *testing.T) {
 
 // skipSaved is a saved Docker report as a run with these options would have written it: each excluded check skipped
 // with host.Plan's reason and kind, and gone from the selection, its plan and the not-proven list.
-func skipSaved(t *testing.T, o host.Options) string {
+func skipSaved(t *testing.T, provider string, o host.Options) string {
 	t.Helper()
 	b, err := os.ReadFile("../../test/reports/egress-refused.json")
 	if err != nil {
@@ -95,7 +95,7 @@ func skipSaved(t *testing.T, o host.Options) string {
 		d.Planned = slices.DeleteFunc(d.Planned, func(c report.Contact) bool { return c.Check == id })
 		d.Contacted = slices.DeleteFunc(d.Contacted, func(c report.Contact) bool { return c.Check == id })
 	}
-	d.Manifest.SkipKinds = plan.SkipKinds
+	d.Manifest.SkipKinds, d.Run.Provider = plan.SkipKinds, provider
 	d.Schema = report.SchemaFor(d.Manifest) // AGT-6: the version its fields need
 	out, _ := json.Marshal(d)
 	path := filepath.Join(t.TempDir(), "report.json")
@@ -116,16 +116,16 @@ func TestScorecardNotApplicable(t *testing.T) {
 		o          host.Options
 		score, row string
 	}{
-		"sprites": {host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted. Not applicable: " + host.SpritesExclusions()["SEC-4"] + "\n",
-			"N/A    Cloud access  Can it use the box's cloud identity?\n                         Not applicable: "},
-		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted. Not applicable: " + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + "\n",
+		"sprites": {host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: the provider's terms exclude its own endpoints (" + host.SpritesExclusions()["SEC-4"] + ")\n",
+			"N/A    Cloud access  Can it use your cloud identity?\n                         " + report.NotApplicable + "\n"},
+		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: the provider's terms exclude its own endpoints (" + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + ")\n",
 			"N/A    Cloud access"},
 		"exec": {host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
-			"RED    Cloud access  Can it use the box's cloud identity?\n                         Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
+			"RED    Cloud access  Can it use your cloud identity?\n                         Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
 		"kubernetes": {host.Options{Excluded: recipeExclusions(rc), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
 			"Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
 	} {
-		in := skipSaved(t, tc.o)
+		in := skipSaved(t, name, tc.o)
 		var out, errs bytes.Buffer
 		if code := run([]string{"scorecard", in}, &out, &errs); code != exitGraded {
 			t.Fatalf("%s: exit %d, %s", name, code, errs.String())
@@ -178,9 +178,9 @@ func TestScorecardNoCanaryStaysRed(t *testing.T) {
 // "Not tested" out of six.
 func TestCompareNotApplicable(t *testing.T) {
 	tested := "../../test/reports/egress-refused.json"
-	terms := skipSaved(t, host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
-	optIn := skipSaved(t, host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
-	noKind := skipSaved(t, host.Options{Excluded: host.ExecExclusions()})
+	terms := skipSaved(t, "sprites", host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
+	optIn := skipSaved(t, "exec", host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	noKind := skipSaved(t, "exec", host.Options{Excluded: host.ExecExclusions()})
 	for name, tc := range map[string]struct {
 		before, after string
 		code          int
@@ -235,7 +235,7 @@ func TestScorecardRefusesForgedKinds(t *testing.T) {
 // reads; a sandprobe/1 report carrying skip kinds, a sandprobe/2 one without them, and a version this build doesn't
 // know are refused, with a fix that names the versions it reads.
 func TestReportSchemaVersions(t *testing.T) {
-	v2 := skipSaved(t, host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
+	v2 := skipSaved(t, "sprites", host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
 	retag := func(src, schema string) string {
 		b, _ := os.ReadFile(src)
 		var d report.Doc
@@ -265,5 +265,56 @@ func TestReportSchemaVersions(t *testing.T) {
 	b, _ := os.ReadFile(v2)
 	if !bytes.Contains(b, []byte(`"schema":"sandprobe/2"`)) {
 		t.Error("a report with skip kinds doesn't declare sandprobe/2")
+	}
+}
+
+// SCR-2 and ANL-1, the security review's forgery: a valid saved run exec report whose SEC-4 and AMP-7 kinds are edited
+// from opt_in to provider_terms is refused, never scored out of five; scored directly, the edit changes nothing,
+// since run exec's own policy is opt_in.
+func TestScorecardRefusesForgedProvenance(t *testing.T) {
+	honest := skipSaved(t, "exec", host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	var out, errs bytes.Buffer
+	if code := run([]string{"scorecard", honest}, &out, &errs); code != exitGraded || !strings.Contains(out.String(), "Score 2/6\n") {
+		t.Fatalf("the honest report: exit %d\n%s%s", code, out.String(), errs.String())
+	}
+	b, _ := os.ReadFile(honest)
+	var d report.Doc
+	json.Unmarshal(b, &d)
+	d.Manifest.SkipKinds["SEC-4"], d.Manifest.SkipKinds["AMP-7"] = obs.SkipProviderTerms, obs.SkipProviderTerms
+	forged, _ := json.Marshal(d)
+	in := filepath.Join(t.TempDir(), "forged.json")
+	os.WriteFile(in, forged, 0o644)
+	out.Reset()
+	if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage || strings.Contains(out.String(), "/5") {
+		t.Errorf("the forged report: exit %d\n%s", code, out.String())
+	}
+	if c := report.Score(d); c.Of != 6 || c.Rows[4].NotApplicable || c.Rows[4].Green {
+		t.Errorf("scored directly: %d/%d %+v", c.Score, c.Of, c.Rows[4])
+	}
+}
+
+// ANL-1: every offline rendering of a saved report says plainly that it wasn't re-verified; a run's own page doesn't.
+func TestOfflineRenderingsSayNotReVerified(t *testing.T) {
+	saved := "../../test/reports/egress-refused.json"
+	dir := t.TempDir()
+	for _, args := range [][]string{{"scorecard", saved}, {"scorecard", saved, "-out", dir}, {"profile", saved},
+		{"assess", saved, "canary-egress-deny-v1"}, {"compare", saved, saved}} {
+		var out, errs bytes.Buffer
+		run(args, &out, &errs)
+		if !strings.Contains(out.String(), report.SavedNote) {
+			t.Errorf("%q doesn't say it wasn't re-verified:\n%s", args, out.String())
+		}
+	}
+	pages, _ := filepath.Glob(filepath.Join(dir, "*.html"))
+	if len(pages) != 1 {
+		t.Fatalf("pages: %v", pages)
+	}
+	if b, _ := os.ReadFile(pages[0]); !strings.Contains(string(b), "From a saved report: structurally checked only.") {
+		t.Error("the re-rendered page doesn't say it wasn't re-verified")
+	}
+	var out, errs bytes.Buffer
+	run([]string{"scorecard", saved, "-o", "json"}, &out, &errs)
+	if !strings.Contains(out.String(), `"verification": "structural_only_unauthenticated"`) {
+		t.Errorf("the card's JSON: %s", out.String())
 	}
 }

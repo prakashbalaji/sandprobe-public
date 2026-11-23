@@ -341,6 +341,15 @@ func ExecExclusions() map[string]string {
 	return map[string]string{"SEC-4": why, "EGR-3": why, "AMP-6": why, "AMP-7": why}
 }
 
+// TermsExclusions is each native adapter's PRV-row exclusions by the provider name its reports record (PRV-5): the
+// provider's terms exclude its own endpoints, so a report naming that provider may mark them provider_terms (SCR-2).
+// It is the binary's own policy, so a scorecard never takes a saved report's word for a kind.
+var TermsExclusions = map[string]func() map[string]string{
+	"sprites": SpritesExclusions, "e2b": E2BExclusions, "daytona": DaytonaExclusions, "vercel": VercelExclusions,
+	"cloudflare": CloudflareExclusions, "boat": BoatExclusions, "baseten": BasetenExclusions, "exe.dev": ExedevExclusions,
+	"modal": func() map[string]string { return ModalExcluded },
+}
+
 // ExecResidual is what a run exec report says it can't vouch for (PRV-1, PRV-2).
 const ExecResidual = "This is an existing box, reached through your own command: the boundary is your word that it's the agent's box and " +
 	"not production (PRV-2). Sandprobe didn't create, reset or delete it; it placed only a scratch directory, removed after each " +

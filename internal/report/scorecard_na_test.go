@@ -77,7 +77,8 @@ func replan(t *testing.T, o host.Options) (obs.Manifest, *obs.Doc, obs.CanaryEvi
 	return m, pd, q.Evidence
 }
 
-// natives are the native adapters whose PRV rows exclude the provider's own endpoints because its terms do (PRV-5).
+// natives are the native adapters whose PRV rows exclude the provider's own endpoints because its terms do (PRV-5),
+// by the provider name their reports record: exactly host.TermsExclusions (TestNativesAreThePolicy).
 var natives = map[string]map[string]string{"e2b": host.E2BExclusions(), "daytona": host.DaytonaExclusions(),
 	"vercel": host.VercelExclusions(), "cloudflare": host.CloudflareExclusions(), "boat": host.BoatExclusions(),
 	"baseten": host.BasetenExclusions(), "exe.dev": host.ExedevExclusions(), "sprites": host.SpritesExclusions(),
@@ -90,11 +91,10 @@ func TestScoreNotApplicable(t *testing.T) {
 		d := replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipProviderTerms})
 		c := Score(d)
 		r := row(t, c, "Cloud access")
-		if !r.NotApplicable || r.Green || !strings.HasPrefix(r.Why, "Not applicable: ") || !strings.Contains(r.Why, excluded["SEC-4"]) ||
-			!strings.Contains(r.Why, excluded["AMP-7"]) {
+		if !r.NotApplicable || r.Green || r.Why != NotApplicable || !strings.Contains(r.Terms, excluded["SEC-4"]) || !strings.Contains(r.Terms, excluded["AMP-7"]) {
 			t.Errorf("%s: Cloud access %+v", provider, r)
 		}
-		if c.Of != 5 || c.Score > 5 || len(c.NotCounted()) != 1 || !strings.HasPrefix(c.NotCounted()[0], "Cloud access isn't counted. Not applicable: ") {
+		if c.Of != 5 || c.Score > 5 || len(c.NotCounted()) != 1 || !strings.HasPrefix(c.NotCounted()[0], "Cloud access isn't counted: the provider's terms exclude its own endpoints (") {
 			t.Errorf("%s: score %d/%d, line %q", provider, c.Score, c.Of, c.NotCounted())
 		}
 		for _, other := range c.Rows {
@@ -116,7 +116,7 @@ func TestScoreNotApplicable(t *testing.T) {
 		}
 		p := string(page)
 		if !strings.Contains(p, "<span>/5</span>") || strings.Contains(p, "<span>/6</span>") || !strings.Contains(p, `class="cat na"`) ||
-			!strings.Contains(p, "NOT APPLICABLE") || !strings.Contains(p, "Cloud access isn&#39;t counted.") {
+			!strings.Contains(p, "NOT APPLICABLE") || !strings.Contains(p, "Cloud access isn&#39;t counted: ") || strings.Contains(p, "From a saved report") {
 			t.Errorf("%s: the page doesn't show Cloud access as not applicable out of 5", provider)
 		}
 	}
@@ -174,8 +174,14 @@ func TestNotApplicableNeedsTheHostsKind(t *testing.T) {
 		"one check unknown": {map[string]Check{"SEC-4": {Result: obs.Skipped}, "AMP-7": {Result: obs.Skipped}},
 			map[string]string{"SEC-4": "terms", "AMP-7": "terms"}, []string{"AMP-7"}},
 		"a check missing": {map[string]Check{"SEC-4": {Result: obs.Skipped}}, map[string]string{"SEC-4": "terms"}, nil},
+		"the report's word alone, on run exec": {map[string]Check{"SEC-4": {Result: obs.Skipped}, "AMP-7": {Result: obs.Skipped}},
+			map[string]string{"SEC-4": "terms", "AMP-7": "terms"}, nil},
 	} {
 		d := doc(obs.Pass, tc.checks)
+		d.Run.Provider = "sprites" // the policy would allow it: each case fails for its own reason
+		if strings.HasPrefix(name, "the report's word alone") {
+			d.Run.Provider = "exec" // SCR-2: exec's policy is opt_in, whatever the manifest says
+		}
 		if name == "a check missing" {
 			d.Checks = slices.DeleteFunc(d.Checks, func(c Check) bool { return c.ID == "AMP-7" })
 		}
@@ -218,11 +224,12 @@ func TestWorkloadExposureNotApplicable(t *testing.T) {
 		t.Fatal("an honest not-applicable card was refused")
 	}
 	for name, mutate := range map[string]func(*Card){
-		"out of six":          func(c *Card) { c.Of = 6 },
-		"green":               func(c *Card) { c.Rows[4].Green, c.Score = true, c.Score+1 },
-		"another row":         func(c *Card) { c.Rows[0].NotApplicable, c.Of = true, c.Of-1 },
-		"unknown":             func(c *Card) { c.Rows[4].Unknown = []string{"SEC-4"} },
-		"not applicable gone": func(c *Card) { c.Rows[4].NotApplicable = false },
+		"out of six":             func(c *Card) { c.Of = 6 },
+		"green":                  func(c *Card) { c.Rows[4].Green, c.Score = true, c.Score+1 },
+		"another row":            func(c *Card) { c.Rows[0].NotApplicable, c.Of = true, c.Of-1 },
+		"unknown":                func(c *Card) { c.Rows[4].Unknown = []string{"SEC-4"} },
+		"not applicable gone":    func(c *Card) { c.Rows[4].NotApplicable = false },
+		"terms on a counted row": func(c *Card) { c.Rows[0].Terms = "forged" },
 	} {
 		y := x
 		y.Card = Score(replanned(t, "daytona", host.Options{Mode: "exec", Excluded: host.DaytonaExclusions(), ExcludedKind: obs.SkipProviderTerms}))
@@ -238,6 +245,7 @@ func TestWorkloadExposureNotApplicable(t *testing.T) {
 func TestCleanBoxReadsFiveOfFive(t *testing.T) {
 	d := doc(obs.Pass, map[string]Check{"SEC-4": {Result: obs.Skipped}, "AMP-7": {Result: obs.Skipped}})
 	why := host.SpritesExclusions()["SEC-4"]
+	d.Run.Provider = "sprites"
 	d.Manifest.Skipped = map[string]string{"SEC-4": why, "AMP-7": why}
 	d.Manifest.SkipKinds = map[string]string{"SEC-4": obs.SkipProviderTerms, "AMP-7": obs.SkipProviderTerms}
 	c := Score(d)
@@ -268,5 +276,24 @@ func TestReportSchemaVersions(t *testing.T) {
 	}
 	if b, _ := json.Marshal(plain); strings.Contains(string(b), "SkipKinds") {
 		t.Error("a sandprobe/1 report carries SkipKinds")
+	}
+}
+
+// SCR-2: the native adapters the tests treat as provider-terms are exactly the binary's own policy, and the policy
+// derives opt-in for run exec and the shipped recipe, and nothing for any other provider.
+func TestNativesAreThePolicy(t *testing.T) {
+	for provider := range natives {
+		if _, ok := host.TermsExclusions[provider]; !ok {
+			t.Errorf("%s isn't in the policy", provider)
+		}
+	}
+	if len(natives) != len(host.TermsExclusions) {
+		t.Errorf("the policy has %d providers, the tests %d", len(host.TermsExclusions), len(natives))
+	}
+	for provider, want := range map[string]string{"sprites": obs.SkipProviderTerms, "exec": obs.SkipOptIn, "kubernetes": obs.SkipOptIn,
+		"docker": "", "aws-nitro": "", "": ""} {
+		if got := PolicyKinds(provider)["AMP-7"]; got != want {
+			t.Errorf("%q: AMP-7 %q, want %q", provider, got, want)
+		}
 	}
 }

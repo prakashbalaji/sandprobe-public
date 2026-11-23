@@ -219,6 +219,7 @@ td.long { overflow-wrap: anywhere; font: 12px var(--mono); }
 
 <main>
 <div class="wrap score">
+  {{with .Saved}}<p class="kicker"><em>{{.}}</em></p>{{end}}
   {{if .Card.Valid}}<p class="kicker">SANDBOX SCORE</p>
   <p class="scorebig" role="img" aria-label="Score {{.Card.Score}} of {{.Card.Of}}"><b>{{.Card.Score}}</b><span>/{{.Card.Of}}</span></p>
   {{range .Card.NotCounted}}<p class="statement">{{.}}</p>{{end}}

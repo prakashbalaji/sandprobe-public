@@ -30,6 +30,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 			for _, limit := range p.Limits {
 				fmt.Fprintln(o.stdout, limit)
 			}
+			fmt.Fprintln(o.stdout, report.SavedNote)
 		}
 		if !p.Valid || !p.Complete {
 			return exitPartial, nil
@@ -88,4 +89,5 @@ func printComparison(o opts, c analysis.Comparison) {
 		fmt.Fprintln(o.stdout, "Some checks couldn't be proven in at least one report, so an all-clear here wouldn't count either.")
 	}
 	fmt.Fprintln(o.stdout, "This compares the two reports only; it doesn't vouch for either box.")
+	fmt.Fprintln(o.stdout, report.SavedNote)
 }

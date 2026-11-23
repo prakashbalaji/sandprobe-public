@@ -109,8 +109,13 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 
 The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
-and nothing above Info was found. On a hosted provider whose terms rule out its own metadata and Kubernetes
-endpoints, Cloud access is not applicable: it is never green, and the score is out of five.
+and nothing above Info was found. Cloud access asks whether the agent can use your cloud identity: your own cloud
+roles, your own cloud's metadata service, your own Kubernetes API. On a hosted provider whose terms rule out probing
+its own metadata and Kubernetes endpoints, the box holds no cloud identity of yours to check, so Cloud access is not
+applicable: it is never green, the score is out of five, and a line under the score says why. A credential of yours
+injected into the box is still caught under Secrets. `run exec` and recipes leave Cloud access "Not tested", since
+there those endpoints may be yours. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its
+structure only: it can't re-verify the run or tell an edited report apart, and each says so.
 
 Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 below `-min`, 7 a box not
 confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.

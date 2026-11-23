@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"sandprobe/internal/analysis"
+	"sandprobe/internal/report"
 )
 
 func assessSaved(o opts, args []string) (int, error) {
@@ -37,6 +38,7 @@ func assessSaved(o opts, args []string) (int, error) {
 		for _, limit := range a.Limits {
 			fmt.Fprintln(o.stdout, limit)
 		}
+		fmt.Fprintln(o.stdout, report.SavedNote)
 	}
 	// CAL-3: uncertainty wins exit precedence without hiding a reported violation.
 	if !a.SourceComplete || a.Counts[analysis.Inconclusive] > 0 {

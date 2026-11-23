@@ -106,9 +106,11 @@ func Validate(d *report.Doc) error {
 			return ErrInput
 		}
 	}
-	// SCR-2: a skip kind names only a skipped provider-endpoint check, and only one of the two kinds.
+	// SCR-2: a skip kind names only a skipped provider-endpoint check, and only one of the two kinds; and it must be
+	// the kind this binary's own policy derives for the run's provider, so an edited kind is refused, never scored.
+	policy := report.PolicyKinds(d.Run.Provider)
 	for id, kind := range d.Manifest.SkipKinds {
-		if _, ok := d.Manifest.Skipped[id]; !ok || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) {
+		if _, ok := d.Manifest.Skipped[id]; !ok || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) || policy[id] != kind {
 			return ErrInput
 		}
 	}

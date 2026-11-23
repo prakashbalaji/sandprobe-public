@@ -1,11 +1,14 @@
 package report
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
 	"sandprobe/internal/catalog"
+	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
+	"sandprobe/recipes"
 )
 
 // Category is one of SCR-1's six questions, with a short fixed label for each of its checks and the plain question
@@ -49,7 +52,7 @@ var Categories = []Category{
 		Label: map[string]string{"AMP-1": "passwordless sudo", "AMP-2": "root or capabilities", "AMP-3": "setuid escalation"},
 		Ask: map[string]string{"AMP-1": "Can it run sudo without a password?", "AMP-2": "Is it root, or does it hold powerful Linux capabilities?",
 			"AMP-3": "Could a setuid program raise its privileges?"}},
-	{Name: "Cloud access", Question: "Can it use the box's cloud identity?", Checks: []string{"SEC-4", "AMP-7"},
+	{Name: "Cloud access", Question: "Can it use your cloud identity?", Checks: []string{"SEC-4", "AMP-7"},
 		Label: map[string]string{"SEC-4": "cloud metadata credentials", "AMP-7": "Kubernetes API"},
 		Ask: map[string]string{"SEC-4": "Can it get cloud credentials from the cloud's metadata service?",
 			"AMP-7": "Can it reach the Kubernetes API?"}},
@@ -83,6 +86,7 @@ type Row struct {
 	Green         bool           `json:"green"`
 	NotApplicable bool           `json:"not_applicable,omitempty"`
 	Why           string         `json:"why,omitempty"`
+	Terms         string         `json:"terms,omitempty"` // SCR-2: a not-applicable row's provider-terms reasons, from this binary's own PRV rows
 	NotProven     string         `json:"not_proven,omitempty"`
 	Found         []string       `json:"found,omitempty"`
 	Unknown       []string       `json:"unknown,omitempty"`
@@ -92,22 +96,25 @@ type Row struct {
 
 // Card is the headline: Score green rows of Of, the categories that apply (SCR-2). An invalid run has no score.
 type Card struct {
-	Valid    bool           `json:"valid"`
-	Score    int            `json:"score"`
-	Of       int            `json:"of"`
-	Rows     []Row          `json:"rows"`
-	Coverage *ScoreCoverage `json:"coverage,omitempty"`
+	Verification string         `json:"verification,omitempty"` // ANL-1: set when the card comes from a saved report
+	Valid        bool           `json:"valid"`
+	Score        int            `json:"score"`
+	Of           int            `json:"of"`
+	Rows         []Row          `json:"rows"`
+	Coverage     *ScoreCoverage `json:"coverage,omitempty"`
 }
 
 // Score is SCR-2. A row is green only when one of its checks was tested, none is unknown, and none has a finding
 // above Info. Only the results named below count as clean: anything else, or a check the grade lists as unknown, is
 // "couldn't prove". Its reason is built from the fixed labels above, never from a string the box returned. A row is
-// not applicable only when the host skipped every one of its checks for the provider's terms, as its manifest records.
+// not applicable only when the host skipped every one of its checks for the provider's terms, as its manifest records
+// and as this binary's own policy for the run's provider derives: a report's word alone never shrinks the score.
 func Score(d Doc) Card {
 	c := Card{Valid: d.Grade.Valid, Of: len(Categories)}
 	if !d.Grade.Valid {
 		return c
 	}
+	policy := PolicyKinds(d.Run.Provider)
 	got, unknown := map[string]Check{}, map[string]bool{}
 	for _, ck := range d.Checks {
 		got[ck.ID] = ck
@@ -126,10 +133,10 @@ func Score(d Doc) Card {
 				r.Unknown = append(r.Unknown, id)
 			case !ok: // not in this run at all: says nothing either way
 			case ck.Result == obs.Skipped: // not run here: says nothing either way, but its kind may explain why
-				switch skipKind(d.Manifest, id) {
-				case obs.SkipProviderTerms:
+				switch kind := skipKind(d.Manifest, id); {
+				case kind == obs.SkipProviderTerms && policy[id] == obs.SkipProviderTerms:
 					terms = append(terms, id)
-				case obs.SkipOptIn:
+				case kind == obs.SkipOptIn:
 					optIn = append(optIn, id)
 				}
 			case ck.Result == obs.Pass || ck.Result == obs.Absent || ck.Result == obs.ScopedOut:
@@ -160,7 +167,7 @@ func Score(d Doc) Card {
 		case len(r.Unknown) > 0:
 			r.Why = "Couldn't prove: " + labels(cat, r.Unknown)
 		case tested == 0 && len(terms) == len(cat.Checks): // SCR-2: the provider's own endpoints, out of the score
-			r.NotApplicable, r.Why = true, "Not applicable: "+skipReasons(d.Manifest, terms)
+			r.NotApplicable, r.Why, r.Terms = true, NotApplicable, termsReasons(d.Run.Provider, terms)
 			c.Of--
 		case tested == 0 && len(optIn) > 0: // SCR-2: PRV-15's or RCP-4's default, which the person may lift
 			r.Why = "Not tested: run exec and recipes skip provider-owned endpoints by default"
@@ -187,11 +194,40 @@ func skipKind(m obs.Manifest, id string) string {
 	return m.SkipKinds[id]
 }
 
-// skipReasons is the run's own reasons for skipping ids, each said once.
-func skipReasons(m obs.Manifest, ids []string) string {
+// NotApplicable is SCR-2's fixed reason for a not-applicable row, under SCR-1's narrowed Cloud access contract.
+const NotApplicable = "Not applicable: this box holds no cloud identity of yours that Sandprobe checks here; the provider's own endpoints weren't tested (their terms)"
+
+// PolicyKinds is SCR-2's skip kinds as this binary's own policy derives them for the provider a run names, never as a
+// report states them: a native adapter's PRV-row exclusions are provider_terms (PRV-5); run exec's (PRV-15) and a
+// shipped recipe's (RCP-4) default exclusions are opt_in; any other provider has none.
+func PolicyKinds(provider string) map[string]string {
+	kinds := map[string]string{}
+	if excluded, ok := host.TermsExclusions[provider]; ok {
+		for id := range excluded() {
+			kinds[id] = obs.SkipProviderTerms
+		}
+		return kinds
+	}
+	var ids []string
+	if provider == "exec" {
+		ids = slices.Collect(maps.Keys(host.ExecExclusions()))
+	} else if text, ok := recipes.Get(provider); ok && recipes.Shipped[provider] != "" {
+		if rc, err := host.ParseRecipe(provider, text); err == nil {
+			ids = rc.Exclusions
+		}
+	}
+	for _, id := range ids {
+		kinds[id] = obs.SkipOptIn
+	}
+	return kinds
+}
+
+// termsReasons is the provider's PRV-row reasons for excluding ids, from this binary's own policy, each said once.
+func termsReasons(provider string, ids []string) string {
+	excluded := host.TermsExclusions[provider]()
 	var out []string
 	for _, id := range ids {
-		if why := m.Skipped[id]; !slices.Contains(out, why) {
+		if why := excluded[id]; !slices.Contains(out, why) {
 			out = append(out, why)
 		}
 	}
@@ -203,7 +239,7 @@ func (c Card) NotCounted() []string {
 	var out []string
 	for _, r := range c.Rows {
 		if r.NotApplicable {
-			out = append(out, r.Name+" isn't counted. "+r.Why)
+			out = append(out, r.Name+" isn't counted: the provider's terms exclude its own endpoints ("+r.Terms+")")
 		}
 	}
 	return out
