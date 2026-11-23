@@ -105,6 +105,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	r.outSet = given["out"]
 	r.settleCanary(given) // HCN-5: a canary flag beats every SANDPROBE_CANARY* value
+	r.providerEndpointsSet = given["provider-endpoints"]
 	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
 	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
 	if passthrough != nil && !docker && !execRun {
@@ -116,6 +117,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if r.noCanary && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
 		return reportErr(o, stderr, fail("usage", "-no-canary applies only to run exec, a recipe such as run kubernetes, and their plans", "sandprobe run exec -no-canary -y -- <command>", exitUsage))
+	}
+	if r.providerEndpointsSet && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
+		return reportErr(o, stderr, fail("usage", "-provider-endpoints applies only to run exec, a recipe such as run kubernetes, and their plans: run docker already runs these checks, and a provider's own PRV row decides them (PRV-15)", "sandprobe run exec -provider-endpoints SEC-4,AMP-7 -y -- <command>", exitUsage))
 	}
 	if r.tlsInsecure && cmd != "canary" {
 		return reportErr(o, stderr, fail("usage", "-tls-insecure applies only to canary check", "sandprobe canary check -tls-insecure -canary-url <url> -canary-pin <pin>", exitUsage))
@@ -215,6 +219,8 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
                                    grade a throwaway container from a local image (PRV-14)
   sandprobe run exec [-as <user>] -y -- <command that starts sh in the box>
                                    grade a box you already have, through your own command (PRV-15)
+  sandprobe run exec -provider-endpoints SEC-4,AMP-7 -y -- <command>
+                                   also test cloud access, attesting your provider's terms allow it on your account
   sandprobe run kubernetes [-as <user>] -y
                                    grade a throwaway pod in your cluster, by recipe; set SANDPROBE_KUBE_CONTEXT (PRV-16)
   sandprobe canary check -canary-url <url> -canary-pin <pin>
@@ -233,6 +239,8 @@ Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names
 -canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
 SANDPROBE_CANARY* variable aside. run docker always starts its own canary and takes no canary flag.
 run exec and recipes also take -no-canary, which sends no test traffic at all, leaving Exfiltration untested (HCN-5).
+run exec and recipes keep SEC-4, EGR-3, AMP-6 and AMP-7 off, since they contact your provider's own endpoints;
+-provider-endpoints <IDs> turns named ones on, each one you attest your provider's terms allow on your account (PRV-15).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....

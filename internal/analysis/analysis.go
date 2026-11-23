@@ -106,9 +106,22 @@ func Validate(d *report.Doc) error {
 			return ErrInput
 		}
 	}
+	policy := report.PolicyKinds(d.Run.Provider)
+	// PRV-15: an attestation names a provider endpoint once, never one that still carries a skip kind, only where this
+	// binary's own policy makes it opt-in (run exec, a shipped recipe), and each report row carries the fixed sentence
+	// exactly when its check was attested.
+	for i, id := range d.Manifest.Attested {
+		if _, kind := d.Manifest.SkipKinds[id]; !catalog.ProviderEndpoints[id] || kind || policy[id] != obs.SkipOptIn || slices.Contains(d.Manifest.Attested[:i], id) {
+			return ErrInput
+		}
+	}
+	for _, c := range d.Checks {
+		if want := slices.Contains(d.Manifest.Attested, c.ID); c.Attestation != "" && (!want || c.Attestation != report.Attestation) || want && c.Attestation == "" {
+			return ErrInput
+		}
+	}
 	// SCR-2: a skip kind names only a skipped provider-endpoint check, and only one of the two kinds; and it must be
 	// the kind this binary's own policy derives for the run's provider, so an edited kind is refused, never scored.
-	policy := report.PolicyKinds(d.Run.Provider)
 	for id, kind := range d.Manifest.SkipKinds {
 		if _, ok := d.Manifest.Skipped[id]; !ok || !catalog.ProviderEndpoints[id] || (kind != obs.SkipProviderTerms && kind != obs.SkipOptIn) || policy[id] != kind {
 			return ErrInput

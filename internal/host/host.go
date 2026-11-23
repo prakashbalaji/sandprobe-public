@@ -72,6 +72,11 @@ type Options struct {
 	// ExcludedKind is why Excluded skips them (SCR-2): obs.SkipProviderTerms for a native adapter's PRV row,
 	// obs.SkipOptIn for PRV-15's or RCP-4's default. Empty records no kind, and the scorecard reads "Not tested".
 	ExcludedKind string
+	// Attested is PRV-15's -provider-endpoints: the provider-endpoint checks the person attests their provider's terms
+	// allow on their own account. None may also be excluded.
+	Attested []string
+	// Existing is an existing box (PRV-1): it gets non-mutating checks only, so AMP-6 makes no vsock connect.
+	Existing bool
 }
 
 // excludable is every check a provider's rules of engagement may skip (GRD-3, PRV-5): each would send a request to
@@ -129,6 +134,11 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 	}
 	if k := o.ExcludedKind; k != "" && k != obs.SkipProviderTerms && k != obs.SkipOptIn {
 		return nil, fmt.Errorf("%q isn't a skip kind (SCR-2)", k)
+	}
+	for i, id := range o.Attested { // PRV-15: an attestation names a provider endpoint once, and lifts its exclusion
+		if _, excluded := o.Excluded[id]; !excludable[id] || excluded || slices.Contains(o.Attested[:i], id) {
+			return nil, fmt.Errorf("%s can't be attested (PRV-15)", id)
+		}
 	}
 	out, err := b.Probe(ctx, []string{"-survey"}, nil)
 	if err != nil {
@@ -318,6 +328,14 @@ func Teardown(ctx context.Context, r *Run) error {
 	return nil
 }
 
+// attested is PRV-15's attestations as the manifest keeps them: sorted, or nil when there are none.
+func attested(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	return slices.Sorted(slices.Values(ids))
+}
+
 // Plan fixes the manifest (GRD-5): the checks selected and skipped, each one's planned targets and discovery rules from
 // the catalog, fresh nonces for the run and for each canary check, each canary check's endpoint, and EGR-3's proxy from
 // the survey. Only GRD-3's gates skip a check, and only the host decides them: EGR-6 until it's approved, AMP-6 with no
@@ -345,7 +363,11 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 	case len(marks) == 0:
 		skip["PER-5"] = "the provider's reset leaves no storage to test: no root this run may mark"
 	}
-	if !s.Vsock && skip["AMP-6"] == "" { // a provider's exclusion keeps its own reason (PRV-5)
+	switch {
+	case skip["AMP-6"] != "": // a provider's exclusion keeps its own reason (PRV-5)
+	case o.Existing:
+		skip["AMP-6"] = "an existing box gets no vsock connects (PRV-1)"
+	case !s.Vsock:
 		skip["AMP-6"] = "no vsock device"
 	}
 	var proxy string
@@ -386,7 +408,7 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		Selected: selected, Skipped: skipped, Targets: targets, Discover: discover,
 		CheckNonces: map[string]string{}, Endpoints: map[string]string{}, Proxy: proxy, AllowLocalProxy: o.AllowLocalProxy,
 		ProxyMalformed: s.Proxy != nil && s.Proxy.Malformed && skip["EGR-3"] == "", KubeAPI: s.KubeAPI, NoCanary: o.NoCanary,
-		SkipKinds: kinds}
+		SkipKinds: kinds, Attested: attested(o.Attested)}
 	if o.WorkloadContract != nil {
 		contract := *o.WorkloadContract
 		m.WorkloadContract = &contract

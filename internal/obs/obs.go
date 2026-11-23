@@ -51,6 +51,9 @@ type Manifest struct {
 	// SkipKinds is why each provider-endpoint skip was made (GRD-3, SCR-2): SkipProviderTerms or SkipOptIn. Only the
 	// host writes it, and it never reaches the probe's input.
 	SkipKinds map[string]string `json:"SkipKinds,omitempty"`
+	// Attested is the provider-endpoint checks the person attests their provider's terms allow on their own account
+	// (PRV-15's -provider-endpoints), sorted. Only the host writes it, and it never reaches the probe's input.
+	Attested []string `json:"Attested,omitempty"`
 }
 
 // Skip kinds (SCR-2). Only a provider-terms skip can make a scorecard category not applicable.

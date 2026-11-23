@@ -190,7 +190,7 @@ sp_gone() { note gone; }
 	if strings.Contains(got, "shell") || strings.Contains(got, "delete") || !strings.Contains(got, "whois") {
 		t.Errorf("the guard didn't hold:\n%s", got)
 	}
-	if !strings.Contains(RecipeResidual(r, "t"), "can't be ruled out") || strings.Contains(RecipeResidual(&Recipe{Name: "x", AddressedBy: "id"}, "t"), "ruled out") {
+	if !strings.Contains(RecipeResidual(r, "t", nil), "can't be ruled out") || strings.Contains(RecipeResidual(&Recipe{Name: "x", AddressedBy: "id"}, "t", nil), "ruled out") {
 		t.Error("the residual doesn't report the name's race, or reports it for an ID")
 	}
 }

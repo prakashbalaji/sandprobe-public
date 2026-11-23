@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -78,7 +79,7 @@ func recipeExclusions(rc *host.Recipe) map[string]string {
 	return out
 }
 
-func recipePlan(b *host.RecipeBox, as string, c canaryChoice) planDoc {
+func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string, allowLocalProxy bool) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	rc := b.Recipe
 	user := "whoever the box runs it as, which the report calls unconfirmed as the agent's user"
@@ -93,21 +94,27 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice) planDoc {
 	if rc.AddressedBy == "name" {
 		launch += ". Before every invocation sp_whois must name the box the create returned (RCP-2)"
 	}
-	residual := withRetention(host.RecipeResidual(rc, b.Target), c)
+	residual := withRetention(host.RecipeResidual(rc, b.Target, attested), c)
+	contacts, boxNamed := []string{c.describe}, []string{named}
+	lines, extra, attestedNamed := attestedPlan(attested, recipeExclusions(rc), false, "RCP-4")
+	if len(attested) > 0 {
+		contacts, boxNamed = append(contacts, extra...), attestedNamed
+	}
 	return planDoc{Provider: rc.Name,
 		Creates: []string{"one box, " + b.Name + ", through the " + rc.Name + " recipe (" + rc.Provider + ") in " + b.Target + "; its ID is what the create returns",
 			"a scratch directory " + b.Scratch + " in the box (mode 700) for each invocation, removed on exit"},
 		LaunchPath:    launch,
 		Probe:         "decoded from base64 into the scratch directory, run there, and removed with it",
 		Markers:       "none: the recipe has no reset, so PER-5 is skipped (RCP-3)",
-		Contacts:      []string{c.describe},
-		BoxNamed:      []string{named},
+		Attested:      lines,
+		Contacts:      contacts,
+		BoxNamed:      boxNamed,
 		OpensReadOnly: append(append([]string{}, sec3.Targets...), "private SSH keys, /run/secrets and .env files it finds", "/proc/<pid>/environ and /proc/<pid>/mem of other processes"),
 		Runs: []string{"the probe, and sudo -n -l, which runs no command", "the wrapper's sh, mkdir, base64, chmod, rm and uname",
 			"on this machine, the recipe's sp_ functions, with your own credentials and permissions (recipe SHA-256 " + rc.SHA256[:12] + "…)"},
 		Reset:      "none: the recipe has no reset",
 		Deletes:    "the box, only by the ID its create returned, then waits for the provider to say it's gone; if it can't, the run exits 7 naming it",
-		LocalProxy: "excluded: EGR-3 is off",
+		LocalProxy: localProxy(attested, allowLocalProxy),
 		Time:       "a minute or two, plus the box's start-up",
 		Residual:   residual,
 	}
@@ -125,6 +132,11 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	if err != nil {
 		return 0, err
 	}
+	attested, err := providerEndpoints(r.providerEndpoints, r.providerEndpointsSet, recipeExclusions(rc))
+	if err != nil {
+		return 0, err
+	}
+	allowLocal := r.allowLocalProxy && slices.Contains(attested, "EGR-3") // SBX-1 (e): only once EGR-3 is on
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	rctx, rcancel := context.WithTimeout(ctx, time.Minute)
@@ -137,7 +149,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	if err != nil {
 		return 0, fail("usage", err.Error(), "sandprobe run "+name+" -y", exitUsage)
 	}
-	p := recipePlan(box, r.as, choice)
+	p := recipePlan(box, r.as, choice, attested, allowLocal)
 	if planOnly {
 		if o.json() {
 			o.emit(p)
@@ -216,7 +228,8 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 			return err
 		}
 		step("running the probe as uid %d through the recipe", w.UIDs[1])
-		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: recipeExclusions(rc), ExcludedKind: obs.SkipOptIn, NoCanary: choice.none})
+		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(recipeExclusions(rc), attested),
+			ExcludedKind: obs.SkipOptIn, Attested: attested, AllowLocalProxy: allowLocal, NoCanary: choice.none})
 		return err
 	}()
 	cleanup, cleaned := recipeCleanup(box, j, stderr)

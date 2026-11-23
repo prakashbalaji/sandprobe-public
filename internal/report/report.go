@@ -5,6 +5,7 @@ package report
 import (
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,8 +19,9 @@ import (
 // Schema is OUT-1's first version, which every report declares that needs none of a later version's fields (AGT-6).
 const Schema = "sandprobe/1"
 
-// SchemaSkipKinds is OUT-1's version that adds the manifest's SkipKinds (SCR-2). A new field is a breaking change,
-// since readers refuse unknown fields (JON-1), so it bumps the version (AGT-6).
+// SchemaSkipKinds is OUT-1's version that adds the manifest's SkipKinds (SCR-2), and its Attested with a check's
+// attestation (PRV-15). A new field is a breaking change, since readers refuse unknown fields (JON-1), so it bumps the
+// version (AGT-6); both arrive in one release, so they share it.
 const SchemaSkipKinds = "sandprobe/2"
 
 // Schemas are the versions this build reads, oldest first.
@@ -28,7 +30,7 @@ var Schemas = []string{Schema, SchemaSkipKinds}
 // SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
 // reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
 func SchemaFor(m obs.Manifest) string {
-	if len(m.SkipKinds) > 0 {
+	if len(m.SkipKinds) > 0 || len(m.Attested) > 0 {
 		return SchemaSkipKinds
 	}
 	return Schema
@@ -144,7 +146,12 @@ type Check struct {
 	Proof         *Proof `json:"proof,omitempty"`
 	Gets          string `json:"gets"`
 	Fix           string `json:"fix"`
+	Attestation   string `json:"attestation,omitempty"` // PRV-15: the person's attestation, for a check they turned on
 }
+
+// Attestation is what a report says beside a check PRV-15's -provider-endpoints turned on: a fixed sentence, never
+// text from the command line.
+const Attestation = "You attested that your provider's terms allow this check on your own account (-provider-endpoints, PRV-15)."
 
 type Scope struct {
 	Destination string `json:"destination"`
@@ -258,6 +265,9 @@ func Build(r *host.Run, m Meta) Doc {
 	for _, ck := range catalog.Checks {
 		a := catalog.Guide[ck.ID]
 		c := Check{ID: ck.ID, Category: ck.Category, Title: ck.Title, Kind: kind(ck.Kind), Gets: a.Gets, Fix: a.Fix}
+		if slices.Contains(man.Attested, ck.ID) {
+			c.Attestation = Attestation
+		}
 		if why, skipped := rep.Skipped[ck.ID]; skipped {
 			c.Result, c.Reason = "skipped", why
 			d.Checks = append(d.Checks, c)

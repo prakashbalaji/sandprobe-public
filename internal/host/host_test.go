@@ -354,3 +354,67 @@ func TestExecuteNoCanaryAsksNothing(t *testing.T) {
 		t.Fatalf("the probe was told of a canary: %+v", in)
 	}
 }
+
+// PRV-15 in Plan and Execute: attested checks are selected and recorded, sorted, in the manifest only; the rest keep
+// their opt-in kind; AMP-6 never connects on an existing box, whatever was attested; and Execute refuses an
+// attestation that isn't a provider endpoint, is named twice, or is still excluded.
+func TestPlanAttested(t *testing.T) {
+	off := map[string]string{}
+	for id, why := range ExecExclusions() {
+		if id != "SEC-4" && id != "AMP-7" {
+			off[id] = why
+		}
+	}
+	m, in := Plan(Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "AMP-7"}, Existing: true},
+		&obs.Survey{KubeAPI: "10.96.0.1:443"}, "box-1", Storage{}, "", "", "")
+	if !slices.Equal(m.Attested, []string{"AMP-7", "SEC-4"}) || !slices.Contains(m.Selected, "SEC-4") || !slices.Contains(m.Selected, "AMP-7") ||
+		!maps.Equal(m.SkipKinds, map[string]string{"EGR-3": obs.SkipOptIn, "AMP-6": obs.SkipOptIn}) || m.KubeAPI != "10.96.0.1:443" {
+		t.Fatalf("attested %v, selected %v, kinds %v", m.Attested, m.Selected, m.SkipKinds)
+	}
+	if b, _ := json.Marshal(in); strings.Contains(string(b), "ttest") || !slices.Contains(in.Selected, "SEC-4") || in.KubeAPI != "10.96.0.1:443" {
+		t.Errorf("the probe's input: %s", b)
+	}
+	if err := grade.ManifestSound(m); err != nil {
+		t.Fatalf("the grader refused the manifest: %v", err)
+	}
+	delete(off, "AMP-6")
+	for existing, want := range map[bool]string{true: "an existing box gets no vsock connects (PRV-1)", false: ""} {
+		m, _ = Plan(Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"AMP-6"}, Existing: existing},
+			&obs.Survey{Vsock: true}, "box-1", Storage{}, "", "", "")
+		if m.Skipped["AMP-6"] != want || m.SkipKinds["AMP-6"] != "" || slices.Contains(m.Selected, "AMP-6") == existing {
+			t.Errorf("existing %v: AMP-6 skipped %q, kind %q", existing, m.Skipped["AMP-6"], m.SkipKinds["AMP-6"])
+		}
+	}
+	// EGR-3 turned on: through the agent's proxy, a state no run reached before; without a canary it's graded unknown
+	// and never sent to the probe; a loopback proxy still needs -allow-local-proxy, and its skip has no kind.
+	egr3 := map[string]string{"AMP-6": "off"}
+	m, in = Plan(Options{Mode: "exec", Excluded: egr3, ExcludedKind: obs.SkipOptIn, Attested: []string{"EGR-3"}, Existing: true, NoCanary: true},
+		&obs.Survey{Proxy: &obs.ProxySetting{Addr: "198.51.100.7:3128"}}, "box-1", Storage{}, "", "", "")
+	if err := grade.ManifestSound(m); err != nil || !slices.Contains(m.Selected, "EGR-3") || slices.Contains(in.Selected, "EGR-3") || m.Proxy != "198.51.100.7:3128" {
+		t.Errorf("EGR-3 without a canary: %v, selected %v, sent %v, proxy %q", err, m.Selected, in.Selected, m.Proxy)
+	}
+	m, _ = Plan(Options{Mode: "exec", Excluded: egr3, ExcludedKind: obs.SkipOptIn, Attested: []string{"EGR-3"}, Existing: true},
+		&obs.Survey{Proxy: &obs.ProxySetting{Addr: "127.0.0.1:3128"}}, "box-1", Storage{}, "", "", "")
+	if m.Skipped["EGR-3"] == "" || m.SkipKinds["EGR-3"] != "" || m.Proxy != "" || grade.ManifestSound(m) != nil {
+		t.Errorf("a loopback proxy without approval: skipped %q, kind %q, proxy %q", m.Skipped["EGR-3"], m.SkipKinds["EGR-3"], m.Proxy)
+	}
+	for name, mutate := range map[string]func(*obs.Manifest){
+		"not an endpoint":   func(m *obs.Manifest) { m.Attested = append(m.Attested, "SEC-3") },
+		"named twice":       func(m *obs.Manifest) { m.Attested = append(m.Attested, m.Attested[0]) },
+		"still a skip kind": func(m *obs.Manifest) { m.Attested = append(m.Attested, "EGR-3") },
+	} {
+		m, _ := Plan(Options{Mode: "exec", Excluded: map[string]string{"EGR-3": "off"}, ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4"}},
+			&obs.Survey{}, "box-1", Storage{}, "", "", "")
+		mutate(&m)
+		if grade.ManifestSound(m) == nil {
+			t.Errorf("%s: the grader took it", name)
+		}
+	}
+	for _, o := range []Options{{Attested: []string{"AMP-2"}}, {Attested: []string{"SEC-4", "SEC-4"}},
+		{Excluded: map[string]string{"SEC-4": "off"}, Attested: []string{"SEC-4"}}} {
+		o.Mode = "exec"
+		if _, err := Execute(context.Background(), surveyBox{}, nil, o); err == nil {
+			t.Errorf("Execute took %+v", o)
+		}
+	}
+}

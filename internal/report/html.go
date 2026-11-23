@@ -57,6 +57,7 @@ type section struct {
 
 type test struct {
 	ID, Ask, Result, Class, Detail, Fix, Sev string
+	Attested                                 string // PRV-15: the person's attestation, beside the check
 	order                                    int
 }
 
@@ -141,7 +142,7 @@ func sections(d Doc, c Card) []section {
 		counts := map[string]int{}
 		for _, id := range cat.Checks {
 			ck, ok := got[id]
-			t := test{ID: id, Ask: cat.Ask[id], Sev: worst(id)}
+			t := test{ID: id, Ask: cat.Ask[id], Sev: worst(id), Attested: ck.Attestation}
 			var top bool
 			t.Result, t.Class, t.Detail, top = answer(ck, ok)
 			if t.Result != "Not run" {

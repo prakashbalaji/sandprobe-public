@@ -61,7 +61,10 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 
 Read your provider's terms before you probe: some require consent for security testing. For `run exec` and recipes,
 the checks that would contact a provider's own endpoints (cloud metadata, the Kubernetes API, the host over vsock,
-the box's proxy) are off by default. The native adapters' rules for each provider are its PRV row in SPEC.md.
+the box's proxy) are off by default. If your provider's terms allow one on your own account, turn it on by name,
+for example `-provider-endpoints SEC-4,AMP-7` to test cloud access: the plan lists each one with your attestation
+before anything runs, and the report records it beside the check. The native adapters' rules for each provider are
+its PRV row in SPEC.md.
 
 ## What leaves your machine
 
@@ -116,7 +119,7 @@ roles, your own cloud's metadata service, your own Kubernetes API. On a hosted p
 its own metadata and Kubernetes endpoints, the box holds no cloud identity of yours to check, so Cloud access is not
 applicable: it is never green, the score is out of five, and a line under the score says why. A credential of yours
 injected into the box is still caught under Secrets. `run exec` and recipes leave Cloud access "Not tested", since
-there those endpoints may be yours. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its
+there those endpoints may be yours, until you turn its checks on with `-provider-endpoints`. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its
 structure only: it can't re-verify the run or tell an edited report apart, and each says so.
 
 Current source builds also show catalog-wide measurement coverage (SCR-5): which

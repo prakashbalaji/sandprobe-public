@@ -121,9 +121,9 @@ func TestScorecardNotApplicable(t *testing.T) {
 		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: the provider's terms exclude its own endpoints (" + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + ")\n",
 			"N/A    Cloud access"},
 		"exec": {host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
-			"RED    Cloud access  Can it use your cloud identity?\n                         Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
+			"RED    Cloud access  Can it use your cloud identity?\n                         Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow\n"},
 		"kubernetes": {host.Options{Excluded: recipeExclusions(rc), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
-			"Not tested: run exec and recipes skip provider-owned endpoints by default\n"},
+			"Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow\n"},
 	} {
 		in := skipSaved(t, name, tc.o)
 		var out, errs bytes.Buffer

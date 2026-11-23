@@ -424,7 +424,7 @@ func TestPublicCanaryPlansDiscloseRetention(t *testing.T) {
 		spec := host.PodSpec{Image: "i", RuntimeClass: "isolated-sandbox"}
 		out["sprites"] = [2]string{sprPlan("org", choice, r, "").Residual, residual}
 		out["aws-nitro"] = [2]string{nitroPlan("/k", choice, runFlags{variant: "isolated"}, spec).Residual, nitroResidual}
-		out["kubernetes"] = [2]string{recipePlan(box, "", choice).Residual, host.RecipeResidual(rc, box.Target)}
+		out["kubernetes"] = [2]string{recipePlan(box, "", choice, nil, false).Residual, host.RecipeResidual(rc, box.Target, nil)}
 		for name, base := range map[string]string{"exec": host.ExecResidual, "baseten": host.BasetenResidual, "e2b": host.E2BResidual,
 			"vercel": host.VercelResidual, "cloudflare": host.CloudflareResidual, "boat": host.BoatResidual,
 			"daytona": host.DaytonaResidual, "exe.dev": host.ExedevResidual} {
