@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability in Sandprobe
+    url: https://github.com/summationai/sandprobe/security/advisories/new
+    about: Report it privately, never in a public issue. That includes a box that can make the grader report a pass it didn't prove.

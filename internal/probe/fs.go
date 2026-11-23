@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
 )
 
@@ -296,17 +297,7 @@ var agentCaps = func() uint64 {
 }
 
 // capList names the capabilities set in caps.
-func capList(caps uint64) string {
-	var held []string
-	for bit := 0; bit < 64; bit++ {
-		if caps&(1<<bit) != 0 && bit < len(capNames) {
-			held = append(held, "CAP_"+capNames[bit])
-		} else if caps&(1<<bit) != 0 {
-			held = append(held, fmt.Sprintf("capability %d", bit))
-		}
-	}
-	return strings.Join(held, ", ")
-}
+func capList(caps uint64) string { return strings.Join(catalog.CapList(caps), ", ") }
 
 // replacer: some entry on the way to p, a symlink's included, lets the agent as it is create, rename or remove it in
 // the real directory it is looked up in: that directory writable and searchable, by the kernel's own check; not

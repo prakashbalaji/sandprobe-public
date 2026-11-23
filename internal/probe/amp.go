@@ -252,17 +252,7 @@ func privileged() string {
 }
 
 func privilegedWhy(euid int, caps uint64) string {
-	var held []string
-	for bit := 0; bit < 64; bit++ {
-		if caps&(1<<bit) == 0 {
-			continue
-		}
-		if bit < len(capNames) {
-			held = append(held, "CAP_"+capNames[bit])
-		} else {
-			held = append(held, fmt.Sprintf("capability %d", bit))
-		}
-	}
+	held := catalog.CapList(caps)
 	if n := len(held); n > 8 {
 		held = append(held[:8], fmt.Sprintf("%d more", n-8))
 	}
@@ -280,14 +270,6 @@ func privilegedWhy(euid int, caps uint64) string {
 	return who + ", so it could have replaced, exchanged or re-owned a link or directory on sudo's chain and left it " +
 		"looking like root's; ownership and permissions can't show the chain is out of its reach"
 }
-
-// capNames are the capabilities by bit (linux/capability.h).
-var capNames = []string{"CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID",
-	"SETPCAP", "LINUX_IMMUTABLE", "NET_BIND_SERVICE", "NET_BROADCAST", "NET_ADMIN", "NET_RAW", "IPC_LOCK", "IPC_OWNER",
-	"SYS_MODULE", "SYS_RAWIO", "SYS_CHROOT", "SYS_PTRACE", "SYS_PACCT", "SYS_ADMIN", "SYS_BOOT", "SYS_NICE",
-	"SYS_RESOURCE", "SYS_TIME", "SYS_TTY_CONFIG", "MKNOD", "LEASE", "AUDIT_WRITE", "AUDIT_CONTROL", "SETFCAP",
-	"MAC_OVERRIDE", "MAC_ADMIN", "SYSLOG", "WAKE_ALARM", "BLOCK_SUSPEND", "AUDIT_READ", "PERFMON", "BPF",
-	"CHECKPOINT_RESTORE"}
 
 const unixOPath = 0x200000 // O_PATH
 

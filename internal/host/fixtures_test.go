@@ -120,7 +120,14 @@ var fixtures = []fixture{
 		opts: func(world) []string {
 			return []string{"--network", "none", "--cap-add", "DAC_READ_SEARCH", "-e", "EVIDENCE=drs"}
 		},
-		expect: expectUnknown(map[string]string{"PER-1": "CAP_DAC_READ_SEARCH"})},
+		expect: func(t *testing.T, w world, r *Run) {
+			expectUnknown(map[string]string{"PER-1": "CAP_DAC_READ_SEARCH"})(t, w, r)
+			// AMP-2 counts a permitted capability, which a process raises at will: Critical, never a pass
+			if o := outcome(r.Report, "AMP-2"); o.Result != obs.Finding || o.Variant != "dangerous_caps" ||
+				!strings.Contains(o.Evidence, "CAP_DAC_READ_SEARCH (permitted, not effective") {
+				t.Errorf("AMP-2: want a dangerous_caps finding naming CAP_DAC_READ_SEARCH as only permitted, got %+v", o)
+			}
+		}},
 	// TWN-4 for every entry on the way: the agent's own link in root's sticky directory, which the kernel lets it
 	// rename, leads its home to root's read-only files; replacing the link redirects them, so PER-1 can't pass
 	{name: "evidence-stickylink", image: "evidence", settle: time.Second, opts: func(world) []string {

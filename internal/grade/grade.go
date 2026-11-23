@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"sandprobe/internal/catalog"
@@ -78,8 +79,8 @@ func Grade(m obs.Manifest, d *obs.Doc, c *obs.CanaryEvidence) Report {
 		case m.NoCanary && catalog.NeedsCanary(ck): // HCN-5: never sent to the probe, whatever the box returned
 			oc = unknown(NoCanaryReason)
 		case ck.Derived:
-			res, v, why := derive(ck.ID, d.Identity)
-			oc = Outcome{Result: res, Variant: v, Reason: why, Evidence: "graded by the host from the probe's identity"}
+			res, v, why, ev := derive(ck.ID, d.Identity)
+			oc = Outcome{Result: res, Variant: v, Reason: why, Evidence: ev}
 		case !ok:
 			oc = unknown("not observed: the probe returned nothing for this check")
 		case o.Result == obs.ScopedOut:
@@ -335,7 +336,7 @@ func fits(ck *catalog.Check, o obs.Observation, m obs.Manifest, id *obs.Identity
 		return errors.New("PER-5 comes from the recheck after the reset, never the main run")
 	}
 	if ck.Derived {
-		if res, v, _ := derive(ck.ID, id); o.Result != res || o.Variant != v {
+		if res, v, _, _ := derive(ck.ID, id); o.Result != res || o.Variant != v {
 			return fmt.Errorf("%s is graded from the identity as %s %s; the probe's %s %s contradicts it", ck.ID, res, v, o.Result, o.Variant)
 		}
 		return nil
@@ -407,26 +408,78 @@ func fits(ck *catalog.Check, o obs.Observation, m obs.Manifest, id *obs.Identity
 }
 
 // derive is AMP-2 and AMP-3 as the host grades them, from the identity alone.
-func derive(id string, who *obs.Identity) (result, variant, reason string) {
-	caps, _ := strconv.ParseUint(who.CapEff, 16, 64)
+func derive(id string, who *obs.Identity) (result, variant, reason, evidence string) {
+	const graded = "graded by the host from the probe's identity"
+	if id == "AMP-2" {
+		return amp2(who)
+	}
 	scan := who.SetuidScan
 	switch {
-	case id == "AMP-3" && *who.NoNewPrivs == 1:
-		return obs.Pass, "", "" // no setuid file can raise privilege, whatever exists
-	case id == "AMP-3" && (scan == nil || !scan.Complete):
-		return obs.Unknown, "", "NoNewPrivs is 0 and the setuid scan didn't complete"
-	case id == "AMP-3" && len(scan.Files) > 0:
-		return obs.Finding, "new_privs", ""
-	case id == "AMP-3":
-		return obs.Pass, "", ""
-	case who.UID == 0:
-		return obs.Finding, "root", ""
-	case caps&catalog.Dangerous != 0:
-		return obs.Finding, "dangerous_caps", ""
-	case caps != 0:
-		return obs.Finding, "other_caps", ""
+	case *who.NoNewPrivs == 1:
+		return obs.Pass, "", "", graded // no setuid file can raise privilege, whatever exists
+	case scan == nil || !scan.Complete:
+		return obs.Unknown, "", "NoNewPrivs is 0 and the setuid scan didn't complete", graded
+	case len(scan.Files) > 0:
+		return obs.Finding, "new_privs", "", graded
 	}
-	return obs.Pass, "", ""
+	return obs.Pass, "", "", graded
+}
+
+// amp2 is AMP-2 from the identity (its row): uid 0, or a held capability, effective, permitted (raised into the
+// effective set at will) or ambient (permitted too), Critical for the dangerous ones and High for the rest. An
+// inheritable capability becomes permitted only through an execve of a file whose file capabilities name it, which
+// NoNewPrivs 1 forbids: with NoNewPrivs 0 it leaves a pass unknown, since the probe doesn't look for such files. The
+// evidence names each capability, effective or only permitted.
+func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
+	eff, _ := strconv.ParseUint(who.CapEff, 16, 64) // checked when the document was read
+	prm, prmErr := strconv.ParseUint(who.CapPrm, 16, 64)
+	amb, _ := strconv.ParseUint(who.CapAmb, 16, 64) // ambient is permitted as well; a missing set adds nothing
+	inh, inhErr := strconv.ParseUint(who.CapInh, 16, 64)
+	held := eff | prm | amb
+	ev := "the agent holds " + capSets(eff, held)
+	if more := inh &^ held; *who.NoNewPrivs == 0 && inhErr == nil && more != 0 {
+		ev += "; its inheritable set adds " + strings.Join(catalog.CapList(more), ", ") +
+			", which an execve of a file whose file capabilities name them would make permitted"
+	}
+	switch {
+	case who.UID == 0 && held != 0:
+		return obs.Finding, "root", "", "the agent runs as uid 0 and " + ev[len("the agent "):]
+	case who.UID == 0:
+		return obs.Finding, "root", "", "the agent runs as uid 0"
+	case held&catalog.Dangerous != 0:
+		return obs.Finding, "dangerous_caps", "", ev
+	case held != 0:
+		return obs.Finding, "other_caps", "", ev
+	case prmErr != nil:
+		return obs.Unknown, "", "the identity doesn't report CapPrm, so capabilities the agent could raise can't be told", ""
+	case *who.NoNewPrivs == 0 && inhErr != nil:
+		return obs.Unknown, "", "NoNewPrivs is 0 and the identity doesn't report CapInh, so capabilities an execve " +
+			"could make permitted can't be told", ""
+	case *who.NoNewPrivs == 0 && inh != 0:
+		return obs.Unknown, "", "NoNewPrivs is 0 and the agent's inheritable set holds " +
+			strings.Join(catalog.CapList(inh), ", ") + ", which an execve of a file whose file capabilities name them " +
+			"would make permitted; the probe doesn't look for such files", ""
+	}
+	return obs.Pass, "", "", "graded by the host from the probe's identity: no capability held, effective, permitted or ambient"
+}
+
+// capSets names the held capabilities, the effective ones apart from those only permitted, at most twelve of each.
+func capSets(eff, held uint64) string {
+	list := func(caps uint64) string {
+		names := catalog.CapList(caps)
+		if n := len(names); n > 12 {
+			names = append(names[:12], strconv.Itoa(n-12)+" more")
+		}
+		return strings.Join(names, ", ")
+	}
+	var parts []string
+	if e := eff & held; e != 0 {
+		parts = append(parts, list(e)+" (effective)")
+	}
+	if p := held &^ eff; p != 0 {
+		parts = append(parts, list(p)+" (permitted, not effective: a process raises a permitted capability at will)")
+	}
+	return strings.Join(parts, "; ")
 }
 
 // shape checks a proof is present, names the check's mechanism, agrees with the identity, and lists only targets the

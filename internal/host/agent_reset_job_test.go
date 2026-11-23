@@ -72,7 +72,7 @@ func TestAgentResetAcceptsPythonRenderedProfiles(t *testing.T) {
 		t.Skip("Python renderer unavailable")
 	}
 	script := `import runpy,json,hashlib,sys
-n=runpy.run_path("../../deploy/eks-agent/render_profile.py")
+n=runpy.run_path("../../experiments/eks-agent/render_profile.py")
 p=n["render"](sys.argv[1],sys.argv[2],"111122223333",n["LIGHTWEIGHT_MODEL"],["8.8.8.8"],"172.20.0.10",controller="host",storage_profile=sys.argv[3],workspace_volume={"id":"vol-"+"5"*17,"zone":"us-west-2a"})
 j=p["kubernetes"]["items"][-1]
 h=hashlib.sha256(json.dumps(j,sort_keys=True,separators=(",",":")).encode()).hexdigest()

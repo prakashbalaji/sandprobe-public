@@ -17,7 +17,7 @@ make poc        # bin/sandprobe-poc: the Modal proof of concept, built with -tag
 SANDPROBE_FIXTURES=1 go test ./internal/host   # adds the Docker fixture and exec tests
 sh test/probe.sh                               # probe contract tests as root and nobody, without network
 deploy/canary_test.sh; deploy/eks_test.sh      # tests for the deploy scripts (no cloud account needed)
-cd proto/tui && go run .                       # the UX prototype on demo data (its own module)
+cd experiments/proto/tui && go run .           # the UX prototype on demo data (its own module)
 ```
 
 Every test runs on public data: saved reports come from `demo/reports` and `test/reports` (runs of local Docker boxes;
@@ -31,7 +31,7 @@ Every test runs on public data: saved reports come from `demo/reports` and `test
 | `cmd/sandprobe-probe` | the in-box probe: observations only, no grade |
 | `cmd/sandprobe-canary` | the canary server: TLS echo with a pinned key, TCP and UDP ports, an authoritative DNS server, a signed public control, receipts kept in memory |
 | `cmd/sandprobe-aux` | the Modal proof of concept's sidecar relay and look helper |
-| `cmd/sandprobe-agent-grade`, `cmd/sandprobe-daytona-workload` | the managed-workload evaluations, with `deploy/eks-agent` and `deploy/daytona-agent`; they need `SANDPROBE_AWS_ACCOUNT` and `SANDPROBE_AWS_PROFILE` |
+| `cmd/sandprobe-agent-grade`, `cmd/sandprobe-daytona-workload` | the managed-workload evaluations, with `experiments/eks-agent` and `experiments/daytona-agent`; they need `SANDPROBE_AWS_ACCOUNT` and `SANDPROBE_AWS_PROFILE` |
 | `internal/probe` | the checks themselves (SEC, EGR, PER, AMP) |
 | `internal/grade` | the grader. It trusts nothing the box returns (GRD-5) |
 | `internal/host` | provider adapters, `run exec`'s transport (`exec.go`) and the recipe runner (`recipe.go`) |
@@ -41,7 +41,8 @@ Every test runs on public data: saved reports come from `demo/reports` and `test
 | `deploy/` | `canary.sh` (EC2 and Cloudflare DNS) and `eks.sh` (EKS Auto Mode for AWS Nitro); both need `PROFILE`, your AWS CLI profile |
 | `test/` | Docker fixtures, each with an expected result, and the probe and calibration scripts |
 | `demo/` | three demo boxes (vibe, hardened, regressed) and their reports |
-| `proto/tui` | the TUI and web report prototype on demo data |
+| `docs/providers/` | each provider's status, setup, command and skipped checks |
+| `experiments/` | research harnesses, not part of the product: the EKS and Daytona agent evaluations and the TUI prototype ([README](experiments/README.md)) |
 
 ## Hard rules
 

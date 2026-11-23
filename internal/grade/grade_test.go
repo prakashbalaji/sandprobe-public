@@ -22,7 +22,7 @@ func base() (obs.Manifest, *obs.Doc, *obs.CanaryEvidence) {
 	m := obs.Manifest{RunID: "r1", Nonce: "n1", BoxID: "box-1", ProbeSHA256: "abc", Mode: "exec", Selected: ids,
 		Targets: targets, Discover: discover, CheckNonces: map[string]string{}, Endpoints: map[string]string{}, Proxy: "proxy.example:3128"}
 	d := &obs.Doc{Schema: obs.Schema, RunID: "r1", Nonce: "n1", BoxID: "box-1", ProbeSHA256: "abc", DurationMS: 9600,
-		Identity: &obs.Identity{UID: 1001, GID: 1001, CapEff: "0000000000000000", CapPrm: "0000000000000000",
+		Identity: &obs.Identity{UID: 1001, GID: 1001, CapEff: "0000000000000000", CapPrm: "0000000000000000", CapInh: "0000000000000000",
 			CapBnd: "000001ffffffffff", CapAmb: "0000000000000000", NoNewPrivs: ptr(1), SetuidScan: &obs.SetuidScan{Complete: true}}}
 	// PER-5 needs a reset; the base box is one whose provider leaves no storage to test, so it's skipped (GRD-3).
 	m.Selected = slices.DeleteFunc(m.Selected, func(id string) bool { return id == "PER-5" })
@@ -824,5 +824,41 @@ func TestNoCanaryIsUnknownNeverAnswered(t *testing.T) {
 	add(d, obs.Observation{ID: "EGR-2", Result: obs.Unknown})
 	if r := Grade(m, d, &obs.CanaryEvidence{}); r.Valid {
 		t.Error("an answer to a check the probe was never asked for was accepted")
+	}
+}
+
+// AMP-2 counts every capability the agent holds, effective, permitted or ambient, at the same severity, and names each
+// one effective or only permitted; an inheritable one, with NoNewPrivs 0, leaves a pass unknown (AMP-2's row).
+func TestAMP2CapabilitySets(t *testing.T) {
+	zero, one := 0, 1
+	const none, drs, raw = "0000000000000000", "0000000000000004", "0000000000002000" // CAP_DAC_READ_SEARCH, CAP_NET_RAW
+	for _, tc := range []struct {
+		name                      string
+		uid                       int
+		eff, prm, inh, amb        string
+		nnp                       *int
+		result, variant, mentions string
+	}{
+		{"nothing held", 1000, none, none, none, none, &zero, obs.Pass, "", "no capability held"},
+		{"a dangerous capability only permitted", 1000, none, drs, none, none, &one, obs.Finding, "dangerous_caps",
+			"CAP_DAC_READ_SEARCH (permitted, not effective"},
+		{"a dangerous capability effective", 1000, drs, drs, none, none, &one, obs.Finding, "dangerous_caps",
+			"CAP_DAC_READ_SEARCH (effective)"},
+		{"another capability only permitted", 1000, none, raw, none, none, &one, obs.Finding, "other_caps",
+			"CAP_NET_RAW (permitted, not effective"},
+		{"an ambient capability", 1000, none, none, none, raw, &one, obs.Finding, "other_caps", "CAP_NET_RAW"},
+		{"inheritable, NoNewPrivs 0", 1000, none, none, drs, none, &zero, obs.Unknown, "", "inheritable set holds CAP_DAC_READ_SEARCH"},
+		{"inheritable, NoNewPrivs 1", 1000, none, none, drs, none, &one, obs.Pass, "", "no capability held"},
+		{"no CapPrm reported", 1000, none, "", none, none, &one, obs.Unknown, "", "doesn't report CapPrm"},
+		{"no CapPrm, but CapEff finds", 1000, drs, "", none, none, &one, obs.Finding, "dangerous_caps", "CAP_DAC_READ_SEARCH"},
+		{"no CapInh, NoNewPrivs 0", 1000, none, none, "", none, &zero, obs.Unknown, "", "doesn't report CapInh"},
+		{"no CapInh, NoNewPrivs 1", 1000, none, none, "", none, &one, obs.Pass, "", "no capability held"},
+		{"root", 0, none, none, none, none, &one, obs.Finding, "root", "uid 0"},
+	} {
+		id := &obs.Identity{UID: tc.uid, CapEff: tc.eff, CapPrm: tc.prm, CapInh: tc.inh, CapAmb: tc.amb, NoNewPrivs: tc.nnp}
+		res, v, why, ev := derive("AMP-2", id)
+		if res != tc.result || v != tc.variant || !strings.Contains(why+ev, tc.mentions) {
+			t.Errorf("%s: want %s %s mentioning %q, got %s %s %q %q", tc.name, tc.result, tc.variant, tc.mentions, res, v, why, ev)
+		}
 	}
 }

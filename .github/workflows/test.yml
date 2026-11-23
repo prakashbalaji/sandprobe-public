@@ -22,12 +22,12 @@ jobs:
       - name: Quick-mode smoke in network-disabled root and nobody containers
         run: sh test/quick.sh
       - name: Managed Daytona offline lifecycle and controller tests
-        run: python3 -m unittest discover -s deploy/daytona-agent -p 'test_*.py'
+        run: python3 -m unittest discover -s experiments/daytona-agent -p 'test_*.py'
       - name: Pinned host model request shape without cloud access
         run: |
           python3 -m venv "$RUNNER_TEMP/bedrock-sdk"
-          "$RUNNER_TEMP/bedrock-sdk/bin/pip" install --disable-pip-version-check --require-hashes --only-binary=:all: -r deploy/eks-agent/requirements.lock
-          "$RUNNER_TEMP/bedrock-sdk/bin/python" -I deploy/daytona-agent/model.py check
+          "$RUNNER_TEMP/bedrock-sdk/bin/pip" install --disable-pip-version-check --require-hashes --only-binary=:all: -r experiments/eks-agent/requirements.lock
+          "$RUNNER_TEMP/bedrock-sdk/bin/python" -I experiments/daytona-agent/model.py check
       - name: Pinned Daytona SDK wire contracts
         run: |
           python3 -m venv "$RUNNER_TEMP/daytona-sdk"
