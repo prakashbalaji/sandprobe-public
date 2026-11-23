@@ -540,9 +540,12 @@ func secretFiles(root string) ([]string, error) {
 		for _, d := range entries {
 			p := filepath.Join(dir, d.Name())
 			isDir := d.IsDir()
-			if d.Type()&os.ModeSymlink != 0 {
-				n, err := resolve(p)
-				isDir = err == nil && n.errno == 0 && n.st.Mode&syscall.S_IFMT == syscall.S_IFDIR
+			if d.Type()&os.ModeSymlink != 0 { // where the link leads, as the kernel resolves it (walkPath)
+				w, err := walkFor(p)
+				if err == nil {
+					isDir = w.errno == 0 && w.nodes[w.last()].dir
+					w.close()
+				}
 			}
 			switch {
 			case !isDir:
@@ -617,14 +620,17 @@ func dotenvs(home, wd string) ([]string, error) {
 				if err := walk(p, depth+1); err != nil {
 					return err
 				}
-			case d.Type()&os.ModeSymlink != 0:
-				n, err := resolve(p)
+			case d.Type()&os.ModeSymlink != 0: // where the link leads, as the kernel resolves it (walkPath)
+				w, err := walkFor(p)
 				switch {
 				case errors.Is(err, errDangling):
 					continue // leads nowhere the agent could read
 				case err != nil:
-					return err // a loop, or too many hops: coverage can't be established
-				case n.errno == 0 && n.st.Mode&syscall.S_IFMT == syscall.S_IFDIR:
+					return err // a loop, or too many links: coverage can't be established
+				}
+				isDir := w.errno == 0 && w.nodes[w.last()].dir
+				w.close()
+				if isDir {
 					if err := walk(p, depth+1); err != nil {
 						return err
 					}

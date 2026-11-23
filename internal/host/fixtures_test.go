@@ -133,6 +133,20 @@ var fixtures = []fixture{
 	{name: "evidence-stickylink", image: "evidence", settle: time.Second, opts: func(world) []string {
 		return []string{"--network", "none", "-e", "EVIDENCE=stickylink"}
 	}, expect: expectWritable(map[string]string{"PER-1": "~/.bashrc"})},
+	// the walk resolves as the kernel does: a last ../ link after a directory link lands in the real directory, so the
+	// write and the read it allows are found and the read it refuses isn't, never judged on the decoys beside the link;
+	// and one budget of eight links covers the whole path, so a ninth leaves both checks unknown (SBX-2, TWN-4)
+	{name: "evidence-dotdot", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=dotdot"}
+	}, expect: func(t *testing.T, w world, r *Run) {
+		expectWritable(map[string]string{"PER-1": "~/.bashrc", "SEC-3": ".git-credentials"})(t, w, r)
+		if o := outcome(r.Report, "SEC-3"); strings.Contains(o.Evidence, ".netrc") {
+			t.Errorf("SEC-3: the kernel refuses ~/.netrc, yet it was found: %+v", o)
+		}
+	}},
+	{name: "evidence-ninelinks", image: "evidence", settle: time.Second, opts: func(world) []string {
+		return []string{"--network", "none", "-e", "EVIDENCE=ninelinks"}
+	}, expect: expectUnknown(map[string]string{"PER-1": "more than 8", "SEC-3": "more than 8"})},
 	{name: "evidence-sockets", image: "evidence", settle: time.Second, expect: expectSockets, opts: func(world) []string {
 		return []string{"--network", "none", "--cap-add", "NET_ADMIN", "-e", "EVIDENCE=sockets"}
 	}},

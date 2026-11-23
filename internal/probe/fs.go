@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -54,104 +53,53 @@ func errName(e syscall.Errno) string {
 	return fmt.Sprintf("errno %d", int(e))
 }
 
-// node is a path resolved hop by hop (SBX-2): every path visited, the final one, and how lstat answered for it.
-type node struct {
-	hops  []string
-	final string
-	st    syscall.Stat_t
-	errno syscall.Errno // 0 when the final path exists
-}
-
-func resolve(path string) (node, error) {
-	n := node{}
-	p := path
-	for i := 0; i <= maxHops; i++ {
-		n.hops = append(n.hops, p)
-		var st syscall.Stat_t
-		if err := syscall.Lstat(p, &st); err != nil {
-			switch e := errnoOf(err); e {
-			case syscall.ENOENT, syscall.ENOTDIR, syscall.EACCES:
-				if e != syscall.EACCES && len(n.hops) > 1 {
-					return n, fmt.Errorf("%w: %s", errDangling, path)
-				}
-				n.final, n.errno = p, e
-				return n, nil
-			default:
-				return n, err
-			}
-		}
-		if st.Mode&syscall.S_IFMT != syscall.S_IFLNK {
-			n.final, n.st = p, st
-			return n, nil
-		}
-		t, err := os.Readlink(p)
-		if err != nil {
-			return n, err
-		}
-		if !filepath.IsAbs(t) {
-			t = filepath.Join(filepath.Dir(p), t)
-		}
-		p = filepath.Clean(t)
-	}
-	return n, unknowable("%s has more than %d symlink hops", path, maxHops)
-}
-
-// searchable is TWN-2's second half: the deepest existing ancestor of p is searchable by the probe.
-func searchable(p string) bool {
-	for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
-		var st syscall.Stat_t
-		if syscall.Stat(dir, &st) == nil {
-			return syscall.Faccessat(unixAtFDCWD, dir, 1 /* X_OK */, atEAccess) == nil
-		}
-		if dir == "/" {
-			return false
-		}
-	}
-}
-
 const unixAtFDCWD = -100
 
-func absentTarget(name string, n node) obs.Target {
-	return obs.Target{Name: name, State: "absent", Errno: errName(n.errno), ParentSearchable: searchable(n.final)}
+// absentTarget is TWN-2's absence from the walk: the kernel's ENOENT for the entry in a directory the walk holds, which
+// it could only answer having searched that directory.
+func absentTarget(name string, w *pathWalk) obs.Target {
+	return obs.Target{Name: name, State: "absent", Errno: errName(w.errno), ParentSearchable: w.errno == syscall.ENOENT}
+}
+
+// walkFor walks path for a check, following the last name's link: a chain that ends nowhere is errDangling, which a
+// discovery walk may skip, and the rest of what the walk can't judge is unknowable.
+func walkFor(path string) (*pathWalk, error) {
+	w, err := walkPath(path, true)
+	if err == nil && w.dangling {
+		w.close()
+		return nil, fmt.Errorf("%w: %s", errDangling, path)
+	}
+	return w, err
 }
 
 // sysReopen is readCheck's read-only reopen, a seam so a test can stand in for a filesystem that refuses O_NOATIME.
 var sysReopen = syscall.Open
 
-// readCheck is the file_read mechanism (SEC-3): the inode is pinned with O_PATH, which opens nothing for I/O, checked
-// to be a regular file on that descriptor, and only then reopened read-only through /proc/self/fd and closed, unread.
-// A path swapped for a FIFO after the pin can't change what's opened.
+// readCheck is the file_read mechanism (SEC-3): the path is walked as the kernel resolves it (walkPath), and the inode it
+// ends at is pinned with O_PATH, which opens nothing for I/O, checked to be a regular file on that descriptor, and only
+// then reopened read-only through /proc/self/fd and closed, unread. A path swapped for a FIFO after the pin can't
+// change what's opened.
 func readCheck(name, path string) (t obs.Target, nonEmpty bool, err error) {
 	t = obs.Target{Name: name}
-	n, err := resolve(path)
+	w, err := walkFor(path)
 	if err != nil {
 		return t, false, err
 	}
-	switch n.errno {
+	defer w.close()
+	switch w.errno {
 	case syscall.ENOENT, syscall.ENOTDIR:
-		return absentTarget(name, n), false, nil
+		return absentTarget(name, w), false, nil
 	case syscall.EACCES:
 		t.State, t.Errno = "refused", "EACCES"
 		return t, false, nil
 	}
-	if n.st.Mode&syscall.S_IFMT != syscall.S_IFREG {
-		return t, false, unknowable("%s isn't a regular file", path)
-	}
-	fd, err := syscall.Open(n.final, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		if e := errnoOf(err); e == syscall.EACCES || e == syscall.EPERM {
-			t.State, t.Errno = "refused", errName(e)
-			return t, false, nil
-		}
-		return t, false, err
-	}
-	defer syscall.Close(fd)
+	fd := w.fds[w.last()] // the inode the walk resolved, pinned O_PATH|O_NOFOLLOW
 	var st syscall.Stat_t
 	if err := syscall.Fstat(fd, &st); err != nil {
 		return t, false, err
 	}
 	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
-		return t, false, unknowable("%s was swapped for something that isn't a regular file", path)
+		return t, false, unknowable("%s isn't a regular file", path)
 	}
 	t.Device, t.Inode = uint64(st.Dev), st.Ino // pinned O_PATH identity, even if read-open is refused
 	flags := syscall.O_RDONLY | syscall.O_NONBLOCK | syscall.O_NOCTTY | syscall.O_CLOEXEC
@@ -192,33 +140,29 @@ func writeCheck(name, path string) (obs.Target, error) {
 	return t, err
 }
 
-// writeHow is the write_perm mechanism: the path is found if the agent can write it, or replace it, or any hop of its
-// symlink chain, through a real directory on the way it can write; the kernel answers that, for the agent as it is.
+// writeHow is the write_perm mechanism, on the path as the kernel resolves it (walkPath): the path is found if the agent
+// can write its target, or replace any entry on the way, a symlink's included, in the directory it was looked up in;
+// the kernel answers that, for the agent as it is.
 // Failing that, it is found if a change of identity or mode could get the write (TWN-4's model, gain); how then says
 // so. Nothing is ever opened for writing.
 func writeHow(name, path string) (t obs.Target, how string, err error) {
 	t = obs.Target{Name: name}
-	n, err := resolve(path)
+	w, err := walkFor(path)
 	if err != nil {
 		return t, "", err
 	}
-	for _, h := range n.hops {
-		dir, err := replacer(h)
-		if err != nil {
-			return t, "", err
-		}
-		if dir != "" {
-			t.State = "found"
-			return t, "", nil
-		}
+	defer w.close()
+	if replaceable(w) {
+		t.State = "found"
+		return t, "", nil
 	}
-	switch n.errno {
+	switch w.errno {
 	case syscall.ENOENT, syscall.ENOTDIR:
-		t = absentTarget(name, n)
+		t = absentTarget(name, w)
 	case syscall.EACCES:
 		t.State, t.Errno = "refused", "EACCES"
 	default:
-		err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
+		err = w.canAt(w.last(), 2 /* W_OK */)
 		switch e := errnoOf(err); {
 		case err == nil:
 			t.State = "found"
@@ -229,26 +173,32 @@ func writeHow(name, path string) (t obs.Target, how string, err error) {
 			return t, "", err
 		}
 	}
-	for _, h := range n.hops {
-		why, err := gain(h, 2, false)
-		if err != nil || why != "" {
-			if err == nil {
-				t = obs.Target{Name: name, State: "found"}
-			}
-			return t, why, err
+	why, err := gainOn(w.nodes, path, 2, false)
+	if err != nil || why != "" {
+		if err == nil {
+			t = obs.Target{Name: name, State: "found"}
 		}
+		return t, why, err
 	}
 	return t, "", nil
 }
 
 // gain asks TWN-4's model whether a change could get the agent want (2 write, 4 read) on p, which the kernel refused
-// it as it is: how, when it can; an error the check makes unknown, when the model can't tell. follow: p's own link is
-// followed (a read, or a socket), rather than judged as an entry to replace; onlyOpen: only opening it counts.
+// it as it is: how, when it can; an error the check makes unknown, when the model can't tell. It walks p as the kernel
+// resolves it; onlyOpen: only opening the target counts, not replacing an entry on the way.
 func gain(p string, want uint32, onlyOpen bool) (string, error) {
-	v, how, err := modelGain(p, want == 4 || onlyOpen, want, onlyOpen)
-	switch {
-	case err != nil:
+	w, err := walkFor(p)
+	if err != nil {
 		return "", unknowable("%s: %v", p, err)
+	}
+	defer w.close()
+	return gainOn(w.nodes, p, want, onlyOpen)
+}
+
+// gainOn is gain on a path already walked.
+func gainOn(ns []inode, p string, want uint32, onlyOpen bool) (string, error) {
+	v, how := modelOn(ns, p, want, onlyOpen)
+	switch {
 	case v == cantTell:
 		return "", unknowable("%s", how)
 	case v == can:
@@ -299,31 +249,29 @@ var agentCaps = func() uint64 {
 // capList names the capabilities set in caps.
 func capList(caps uint64) string { return strings.Join(catalog.CapList(caps), ", ") }
 
-// replacer: some entry on the way to p, a symlink's included, lets the agent as it is create, rename or remove it in
-// the real directory it is looked up in: that directory writable and searchable, by the kernel's own check; not
-// protected by a sticky bit, which spares entries the agent doesn't own unless it holds CAP_FOWNER; not procfs or
-// sysfs, where nothing is created; and the entry not a mount point. Every link on the way is kept and followed, so each
-// directory judged is one the kernel looks in (TWN-4). It returns that directory, or "".
-func replacer(p string) (string, error) {
-	ns, err := pathNodes(p, false)
-	if err != nil {
-		return "", unknowable("%v", err)
-	}
+// replaceable: some entry on the walk, a symlink's included, lets the agent as it is create, rename or remove it in the
+// real directory it was looked up in: that directory writable and searchable, by the kernel's own check on the walk's
+// descriptor; not protected by a sticky bit, which spares entries the agent doesn't own unless it holds CAP_FOWNER;
+// not procfs or sysfs, where nothing is created; and the entry not a mount point, as statx says (TWN-4).
+func replaceable(w *pathWalk) bool {
 	euid := uint32(os.Geteuid())
 	fowner := theAgent().eff&capFowner != 0
-	for k := len(ns) - 1; k >= 1; k-- { // every entry on the way, a symlink's included, in its own directory
-		d, c := ns[ns[k].parent], ns[k]
-		if !d.seen || !d.exists || d.noEntries ||
-			syscall.Faccessat(unixAtFDCWD, d.path, 3 /* W_OK|X_OK */, atEAccess) != nil {
+	for k := w.last(); k >= 1; k-- { // every entry on the way, a symlink's included, in its own directory
+		d := w.nodes[k].parent
+		if d < 0 {
+			continue // "/" is no entry of any directory
+		}
+		p, c := w.nodes[d], w.nodes[k]
+		if !p.seen || !p.exists || !p.dir || p.noEntries || w.canAt(d, 3 /* W_OK|X_OK */) != nil {
 			continue
 		}
 		if c.seen && c.exists && (c.mountPoint ||
-			d.mode&syscall.S_ISVTX != 0 && !fowner && d.uid != euid && c.uid != euid) {
+			p.mode&syscall.S_ISVTX != 0 && !fowner && p.uid != euid && c.uid != euid) {
 			continue
 		}
-		return d.path, nil
+		return true
 	}
-	return "", nil
+	return false
 }
 
 // pseudo: procfs and sysfs directories, where faccessat says root may write but nothing can be created, renamed or
@@ -343,20 +291,21 @@ func pseudo(dir string) bool {
 // a socket at the path is unknown.
 func socketCheck(name, path string) (t obs.Target, how string, err error) {
 	t = obs.Target{Name: name}
-	n, err := resolve(path)
+	w, err := walkFor(path)
 	if err != nil {
 		return t, "", err
 	}
-	switch n.errno {
+	defer w.close()
+	switch w.errno {
 	case syscall.ENOENT, syscall.ENOTDIR:
-		return absentTarget(name, n), "", nil
+		return absentTarget(name, w), "", nil
 	case syscall.EACCES:
 		t.State, t.Errno = "refused", "EACCES"
 	default:
-		if n.st.Mode&syscall.S_IFMT != syscall.S_IFSOCK {
+		if w.nodes[w.last()].ftype != syscall.S_IFSOCK {
 			return t, "", unknowable("%s exists but isn't a socket", path)
 		}
-		err = syscall.Faccessat(unixAtFDCWD, n.final, 2 /* W_OK */, atEAccess)
+		err = w.canAt(w.last(), 2 /* W_OK */)
 		switch e := errnoOf(err); {
 		case err == nil:
 			t.State = "found"
@@ -367,7 +316,7 @@ func socketCheck(name, path string) (t obs.Target, how string, err error) {
 			return t, "", err
 		}
 	}
-	why, err := gain(path, 2, true)
+	why, err := gainOn(w.nodes, path, 2, true)
 	if err != nil || why != "" {
 		if err == nil {
 			t = obs.Target{Name: name, State: "found"}
@@ -377,17 +326,28 @@ func socketCheck(name, path string) (t obs.Target, how string, err error) {
 	return t, "", nil
 }
 
-// permCheck is the read_perm mechanism (AMP-8 block devices): faccessat(R_OK), never opened.
+// permCheck is the read_perm mechanism (AMP-8 block devices): on the path as the kernel resolves it (walkPath),
+// faccessat(R_OK), never opened.
 func permCheck(name, path string) (obs.Target, error) {
 	t := obs.Target{Name: name}
-	err := syscall.Faccessat(unixAtFDCWD, path, 4 /* R_OK */, atEAccess)
+	w, err := walkFor(path)
+	if err != nil {
+		return t, err
+	}
+	defer w.close()
+	switch w.errno {
+	case syscall.ENOENT, syscall.ENOTDIR:
+		return absentTarget(name, w), nil
+	case syscall.EACCES:
+		t.State, t.Errno = "refused", "EACCES"
+		return t, nil
+	}
+	err = w.canAt(w.last(), 4 /* R_OK */)
 	switch e := errnoOf(err); {
 	case err == nil:
 		t.State = "found"
 	case e == syscall.EACCES || e == syscall.EPERM:
 		t.State, t.Errno = "refused", errName(e)
-	case e == syscall.ENOENT:
-		t.State, t.Errno, t.ParentSearchable = "absent", "ENOENT", searchable(path)
 	default:
 		return t, err
 	}

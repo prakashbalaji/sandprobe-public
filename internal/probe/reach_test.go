@@ -66,10 +66,21 @@ func kPerm(n kNode, mode, owner, uid uint32, inGroup bool, caps uint64, want uin
 
 func kernelCan(ns []kNode, agentUID uint32, agentGids []uint32, caps uint64, want uint32) bool {
 	uids := []uint32{agentUID}
-	gids := append([]uint32{}, agentGids...)
+	var gids []uint32 // each candidate gid once: a duplicate adds states, never an identity
+	addGid := func(g uint32) {
+		for _, c := range gids {
+			if c == g {
+				return
+			}
+		}
+		gids = append(gids, g)
+	}
+	for _, g := range agentGids {
+		addGid(g)
+	}
 	for _, n := range ns {
 		uids = append(uids, n.uid)
-		gids = append(gids, n.gid)
+		addGid(n.gid)
 	}
 	uids = append(uids, 0, 0xfff0)
 	var start kState
@@ -262,10 +273,10 @@ func TestModelAgainstKernel(t *testing.T) {
 	for _, c := range curated {
 		checkCase(t, c)
 	}
-	// a seeded table: two or three components below "/", or a directory holding a link (absolute, to a directory in
-	// "/", or relative, in its own directory), each owned by me, root or another, in my group, root's or another's, with
-	// modes drawn from the ones that matter, sometimes read-only, missing or a mount point, and every combination of the
-	// capabilities the model weighs
+	// a seeded table: two or three components below "/", a directory holding a link (absolute, to a directory in "/",
+	// or relative, in its own directory), or a link followed by ".." (the target looked up in the real parent), each
+	// owned by me, root or another, in my group, root's or another's, with modes drawn from the ones that matter,
+	// sometimes read-only, missing or a mount point, and every combination of the capabilities the model weighs
 	rng := rand.New(rand.NewSource(24))
 	modes := []uint32{0, 0o010, 0o020, 0o030, 0o040, 0o070, 0o100, 0o200, 0o300, 0o400, 0o444, 0o500, 0o555, 0o600,
 		0o644, 0o666, 0o700, 0o701, 0o705, 0o711, 0o750, 0o755, 0o770, 0o777, 0o1777, 0o1770, 0o1733}
@@ -280,9 +291,9 @@ func TestModelAgainstKernel(t *testing.T) {
 		}
 		return n
 	}
-	for i := 0; i < 9000; i++ {
+	for i := 0; i < 12000; i++ {
 		ns := []kNode{dir(0, 0, modes[rng.Intn(len(modes))])}
-		switch rng.Intn(3) {
+		switch rng.Intn(4) {
 		case 0: // two or three components, each in the one before
 			for d := 1 + rng.Intn(2); d > 0; d-- {
 				ns = append(ns, pick(true))
@@ -299,8 +310,18 @@ func TestModelAgainstKernel(t *testing.T) {
 			b := pick(true)
 			b.in = 2
 			ns = append(ns, pick(true), l, b)
+		case 3: // ".." after a directory link: /link -> /x/y, then .. lands in /x, where the target is looked up
+			l := pick(false)
+			l.link, l.mode, l.ro, l.procfs, l.mnt = true, 0o777, false, false, false
+			x := pick(true)
+			x.in = 1 // in "/"
+			ns = append(ns, l, x, pick(true))
 		}
-		ns = append(ns, pick(rng.Intn(4) == 0))
+		target := pick(rng.Intn(4) == 0)
+		if len(ns) == 4 && ns[1].link {
+			target.in = 3 // after .., in /x, never in /x/y nor beside the link
+		}
+		ns = append(ns, target)
 		for j := 1; j < len(ns); j++ { // nothing exists below what doesn't, nor past a missing link
 			if !ns[up(ns, j)].exists || ns[j-1].link && !ns[j-1].exists {
 				ns[j].exists = false
@@ -320,24 +341,22 @@ func TestModelAgainstKernel(t *testing.T) {
 	}
 }
 
-// pathNodes keeps every lookup the kernel makes: a link on the way stays an entry of its own directory, then is
-// followed to the real directories it leads to, and counted against SBX-2's eight; past a directory the probe can't
-// search, nothing is seen.
-func TestPathNodes(t *testing.T) {
+// walkPath keeps every lookup the kernel makes: a link on the way stays an entry of its own directory, then is
+// followed to the real directories it leads to; past a directory the probe can't search, nothing is seen.
+func TestWalkPathNodes(t *testing.T) {
 	d := t.TempDir()
 	os.MkdirAll(filepath.Join(d, "real", "sub"), 0o755)
 	os.WriteFile(filepath.Join(d, "real", "sub", "f"), nil, 0o644)
 	os.Symlink(filepath.Join(d, "real"), filepath.Join(d, "link")) // a directory link
-	ns, err := pathNodes(filepath.Join(d, "link", "sub", "f"), false)
+	w, err := walkPath(filepath.Join(d, "link", "sub", "f"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer w.close()
 	var paths []string
-	for _, n := range ns {
-		paths = append(paths, n.path)
-	}
 	link := -1
-	for i, n := range ns {
+	for i, n := range w.nodes {
+		paths = append(paths, n.path)
 		if n.path == filepath.Join(d, "link") && n.link {
 			link = i
 		}
@@ -345,24 +364,80 @@ func TestPathNodes(t *testing.T) {
 	switch got := strings.Join(paths, " "); {
 	case !strings.Contains(got, filepath.Join(d, "real", "sub")):
 		t.Errorf("want the real directories the link leads to: %s", got)
-	case link < 0 || ns[ns[link].parent].path != d:
+	case link < 0 || w.nodes[w.nodes[link].parent].path != d:
 		t.Errorf("want the link kept as an entry of its own directory, %s: %s", d, got)
-	}
-	for i := 1; i <= 9; i++ {
-		os.Symlink(fmt.Sprintf("h%d", i+1), filepath.Join(d, fmt.Sprintf("h%d", i)))
-	}
-	os.Mkdir(filepath.Join(d, "h10"), 0o755)
-	if _, err := pathNodes(filepath.Join(d, "h1", "f"), false); err == nil || !strings.Contains(err.Error(), "more than 8") {
-		t.Errorf("nine directory links: want refused after eight, got %v", err)
 	}
 	if !root {
 		closed := filepath.Join(d, "closed")
 		os.Mkdir(closed, 0)
 		t.Cleanup(func() { os.Chmod(closed, 0o700) })
-		ns, _ := pathNodes(filepath.Join(closed, "x", "f"), false)
-		if last := ns[len(ns)-1]; last.seen || !ns[len(ns)-3].seen {
-			t.Errorf("past a directory the probe can't search, nothing is seen: %+v", ns)
+		w, _ := walkPath(filepath.Join(closed, "x", "f"), false)
+		if last := w.nodes[w.last()]; last.seen || w.errno != syscall.EACCES || !w.nodes[w.last()-2].seen {
+			t.Errorf("past a directory the probe can't search, nothing is seen: %+v", w.nodes)
 		}
+		w.close()
+	}
+}
+
+// The code review of #37's cases, against the kernel: after a directory link, a final link to ../target resolves from
+// the real directory holding it, not the lexical one, so the walk, and the read check's pin, land on the inode the
+// kernel's own stat reaches; and eight directory links plus a final link spend one budget of eight, so the walk refuses.
+func TestWalkAgreesWithKernel(t *testing.T) {
+	d := t.TempDir()
+	os.MkdirAll(filepath.Join(d, "real", "dir"), 0o755)
+	os.Mkdir(filepath.Join(d, "base"), 0o755)
+	os.WriteFile(filepath.Join(d, "real", "target"), []byte("real"), 0o644)
+	os.WriteFile(filepath.Join(d, "base", "target"), []byte("lexical"), 0o644)
+	os.Symlink(filepath.Join(d, "real", "dir"), filepath.Join(d, "base", "linkdir"))
+	os.Symlink("../target", filepath.Join(d, "real", "dir", "final"))
+	p := filepath.Join(d, "base", "linkdir", "final")
+	var kst syscall.Stat_t
+	if err := syscall.Stat(p, &kst); err != nil {
+		t.Fatal(err)
+	}
+	w, err := walkPath(p, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := w.nodes[w.last()]; n.ino != kst.Ino || n.dev != uint64(kst.Dev) || n.path != filepath.Join(d, "real", "target") {
+		t.Errorf("want the kernel's inode, %s, got %s", filepath.Join(d, "real", "target"), n.path)
+	}
+	w.close()
+	if tg, _, err := readCheck(p, p); err != nil || tg.Inode != kst.Ino {
+		t.Errorf("the read check pinned another inode than the kernel reaches: %+v %v", tg, err)
+	}
+	// eight directory links, then a final link: nine in all
+	for i := 1; i <= 8; i++ {
+		os.Symlink(fmt.Sprintf("h%d", i+1), filepath.Join(d, fmt.Sprintf("h%d", i)))
+	}
+	os.Mkdir(filepath.Join(d, "h9"), 0o755)
+	os.Symlink("../real/target", filepath.Join(d, "h9", "last"))
+	nine := filepath.Join(d, "h1", "last")
+	if _, err := walkPath(nine, true); err == nil || !strings.Contains(err.Error(), "more than 8") {
+		t.Errorf("eight directory links and a final link: want refused, got %v", err)
+	}
+	if _, _, err := readCheck(nine, nine); err == nil || !strings.Contains(err.Error(), "more than 8") {
+		t.Errorf("the read check followed nine links: %v", err)
+	}
+	if _, _, err := writeHow(nine, nine); err == nil || !strings.Contains(err.Error(), "more than 8") {
+		t.Errorf("the write check followed nine links: %v", err)
+	}
+}
+
+// A mount point is never told by a change of device: a Btrfs subvolume has its own device ID yet stays an entry its
+// directory can rename. Only the mount-root attribute makes an entry immovable (TWN-4).
+func TestDeviceChangeIsNoMountPoint(t *testing.T) {
+	const me = 1000
+	ns := toInodes([]kNode{dir(0, 0, 0o755), dir(me, me, 0o755), {uid: 0, gid: 0, mode: 0o555, dir: true, exists: true},
+		file(0, 0, 0o444)})
+	ns[2].dev = ns[1].dev + 1 // a subvolume's own device, without the mount-root attribute
+	a := agentID{uid: me, gids: []uint32{me}}
+	if v, _ := gains(a, ns, 2, false, false); v != can {
+		t.Error("a subvolume in the agent's own directory: want it replaceable")
+	}
+	ns[2].mountPoint = true // statx's STATX_ATTR_MOUNT_ROOT
+	if v, _ := gains(a, ns, 2, false, false); v == can {
+		t.Error("a mount root: want it immovable")
 	}
 }
 

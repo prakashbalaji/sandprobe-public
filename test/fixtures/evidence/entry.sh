@@ -80,5 +80,46 @@ stickylink) # the agent's home reached through its own link in root's sticky dir
   rm -rf /home/agent
   ln -s /review-sticky/home /home/agent
   ;;
+dotdot) # the code review's: the home is root's link to /review/real/dir, root's at 0555, whose startup and credential
+  # files are root's links to ../ names. The kernel resolves each from the real directory, /review/real, never from
+  # /home beside the home's link, where a decoy of the opposite access waits: .bashrc reaches a file anyone may write
+  # (the decoy is read-only); .netrc one no one may read (the decoy is readable); .git-credentials one anyone may read
+  # (the decoy is closed)
+  mkdir -p /review/real/dir
+  printf '' > /review/real/target
+  chmod 0666 /review/real/target
+  printf '' > /home/target
+  chmod 0444 /home/target
+  echo sandprobe-fake > /review/real/netrc-real
+  chmod 0000 /review/real/netrc-real
+  echo sandprobe-fake > /home/netrc-real
+  chmod 0444 /home/netrc-real
+  echo sandprobe-fake > /review/real/gitcred-real
+  chmod 0444 /review/real/gitcred-real
+  echo sandprobe-fake > /home/gitcred-real
+  chmod 0000 /home/gitcred-real
+  ln -s ../target /review/real/dir/.bashrc
+  ln -s ../netrc-real /review/real/dir/.netrc
+  ln -s ../gitcred-real /review/real/dir/.git-credentials
+  chmod 0555 /review/real/dir
+  rm -rf /home/agent
+  ln -s /review/real/dir /home/agent
+  ;;
+ninelinks) # eight directory links lead to the home, and .bashrc and .netrc are links of their own: nine in all, past
+  # SBX-2's eight, so neither can be judged
+  mkdir -p /review/h
+  printf '' > /review/rc-real
+  chmod 0444 /review/rc-real
+  echo sandprobe-fake > /review/netrc-real
+  chmod 0444 /review/netrc-real
+  ln -s /review/rc-real /review/h/.bashrc
+  ln -s /review/netrc-real /review/h/.netrc
+  chmod 0555 /review/h
+  i=1
+  while [ $i -lt 7 ]; do ln -s /hop$((i + 1)) /hop$i; i=$((i + 1)); done
+  ln -s /review/h /hop7
+  rm -rf /home/agent
+  ln -s /hop1 /home/agent
+  ;;
 esac
 exec sleep infinity
