@@ -546,7 +546,7 @@ class Runner:
         spec["nodeSelector"] = self.task_node_selector()
         spec["tolerations"] = [{"key": "sandprobe.run", "operator": "Equal", "value": self.run_id, "effect": "NoSchedule"}]
         container = spec["containers"][0]
-        container["command"] = host_workload.IDLE_COMMAND if self.controller == "host" else ["python", "-I", "/opt/sandprobe/execute.py"]
+        container["command"] = list(host_workload.IDLE_COMMAND) if self.controller == "host" else ["python", "-I", "/opt/sandprobe/execute.py"]
         container["env"] += [{"name": "SANDPROBE_RUN_ID", "value": self.run_id},
                              {"name": "SANDPROBE_POD_UID", "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}}},
                              {"name": "SANDPROBE_RECEIVER_IP", "value": receiver_ip},
@@ -802,6 +802,8 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                    "job_uid": job_uid, "image": self.image, "container_id": self.journal.data["task_container_id"], "config_sha256": config_sha},
                    "canary_state": str(self.journal.folder / "canary.state"),
                    "contract": self.journal.data["workload_contract"], "upload_hosts": self.upload_hosts}
+        if self.controller == "host":
+            request["pod"]["clean_environment"] = True
         # No retries: an ambiguous launch cannot become a second assessment.
         bundle = strict(self.ops.call([str(self.journal.folder / "standard-grade")],
             payload=encoded(request), env=self.env, timeout=500, limit=4 << 20).decode(), 4 << 20)

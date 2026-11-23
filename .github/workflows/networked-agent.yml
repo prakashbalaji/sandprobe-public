@@ -6,6 +6,8 @@ on:
       - deploy/canary.sh
       - cmd/sandprobe-agent-grade/**
       - internal/host/agent_nitro*
+      - internal/host/workload_environment*
+      - deploy/workload_environment.py
       - deploy/eks.sh
       - deploy/durable_state.py
       - deploy/canary_outcome.py
@@ -43,6 +45,8 @@ jobs:
             --entrypoint python sandprobe-agent-local -I /checks/smoke.py
       - name: Execute allowed/isolated receiver calibration with immutable-ID cleanup
         run: python3 deploy/eks-agent/container_network_test.py
+      - name: Exercise the shared clean environment with an inherited synthetic credential
+        run: python3 deploy/eks-agent/container_environment_test.py
       - name: Exercise delegated EKS lifecycle with durable state and fake AWS
         run: DURABLE_STATE=1 bash deploy/eks_test.sh
       - name: Exercise standard canary cleanup

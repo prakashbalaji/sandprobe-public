@@ -185,6 +185,9 @@ func (p *PodBox) Probe(ctx context.Context, args []string, stdin []byte) ([]byte
 		return nil, err
 	}
 	prefix := []string{"exec", "-i", p.Name, "-c", "agent", "--", "env", "SANDPROBE_TWIN=1"}
+	if p.agentBinding != nil && p.agentBinding.CleanEnvironment {
+		prefix = append([]string{"exec", "-i", p.Name, "-c", "agent", "--"}, WorkloadEnvironment()...)
+	}
 	if p.ReferenceImageID != "" {
 		prefix = append(prefix, "HOME=/workspace")
 	}

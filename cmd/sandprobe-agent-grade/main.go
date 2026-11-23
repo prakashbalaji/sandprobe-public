@@ -41,6 +41,9 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 		q.Contract.ManagedRunID != q.Pod.RunID || q.Contract.Image != q.Pod.Image || q.Contract.ConfigSHA256 != q.Pod.ConfigSHA256 {
 		return errors.New("frozen workload contract mismatch")
 	}
+	if q.Pod.CleanEnvironment != (q.Contract.Schema == "sandprobe.workload-contract/3") {
+		return errors.New("workload environment does not match its identity contract")
+	}
 	c, err := host.LoadSSMCanary(q.CanaryState)
 	if err != nil || c.Profile == "" || c.Profile != os.Getenv("SANDPROBE_AWS_PROFILE") || c.Region != "us-west-2" || c.Domain() != "agent-"+q.Pod.RunID+".probe.ac0.dev" {
 		return errors.New("invalid run canary binding")

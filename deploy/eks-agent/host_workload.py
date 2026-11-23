@@ -7,7 +7,7 @@ import sys
 
 from coding import strict
 from lifecycle import Failure
-from render_profile import IDLE_COMMAND
+from render_profile import IDLE_COMMAND, WORKLOAD_ENVIRONMENT
 
 MODEL = "mistral.ministral-3-3b-instruct"
 
@@ -93,7 +93,7 @@ def perform(runner, pod, config_sha):
               "model_requests": 0, "model_request_count_uncertain": False, "stage": "execution"}
 
     def guest(*args, payload=None):
-        return runner.kube("exec", "-i", pod, "-n", runner.ns, "--", "python", "-I", *args,
+        return runner.kube("exec", "-i", pod, "-n", runner.ns, "--", *WORKLOAD_ENVIRONMENT, "python", "-I", *args,
                            payload=payload, timeout=90)
 
     def protocol(mode, value):
