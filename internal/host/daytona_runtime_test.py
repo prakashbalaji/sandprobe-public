@@ -5,6 +5,52 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('daytona_runtime',Path(__file__).with_name('daytona_runtime.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 SID='12345678-1234-1234-1234-123456789abc'
 class Tests(unittest.TestCase):
+ def test_volume_create_keeps_returned_id_before_optional_metadata(self):
+  import types,daytona_api_client
+  seen=[]
+  class Response:
+   status=201
+   def read(self,amount):return json.dumps({'id':SID,'createdAt':{'bad':'type'},'errorReason':'never echo'}).encode()
+   def close(self):pass
+  api=types.SimpleNamespace(create_volume_without_preload_content=lambda p,**kw:(seen.append(p.to_dict()) or Response()))
+  with patch.object(daytona_api_client,'VolumesApi',return_value=api):
+   req={'op':'volume_create','name':'sandprobe-volume-'+'a'*24}
+   self.assertEqual(m.volume_operation(types.SimpleNamespace(_api_client=None),req),{'id':SID})
+   for name in ('existing-volume','../volume','sandprobe-volume-'+'a'*23):
+    req['name']=name
+    with self.assertRaises(ValueError):m.volume_operation(types.SimpleNamespace(_api_client=None),req)
+  self.assertEqual(seen,[{'name':'sandprobe-volume-'+'a'*24}])
+ def test_volume_cleanup_refuses_changed_identity_or_ownership(self):
+  import types,daytona_api_client
+  from daytona_api_client.models.volume_dto import VolumeDto
+  from daytona_api_client.models.volume_state import VolumeState
+  volume=VolumeDto.model_construct(id=SID,name='sandprobe-volume-'+'a'*24,organization_id='org',created_at='2026-11-23T00:00:00Z',state=VolumeState.READY,error_reason='never echo')
+  calls=[]
+  api=types.SimpleNamespace(get_volume=lambda identity,**kw:volume,delete_volume=lambda identity,**kw:calls.append(identity))
+  req={'op':'volume_delete','volume_id':SID,'name':volume.name,'organization':'org','born':volume.created_at}
+  with patch.object(daytona_api_client,'VolumesApi',return_value=api):
+   for key in ('name','organization','born'):
+    changed=dict(req);changed[key]='replacement'
+    with self.assertRaises(ValueError):m.volume_operation(types.SimpleNamespace(_api_client=None),changed)
+   volume.id='22345678-1234-1234-1234-123456789abc'
+   with self.assertRaises(ValueError):m.volume_operation(types.SimpleNamespace(_api_client=None),req)
+   self.assertEqual(calls,[])
+   volume.id=SID
+   result=m.volume_operation(types.SimpleNamespace(_api_client=None),dict(req,op='volume_lookup'))
+   self.assertEqual(set(result),{'id','name','organization','born','state'})
+   self.assertNotIn('never echo',json.dumps(result))
+   self.assertEqual(m.volume_operation(types.SimpleNamespace(_api_client=None),req),{'id':SID,'deleted_request':True})
+  self.assertEqual(calls,[SID])
+ def test_absent_volume_is_not_a_delete_confirmation_for_another_id(self):
+  import types,daytona_api_client
+  class Missing(Exception):status=404
+  def get(identity,**kw):raise Missing()
+  calls=[]
+  api=types.SimpleNamespace(get_volume=get,delete_volume=lambda *a,**k:calls.append(a))
+  with patch.object(daytona_api_client,'VolumesApi',return_value=api):
+   self.assertEqual(m.volume_operation(types.SimpleNamespace(_api_client=None),{'op':'volume_lookup','volume_id':SID}),{'id':SID,'absent':True})
+   with self.assertRaises(ValueError):m.volume_operation(types.SimpleNamespace(_api_client=None),{'op':'volume_lookup','volume_id':'volume-name'})
+  self.assertEqual(calls,[])
  def test_origins_and_id_path_are_exact(self):
   self.assertTrue(m.safe_url('https://app.daytona.io/api/sandbox'))
   self.assertTrue(m.safe_url('https://proxy.app.daytona.io/toolbox/'+SID+'/process/execute',SID))

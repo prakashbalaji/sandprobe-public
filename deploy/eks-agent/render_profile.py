@@ -14,11 +14,15 @@ WORKLOAD_ENVIRONMENT = runpy.run_path(str(Path(__file__).resolve().parents[1] / 
 IDLE_COMMAND = WORKLOAD_ENVIRONMENT + ["python", "-I", "-c", "import time;time.sleep(1800)"]
 
 
-def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="guest"):
+def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="guest", storage_profile="ephemeral"):
     if controller == "host" and model != LIGHTWEIGHT_MODEL:
         raise ValueError("host controller requires the fixed regional model")
     if controller not in {"guest", "host"}:
         raise ValueError("invalid controller pattern")
+    if storage_profile not in {"ephemeral", "persistent-workspace"}:
+        raise ValueError("invalid storage profile")
+    if storage_profile == "persistent-workspace" and controller != "host":
+        raise ValueError("persistent workspace requires host controller")
     if not re.fullmatch(r"[0-9a-f]{16}", run_id):
         raise ValueError("invalid run identity")
     if not re.fullmatch(r"[0-9]{12}", account):
@@ -116,6 +120,26 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
         plan["deployment_pattern"] = "host_controller_no_guest_credentials"
         plan["prerequisites"][4] = "Pinned host model client/account; no guest role or identity association"
         plan["limits"][-2] = "Model credentials remain on the trusted controller; no guest identity is assigned."
+    if storage_profile == "persistent-workspace":
+        # RUN-23: render intent only. Live callers must bind the returned PV/EBS
+        # identity and implement exact-ID cleanup before selecting this variant.
+        storage_class = "sandprobe-workspace-" + run_id
+        items.insert(1, {"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass",
+                         "metadata": {"name": storage_class, "labels": dict(labels)},
+                         "provisioner": "ebs.csi.eks.amazonaws.com",
+                         "volumeBindingMode": "WaitForFirstConsumer",
+                         "reclaimPolicy": "Retain", "allowVolumeExpansion": False,
+                         "parameters": {"type": "gp3", "encrypted": "true"}})
+        items.insert(2, {"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+                         "metadata": metadata("workspace"),
+                         "spec": {"accessModes": ["ReadWriteOnce"], "volumeMode": "Filesystem",
+                                  "storageClassName": storage_class,
+                                  "resources": {"requests": {"storage": "1Gi"}}}})
+        pod["spec"]["volumes"][0] = {"name": "workspace",
+                                      "persistentVolumeClaim": {"claimName": "workspace"}}
+        plan["storage_profile"] = storage_profile
+        plan["prerequisites"].append("Run-owned PVC/PV/EBS identity binding, proven recreation and exact-ID storage cleanup")
+        plan["limits"].append("Persistent workspace is a separate profile; this plan alone supplies no reset proof.")
     return plan
 
 

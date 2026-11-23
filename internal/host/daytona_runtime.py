@@ -66,6 +66,38 @@ def create_identity(response):
         return {'id':value['id']}
     finally:response.close()
 
+def volume_metadata(volume):
+    # RUN-23: select ownership fields only; no error_reason or provider options.
+    if not UUID.fullmatch(volume.id):raise ValueError('volume identity unavailable')
+    return {'id':volume.id,'name':volume.name,'organization':volume.organization_id,
+            'born':timestamp(volume.created_at),'state':str(volume.state.value)}
+
+def volume_operation(client,req):
+    # The trusted host must journal the create-returned ID before lookup/mount.
+    # Never get-or-create, adopt by name, enumerate or delete a guessed ID.
+    from daytona_api_client import VolumesApi,CreateVolume
+    api=VolumesApi(client._api_client)
+    if req['op']=='volume_create':
+        if not re.fullmatch(r'sandprobe-volume-[a-f0-9]{24}',req.get('name','')):
+            raise ValueError('invalid volume name')
+        return create_identity(api.create_volume_without_preload_content(CreateVolume(name=req['name']),_request_timeout=60))
+    volume_id=req.get('volume_id','')
+    if not UUID.fullmatch(volume_id):raise ValueError('invalid volume ID')
+    try:volume=api.get_volume(volume_id,_request_timeout=25)
+    except Exception as e:
+        if getattr(e,'status',None)==404:return {'id':volume_id,'absent':True}
+        raise
+    value=volume_metadata(volume)
+    if value['id']!=volume_id:raise ValueError('volume identity changed')
+    if req['op']=='volume_lookup':return value
+    if req['op']!='volume_delete':raise ValueError('unsupported volume operation')
+    if not re.fullmatch(r'sandprobe-volume-[a-f0-9]{24}',req.get('name','')):
+        raise ValueError('invalid volume name')
+    for key in ('name','organization','born'):
+        if not req.get(key) or value[key]!=req[key]:raise ValueError('volume cleanup ownership mismatch')
+    api.delete_volume(volume_id,_request_timeout=60)
+    return {'id':volume_id,'deleted_request':True}
+
 def dispatch(req):
     if importlib.metadata.version('daytona')!='0.198.0':raise ValueError('unsupported SDK')
     if req['op']=='check':return {'version':'0.198.0'}
@@ -77,6 +109,8 @@ def dispatch(req):
     client=Daytona(DaytonaConfig(api_key=req['key'],api_url=API,target='us'))
     # Disable SDK retries, with origin/redirect guards also enforced at transport.
     client._api_client.configuration.retries=0
+    if req['op'] in ('volume_create','volume_lookup','volume_delete'):
+        return volume_operation(client,req)
     if req['op']=='available':
         client._sandbox_api.list_sandboxes(limit=1,_request_timeout=25)
         return {'available':True}
