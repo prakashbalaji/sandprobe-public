@@ -12,6 +12,7 @@ import (
 
 	"sandprobe/internal/canary"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -120,7 +121,7 @@ func runDaytona(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		if err == nil {
 			step("running scoped Daytona baseline checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.DaytonaExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.DaytonaExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	step("deleting recorded Daytona sandbox and verifying absence")

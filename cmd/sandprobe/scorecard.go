@@ -90,7 +90,7 @@ func printable(s string) string {
 	return b.String()
 }
 
-// printCard writes the headline: the score, then one line per category, green or red.
+// printCard writes the headline: the score, then one line per category, green, red or not applicable (SCR-2).
 func printCard(o opts, c report.Card, statement string) {
 	green, red, reset := "", "", ""
 	if f, ok := o.stdout.(*os.File); ok && isTerminal(f) {
@@ -101,18 +101,25 @@ func printCard(o opts, c report.Card, statement string) {
 		fmt.Fprintf(w, "\nScore: none (invalid run)\n")
 		return
 	}
-	fmt.Fprintf(w, "\nScore %d/%d\n\n", c.Score, c.Of)
+	fmt.Fprintf(w, "\nScore %d/%d\n", c.Score, c.Of)
+	for _, line := range c.NotCounted() {
+		fmt.Fprintln(w, printable(line))
+	}
+	fmt.Fprintln(w)
 	if c.Coverage != nil {
 		fmt.Fprintln(w, c.Coverage.Description())
 	}
 	for _, row := range c.Rows {
 		mark, color := "RED  ", red
-		if row.Green {
+		switch {
+		case row.Green:
 			mark, color = "GREEN", green
+		case row.NotApplicable: // SCR-2: never green, and out of the score
+			mark, color = "N/A  ", ""
 		}
 		fmt.Fprintf(w, "  %s● %s%s  %-13s %s\n", color, mark, reset, row.Name, row.Question)
-		if row.Why != "" {
-			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, row.Why, reset)
+		if row.Why != "" { // a not-applicable reason is the report's own skip reason: escaped like its other text
+			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), reset)
 		}
 		if row.NotProven != "" {
 			fmt.Fprintf(w, "  %-22s %s\n", "", row.NotProven)

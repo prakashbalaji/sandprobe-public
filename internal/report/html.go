@@ -50,7 +50,7 @@ type view struct {
 // section is one category's table in "What we tested" (SCR-3): failures and unknowns on top, the rest folded away.
 type section struct {
 	Num, Name, Question, RestLabel string
-	Green                          bool
+	Green, NotApplicable           bool
 	Run, Total                     int
 	Top, Rest                      []test
 }
@@ -136,7 +136,8 @@ func sections(d Doc, c Card) []section {
 	}
 	var out []section
 	for i, cat := range Categories {
-		sec := section{Num: fmt.Sprintf("%d", i+1), Name: cat.Name, Question: cat.Question, Green: c.Rows[i].Green, Total: len(cat.Checks)}
+		sec := section{Num: fmt.Sprintf("%d", i+1), Name: cat.Name, Question: cat.Question, Green: c.Rows[i].Green,
+			NotApplicable: c.Rows[i].NotApplicable, Total: len(cat.Checks)}
 		counts := map[string]int{}
 		for _, id := range cat.Checks {
 			ck, ok := got[id]

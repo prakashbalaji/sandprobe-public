@@ -51,9 +51,10 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 ## Scorecard headline, 19 November 2026
 
-The scorecard is a simpler headline: six categories, each green or red, a score out of six, and every
-other detail in an appendix. This changes presentation only. The grader, the letter, OUT-1's schema and every saved
-report stay as they are; the scorecard is computed from a report's checks when it is shown, never written into one.
+The scorecard is a simpler headline: six categories, each green or red (or not applicable, SCR-2), a score out of
+the categories that apply, and every other detail in an appendix. This changes presentation only. The grader, the
+letter and every saved report stay as they are, and OUT-1 gains only SCR-2's additive skip kinds in its manifest; the
+scorecard is computed from a report's checks when it is shown, never written into one.
 
 - **SCR-1 Six categories.** Every catalog check belongs to exactly one category, each asked as a question:
   Secrets, "can it read keys and tokens?" (SEC-1, SEC-2, SEC-3, SEC-5); Exfiltration, "can data leave the box?"
@@ -67,10 +68,34 @@ report stay as they are; the scorecard is computed from a report's checks when i
   skipped), none is unknown, and none has a finding above Info: the bar GRD-1 sets for an A. Anything else is red, and
   its reason says which: found, couldn't prove, or not tested. When every unknown in a category comes from HCN-5's
   no-canary choice, the reason reads "not tested: run without a canary" (a host reason, never a box string), and the
-  category stays red. The score is the number of green categories out of six.
+  category stays red.
+  A category is not applicable only when every one of its checks was skipped and the manifest records each skip's
+  kind as `provider_terms`: a native adapter's PRV row excludes that provider-owned endpoint because the provider's
+  terms do (PRV-5). In practice that is Cloud access (SEC-4 and AMP-7) on a hosted provider, where those endpoints are
+  the provider's, not the person's own cloud identity. Only the host writes a kind, and only for a check it excluded
+  under GRD-3's provider-endpoint gate (`SkipKinds` in the manifest, never in the probe's input); a skip without one
+  (a report from before this rule, a survey-driven skip such as "no vsock device", the managed workload runners'
+  exclusions) is plain "Not tested". The managed workload runners record no kind, so their exposure cards (SCR-4)
+  stay out of six: the Nitro runner's exclusions are RUN-8's audit scope, not a provider's terms, and the Daytona
+  workload runner, though it uses PRV-12's exclusions, keeps the common Nitro and Daytona ranking and the deploy
+  runners' six-category check; `run daytona` itself reads out of five. Nothing the box returns, no unknown, and no `-no-canary` run makes a category
+  not applicable: HCN-5's checks stay unknown, so their category stays "not tested: run without a canary", red, and
+  the run incomplete. PRV-15's and RCP-4's default exclusions (`run exec`, `run kubernetes`) are kind `opt_in`, since
+  the person may lift them, and on a Kubernetes cluster Cloud access is the category that matters most: when none of
+  a category's checks was tested and its skips are `opt_in`, it stays red, and the reason reads "Not tested: opt in
+  with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow", naming those checks from the catalog
+  (`-provider-endpoints` is PRV-15's opt-in, not built yet). The score is the number of green categories out of the
+  applicable ones. A not-applicable row is never green and never counted as passed: it leaves the denominator, so a
+  run with one reads at most 5/5 and is never shown or serialized as 6/6. Its row says "Not applicable" with the
+  run's own skip reasons (host strings from the manifest, escaped like any report text), and one line beside the
+  score names the category and those reasons. The letter doesn't change: GRD-3's skips already never touch GRD-1 or
+  GRD-2. `compare` reports a changed set of `provider_terms` skips as a changed setup (CMP-1's declared
+  configuration), so a newly not-applicable category is never read as like-for-like, and a check that goes from
+  tested to skipped stays coverage loss. An `opt_in` skip and one with no kind both read "Not tested", so a report
+  from before this rule and a new `opt_in` one of the same box compare as a matched pair.
   A green row that rests on a check with no finding but no negative proof says so in one line ("not proven: DNS"),
-  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. Six of six therefore means
-  no finding above Info and nothing unknown, and is still bounded by GRD-4 and SBX-10.
+  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. A full score therefore means
+  no finding above Info and nothing unknown in the categories it counts, and is still bounded by GRD-4 and SBX-10.
 - **SCR-5 Exposure and measurement coverage are separate.** Preserve SCR-2's RC
   score, but attach deterministic catalog-wide coverage to every valid scorecard.
   Partition each category's checks into proven pass/absence, findings (including
@@ -81,8 +106,9 @@ report stay as they are; the scorecard is computed from a report's checks when i
   requires a pass/absence or finding for every check; a finding is a completed
   observation, never a security pass. List all gaps by fixed catalog ID. State
   category/check usable-result and completion counts beside the score in JSON,
-  terminal and HTML, including workload scorecards. A green category and a score
-  of six never imply complete coverage. Invalid runs claim no coverage; historical
+  terminal and HTML, including workload scorecards. A green category and a full
+  score never imply complete coverage, and coverage still counts all six categories,
+  a not-applicable one's checks as skipped (SCR-2). Invalid runs claim no coverage; historical
   scorecards without coverage remain readable and never gain an invented complete
   status. Derive coverage only from graded checks and grading unknowns, never a
   provider flag, supplied counter, workload pass or configuration declaration.
@@ -90,8 +116,9 @@ report stay as they are; the scorecard is computed from a report's checks when i
   changes no scope exclusion, and changes no RC exposure verdict. Only synthetic
   public fixtures enter tests; private saved runs and accounts remain outside git.
 - **SCR-3 Headline first, details in the appendix.** OUT-2's page, the terminal summary after a run, and the offline
-  `sandprobe scorecard <report.json>` lead with the score and the six rows: name, question, green or red, and a short
-  reason built only from catalog IDs and titles, never from box strings. GRD-4's statement stays beside the score.
+  `sandprobe scorecard <report.json>` lead with the score and the six rows: name, question, green, red or not
+  applicable (SCR-2), and a short reason built only from catalog IDs and titles, never from box strings (a
+  not-applicable row's reason is the host's own skip reason). GRD-4's statement stays beside the score.
   Below the rows, "What we tested" gives each category a table headed "x/y tests run", with columns Severity,
   Details (the test as a plain question, what was seen, and the fix when it failed) and Result. Fail (a finding above
   Info; an indicator says it is a sign, not a confirmation) and Unknown sit on top, worst first. Pass (a refusal or an
@@ -1040,7 +1067,7 @@ one, the amended text lands in place only after review.
   - The box is an existing box (PRV-1): non-mutating checks only, GRD-3's existing-box skips, no reset, and the
     boundary is the person's attestation (PRV-2, UX-4). The launch mode is `exec` (SBX-4).
   - The provider isn't identified, so SEC-4, EGR-3, AMP-6 and AMP-7, the checks that contact a provider-owned
-    endpoint, are excluded by default (Sandprobe checks the person's own box and sends only to the
+    endpoint, are excluded by default, as kind `opt_in` (SCR-2) (Sandprobe checks the person's own box and sends only to the
     canary). `-provider-endpoints <IDs>` selects named ones only (for example `SEC-4,AMP-7`), each one the person
     attests their provider's terms allow on their own account; the plan lists each with that attestation before
     approval (AGT-3), and the report records it beside the check. Nothing selects them all at once.
@@ -1449,20 +1476,23 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   provider-owned endpoint under PRV-15's default for an unidentified provider, or RCP-4's for a recipe) is `skipped`
   and listed. Only the checks these gates name can be skipped (EGR-3, EGR-6, PER-5 and AMP-6, and SEC-4 and AMP-7 for
   a provider whose rules exclude them or under PRV-15's or RCP-4's default), only by the host, and each with its
-  reason; AMP-2 and AMP-3 never are.
+  reason; AMP-2 and AMP-3 never are. A provider-endpoint skip (SEC-4, EGR-3, AMP-6, AMP-7) also records its kind in
+  the manifest's `SkipKinds` (SCR-2): `provider_terms` from a native adapter's PRV row (PRV-5), `opt_in` under
+  PRV-15's or RCP-4's default. Skips change no letter.
 - **GRD-4 The grade says what it covers.** Beside every grade: "graded on N checks for this box at <time>, from a
   host-shipped probe's own observations; not a certification", SBX-10's boundary, the not-proven list (KND-2), and the
   scoped-out and skipped lists.
 - **GRD-5 The host trusts nothing from the box.** Before the run, the host fixes the manifest: the mode, the checks
   selected, each check's planned targets and discovery rules (from the catalog), the run nonce, one nonce and one
   planned endpoint per canary check, EGR-3's proxy and whether a local one is approved, the box's immutable provider
-  ID, and the probe's digest. A pass or an absence
+  ID, the probe's digest, and each provider-endpoint skip's kind (GRD-3). A pass or an absence
   must cover every planned target and report every discovery rule with exactly the targets it found; a gap is unknown,
   and a target nobody planned invalidates the run. The probe reports its identity (SBX-4) once, and the host always
   grades AMP-2 and AMP-3 from it, whether or not the probe reports them: AMP-2 from uid and CapEff, AMP-3 from
   NoNewPrivs and the setuid scan (with NoNewPrivs 0 and no completed scan, AMP-3 is unknown). Any AMP-2 or AMP-3 observation that differs, whatever its result, or a proof's
   root flag that contradicts the identity, invalidates the run, as does a missing identity. So does an unsound
   manifest: a check neither selected nor skipped, both, selected twice, or skipped without a GRD-3 gate or a reason;
+  a skip kind on a check that isn't skipped or isn't a provider endpoint, or a kind other than SCR-2's two;
   a selected canary check without its own nonce or a planned endpoint; or EGR-3 without a planned proxy (unless the
   manifest says the agent's can't be parsed, and then never with one) or with an unapproved loopback one. So does an attempt through any proxy but the planned one, through a loopback proxy
   nobody approved, or through a proxy on any route but EGR-3's. The probe's
@@ -1597,7 +1627,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **PRV-5 A provider's rules of engagement narrow the checks.** Before any probe runs on a provider, its published
   security-research, bug bounty, penetration-testing and acceptable-use terms are read, and the PRV row cites what
   they say. Where they or the project owner exclude a destination or surface for that provider, the host skips
-  the checks that would touch it (GRD-3), each with its reason, and the report lists them. A surface that is only
+  the checks that would touch it (GRD-3), each with its reason and the kind `provider_terms` (SCR-2), and the report
+  lists them. A surface that is only
   detected, such as a control socket's `lstat`, isn't excluded: detecting it is fine, using it isn't. Modal: SEC-4,
   AMP-6, AMP-7 and EGR-3, since each would send a request to an endpoint Modal owns.
 
@@ -2107,6 +2138,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
 | SCR-5 | synthetic six-category coverage partition and malformed/missing/unknown/scoped-out cases, unchanged RC scores, invalid/historical coverage absence, terminal/HTML/workload coverage visibility and count validation |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression |
+| SCR-2 (not applicable) | `internal/report/scorecard_na_test.go`, on a Docker fixture run replanned through `host.Plan`, the grader and `Build`: `TestScoreNotApplicable` (each native adapter's PRV-row exclusions make Cloud access not applicable, never green, out of five, named on one line with the run's own reasons, in JSON and on the page; the letter equals the same run's without a kind), `TestScoreOptInStaysNotTested` (run exec's and a recipe's defaults: red, out of six, "Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow"), `TestScoreNoCanaryIsNeverNotApplicable` (Exfiltration "not tested: run without a canary", red, incomplete), `TestNotApplicableNeedsTheHostsKind` (no kind, a row the manifest never skipped, an empty reason, one check tested, unknown or missing: never not applicable; the box answering "skipped", or answering a check the host skipped, invalidates the run), `TestWorkloadExposureNotApplicable` (a forged out-of-six, green, extra, unknown or dropped not-applicable row is refused), `TestCleanBoxReadsFiveOfFive` (a clean box reads 5/5 in the card, its JSON and the page, never 6/6, Cloud access never green); `TestSixOfSixIsAnA` (every saved Docker report stays out of six with nothing left out, and a full score is a complete A); `internal/host`: `TestPlanRecordsSkipKinds` (a kind only for the host's own exclusions, never a survey-driven skip, never in the probe's input; the grader refuses a kind on a check that isn't skipped or isn't an endpoint, or that isn't a kind; Execute refuses an unknown kind); `cmd/sandprobe/scorecard_na_test.go`: `TestExclusionKinds` (every adapter's exclusions record a kind: opt-in for run exec and recipes, provider terms for the rest), `TestScorecardNotApplicable` (Sprites and E2B read "Score 2/5" with the line; exec and kubernetes "Score 2/6" with the hint; the same in `-o json`), `TestScorecardNoCanaryStaysRed` (exit 5, red), `TestCompareNotApplicable` (tested to not applicable is coverage loss and a changed setup; opt-in to not applicable is a changed setup, exit 5; a matched pair, and a report with no kind against an opt-in one, read unchanged), `TestScorecardRefusesForgedKinds` (ANL-1) |
 | HCN-1 | `internal/canarycontrol`: the whole public path over HTTPS, every answer verified under the pinned control key and naming the canary's receipt address and domain (`TestPublicAnswersNameTheReceiptAddress`); an answer replayed for another challenge, altered, re-signed or under an unpinned key is refused; the control name never gets the receipt key and a box name never reaches the control server; method, path, unknown field, op mismatch, trailing data and oversize refusals; a long run label never makes an answer over the bound (`TestPublicAnswerBoundedForLongRun`, `TestControlAnswerBounded`); a control key file that's a symlink, not regular, open to others, not this user's, oversize or carrying trailing bytes is refused (`TestLoadKeyFileSafety`); a browser's cross-site POST (simple content type, Origin or Sec-Fetch-Site) is refused (`TestControlRefusesBrowserPosts`); `TestPublicNeedsAChallenge`; host: `TestHTTPSCanaryImpostor` (an impostor behind a trusted interception root and a redirected name is never believed, and Execute stops before the probe), `TestHTTPSCanaryRefusesRedirectAndOversize`, `TestNewHTTPSCanaryChecks`, `TestHTTPSCanaryAddressFromSignedStatus` (the receipt address comes from the signed status, never from where the control connection went, and a changed one is refused), `TestHTTPSCanaryErrorsRedact` |
 | HCN-2 | `TestPublicSecretGuardsTheRun`: without the secret a box can't query, disarm, re-arm its run or arm its nonce elsewhere, and the host's receipt survives; `TestPublicCantTouchOperatorRuns`; `TestPublicGenerationChangesOnRearm`; host: `TestHTTPSCanaryRearmedRun` (a re-armed run is never read: the old secret is refused, and the thief's secret shows another generation) |
 | HCN-3 | `TestPublicReservation` (no arm without a reservation; one slot per secret; release; expiry), `TestPublicBounds` (per-source runs at once and per hour, by reservation), `TestPublicGlobalBound`, `TestSourceOf` (IPv6 /64), `TestPublicOverloadAtACap`; host: `TestHTTPSCanaryRun` (no arm without a reservation; reserve, arm, receipt, disarm) ; `TestHTTPSCanaryLostAnswersRelease` (a reserve, arm or disarm lost before or after the canary acted never leaves a slot held past Close), `TestHTTPSCanaryCloseRetries` (a Close that couldn't release keeps the slots for the next one) |

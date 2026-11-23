@@ -35,19 +35,25 @@ func WorkloadExposureHTML(r grade.WorkloadReport, coverage grade.EvidenceCoverag
 }
 
 func validWorkloadExposure(x WorkloadExposure) bool {
-	if x.Schema != "sandprobe.workload-exposure/1" || x.InputVerification != "proof_recomputation_unauthenticated_input" || x.Of != len(Categories) {
+	if x.Schema != "sandprobe.workload-exposure/1" || x.InputVerification != "proof_recomputation_unauthenticated_input" {
 		return false
 	}
 	if !x.Valid {
-		return x.Score == 0 && len(x.Rows) == 0 && x.Coverage == nil
+		return x.Of == len(Categories) && x.Score == 0 && len(x.Rows) == 0 && x.Coverage == nil
 	}
 	if len(x.Rows) != len(Categories) {
 		return false
 	}
-	green := 0
+	green, applicable := 0, len(Categories)
 	for i, row := range x.Rows {
 		if row.Name != Categories[i].Name {
 			return false
+		}
+		if row.NotApplicable { // SCR-2: never green, never found or unknown, and out of the score
+			if row.Green || len(row.Found) > 0 || len(row.Unknown) > 0 {
+				return false
+			}
+			applicable--
 		}
 		if row.Green {
 			if len(row.Found) > 0 || len(row.Unknown) > 0 {
@@ -56,5 +62,5 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 			green++
 		}
 	}
-	return x.Score == green && validCardCoverage(x.Card)
+	return x.Score == green && x.Of == applicable && validCardCoverage(x.Card)
 }

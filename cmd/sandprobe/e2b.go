@@ -13,6 +13,7 @@ import (
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -134,7 +135,7 @@ func runE2B(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		if err == nil {
 			step("running scoped E2B baseline checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.E2BExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	step("deleting recorded E2B sandbox and verifying absence")

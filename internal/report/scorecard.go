@@ -1,6 +1,7 @@
 package report
 
 import (
+	"slices"
 	"strings"
 
 	"sandprobe/internal/catalog"
@@ -74,20 +75,22 @@ func CategoryOf(id string) (Category, bool) {
 }
 
 // Row is one category's verdict (SCR-2). Why is empty when the row is green; NotProven names the checks a green
-// row rests on without a negative proof (KND-2), so a green never reads as more than it is.
+// row rests on without a negative proof (KND-2), so a green never reads as more than it is. A not-applicable row is
+// never green and is out of the score.
 type Row struct {
-	Name      string         `json:"name"`
-	Question  string         `json:"question"`
-	Green     bool           `json:"green"`
-	Why       string         `json:"why,omitempty"`
-	NotProven string         `json:"not_proven,omitempty"`
-	Found     []string       `json:"found,omitempty"`
-	Unknown   []string       `json:"unknown,omitempty"`
-	Unproven  []string       `json:"unproven,omitempty"`
-	Coverage  *CheckCoverage `json:"coverage,omitempty"`
+	Name          string         `json:"name"`
+	Question      string         `json:"question"`
+	Green         bool           `json:"green"`
+	NotApplicable bool           `json:"not_applicable,omitempty"`
+	Why           string         `json:"why,omitempty"`
+	NotProven     string         `json:"not_proven,omitempty"`
+	Found         []string       `json:"found,omitempty"`
+	Unknown       []string       `json:"unknown,omitempty"`
+	Unproven      []string       `json:"unproven,omitempty"`
+	Coverage      *CheckCoverage `json:"coverage,omitempty"`
 }
 
-// Card is the headline: Score green rows of Of. An invalid run has no score.
+// Card is the headline: Score green rows of Of, the categories that apply (SCR-2). An invalid run has no score.
 type Card struct {
 	Valid    bool           `json:"valid"`
 	Score    int            `json:"score"`
@@ -98,7 +101,8 @@ type Card struct {
 
 // Score is SCR-2. A row is green only when one of its checks was tested, none is unknown, and none has a finding
 // above Info. Only the results named below count as clean: anything else, or a check the grade lists as unknown, is
-// "couldn't prove". Its reason is built from the fixed labels above, never from a string the box returned.
+// "couldn't prove". Its reason is built from the fixed labels above, never from a string the box returned. A row is
+// not applicable only when the host skipped every one of its checks for the provider's terms, as its manifest records.
 func Score(d Doc) Card {
 	c := Card{Valid: d.Grade.Valid, Of: len(Categories)}
 	if !d.Grade.Valid {
@@ -113,13 +117,21 @@ func Score(d Doc) Card {
 	}
 	for _, cat := range Categories {
 		r, tested := Row{Name: cat.Name, Question: cat.Question}, 0
+		var terms, optIn []string // SCR-2: skips the host recorded a kind for
 		for _, id := range cat.Checks {
 			ck, ok := got[id]
 			switch {
 			case unknown[id] || ok && ck.Result == obs.Unknown:
 				tested++
 				r.Unknown = append(r.Unknown, id)
-			case !ok || ck.Result == obs.Skipped: // not run here: says nothing either way
+			case !ok: // not in this run at all: says nothing either way
+			case ck.Result == obs.Skipped: // not run here: says nothing either way, but its kind may explain why
+				switch skipKind(d.Manifest, id) {
+				case obs.SkipProviderTerms:
+					terms = append(terms, id)
+				case obs.SkipOptIn:
+					optIn = append(optIn, id)
+				}
 			case ck.Result == obs.Pass || ck.Result == obs.Absent || ck.Result == obs.ScopedOut:
 				tested++
 			case ck.Result == obs.NotFound:
@@ -147,6 +159,11 @@ func Score(d Doc) Card {
 			r.Why = "Not tested: run without a canary" // SCR-2, HCN-5: the host's own choice, never a box string
 		case len(r.Unknown) > 0:
 			r.Why = "Couldn't prove: " + labels(cat, r.Unknown)
+		case tested == 0 && len(terms) == len(cat.Checks): // SCR-2: the provider's own endpoints, out of the score
+			r.NotApplicable, r.Why = true, "Not applicable: "+skipReasons(d.Manifest, terms)
+			c.Of--
+		case tested == 0 && len(optIn) > 0: // SCR-2: PRV-15's or RCP-4's default, which the person may lift
+			r.Why = "Not tested: opt in with -provider-endpoints " + strings.Join(optIn, ",") + " if your provider's terms allow"
 		case tested == 0:
 			r.Why = "Not tested"
 		default:
@@ -160,6 +177,36 @@ func Score(d Doc) Card {
 	}
 	attachCoverage(&c, got, unknown)
 	return c
+}
+
+// skipKind is a skipped check's kind as the host recorded it beside its reason (GRD-3, SCR-2), or "" when it has none.
+func skipKind(m obs.Manifest, id string) string {
+	if m.Skipped[id] == "" {
+		return ""
+	}
+	return m.SkipKinds[id]
+}
+
+// skipReasons is the run's own reasons for skipping ids, each said once.
+func skipReasons(m obs.Manifest, ids []string) string {
+	var out []string
+	for _, id := range ids {
+		if why := m.Skipped[id]; !slices.Contains(out, why) {
+			out = append(out, why)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// NotCounted is SCR-2's line beside the score for each category it leaves out, and why.
+func (c Card) NotCounted() []string {
+	var out []string
+	for _, r := range c.Rows {
+		if r.NotApplicable {
+			out = append(out, r.Name+" isn't counted. "+r.Why)
+		}
+	}
+	return out
 }
 
 // canRed says whether a finding on the check could turn its row red: one with only Info variants never can.

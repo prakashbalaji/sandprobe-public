@@ -15,6 +15,7 @@ import (
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -166,7 +167,7 @@ func runBaseten(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		if err == nil {
 			step("running canary-only Baseten checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BasetenExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BasetenExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	cleanup, retention, cleaned, err := completeBasetenLifecycle(ctx, box, run, err, r.keepSandbox)

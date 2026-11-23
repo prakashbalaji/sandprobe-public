@@ -41,6 +41,10 @@ type Variant struct {
 // TLS handshake EGR-2 makes to it.
 func NeedsCanary(c *Check) bool { return c.Canary != nil || c.ID == "EGR-4" }
 
+// ProviderEndpoints are the checks that contact a provider-owned endpoint: the only ones a provider's rules (PRV-5) or
+// PRV-15's and RCP-4's defaults may exclude (GRD-3), and the only ones a skip kind may name (SCR-2).
+var ProviderEndpoints = map[string]bool{"SEC-4": true, "AMP-6": true, "AMP-7": true, "EGR-3": true}
+
 // Canary marks a network check the host decides from the canary's receipts and health (SBX-11), not from the box.
 type Canary struct {
 	Proto string // tcp, udp or dns

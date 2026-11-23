@@ -13,6 +13,7 @@ import (
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 )
@@ -131,7 +132,7 @@ func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		}
 		if err == nil {
 			step("running scoped Vercel baseline checks")
-			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.VercelExclusions()})
+			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.VercelExclusions(), ExcludedKind: obs.SkipProviderTerms})
 		}
 	}
 	step("deleting recorded Vercel sandbox and verifying absence")

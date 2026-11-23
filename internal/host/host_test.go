@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -294,6 +295,48 @@ func TestPlanNoCanary(t *testing.T) {
 	m.CheckNonces["EGR-2"], m.Endpoints["EGR-2"] = "c-1", "203.0.113.1:443"
 	if grade.ManifestSound(m) == nil {
 		t.Error("a canary planned for a run without one passed")
+	}
+}
+
+// SCR-2 and GRD-3: Plan gives a kind only to the host's own provider-endpoint exclusions, never to a skip the survey
+// drove (no vsock, no proxy) or EGR-6's and PER-5's, and never in the probe's input; the grader refuses a kind it
+// can't have, and Execute refuses a kind that isn't one.
+func TestPlanRecordsSkipKinds(t *testing.T) {
+	m, in := Plan(Options{Mode: "exec"}, &obs.Survey{}, "box-1", Storage{}, "", "", "")
+	if m.Skipped["AMP-6"] == "" || m.Skipped["EGR-3"] == "" || m.SkipKinds != nil {
+		t.Fatalf("survey-driven skips got a kind: %v %v", m.Skipped, m.SkipKinds)
+	}
+	for kind, excluded := range map[string]map[string]string{obs.SkipOptIn: ExecExclusions(), obs.SkipProviderTerms: E2BExclusions()} {
+		m, in = Plan(Options{Mode: "exec", Excluded: excluded, ExcludedKind: kind}, &obs.Survey{Vsock: true}, "box-1", Storage{}, "", "", "")
+		want := map[string]string{"SEC-4": kind, "EGR-3": kind, "AMP-6": kind, "AMP-7": kind}
+		if !maps.Equal(m.SkipKinds, want) || m.Skipped["SEC-4"] != excluded["SEC-4"] {
+			t.Errorf("%s: kinds %v, SEC-4's reason %q", kind, m.SkipKinds, m.Skipped["SEC-4"])
+		}
+		if b, _ := json.Marshal(in); strings.Contains(string(b), kind) {
+			t.Errorf("%s: the probe's input carries the kind: %s", kind, b)
+		}
+		if err := grade.ManifestSound(m); err != nil {
+			t.Fatalf("%s: the grader refused the manifest: %v", kind, err)
+		}
+	}
+	m, _ = Plan(Options{Mode: "exec", Excluded: E2BExclusions()}, &obs.Survey{}, "box-1", Storage{}, "", "", "")
+	if m.SkipKinds != nil {
+		t.Errorf("no kind was given, yet the plan records %v", m.SkipKinds)
+	}
+	for name, kinds := range map[string]map[string]string{
+		"not skipped":        {"AMP-2": obs.SkipProviderTerms},
+		"not an endpoint":    {"EGR-6": obs.SkipProviderTerms},
+		"not a kind":         {"SEC-4": "terms"},
+		"skipped by nothing": {"PER-1": obs.SkipOptIn},
+	} {
+		m, _ = Plan(Options{Mode: "exec", Excluded: E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, &obs.Survey{}, "box-1", Storage{}, "", "", "")
+		maps.Copy(m.SkipKinds, kinds)
+		if grade.ManifestSound(m) == nil {
+			t.Errorf("%s: a kind the host can't record passed", name)
+		}
+	}
+	if _, err := Execute(context.Background(), surveyBox{}, nil, Options{Mode: "exec", ExcludedKind: "terms"}); err == nil {
+		t.Error("Execute took a kind that isn't one")
 	}
 }
 

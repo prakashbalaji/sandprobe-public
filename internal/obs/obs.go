@@ -48,7 +48,16 @@ type Manifest struct {
 	Overrides                              []string            // test override names this run allows (Tests)
 	// NoCanary is HCN-5's -no-canary: the canary checks stay graded, as unknown, but are never sent to the probe.
 	NoCanary bool `json:"NoCanary,omitempty"`
+	// SkipKinds is why each provider-endpoint skip was made (GRD-3, SCR-2): SkipProviderTerms or SkipOptIn. Only the
+	// host writes it, and it never reaches the probe's input.
+	SkipKinds map[string]string `json:"SkipKinds,omitempty"`
 }
+
+// Skip kinds (SCR-2). Only a provider-terms skip can make a scorecard category not applicable.
+const (
+	SkipProviderTerms = "provider_terms" // a native adapter's PRV row: the provider's terms exclude its own endpoint (PRV-5)
+	SkipOptIn         = "opt_in"         // PRV-15's or RCP-4's default, which the person may lift (-provider-endpoints)
+)
 
 // Input is what the host hands the probe on stdin: the manifest, as far as the box needs it.
 type Input struct {

@@ -20,6 +20,7 @@ import (
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/probes"
 	"sandprobe/internal/report"
 	"sandprobe/recipes"
@@ -591,7 +592,7 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	}
 	if err == nil {
 		step("running the probe as the agent, then the reset and recheck")
-		run, err = host.Execute(ctx, s, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.SpritesExclusions()})
+		run, err = host.Execute(ctx, s, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
 	}
 	teardown()
 	if err != nil {

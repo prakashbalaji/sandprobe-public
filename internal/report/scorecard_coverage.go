@@ -113,8 +113,8 @@ func validCardCoverage(card Card) bool {
 	want := ScoreCoverage{Categories: len(Categories)}
 	for i, row := range card.Rows {
 		c := row.Coverage
-		if c == nil || c.Total != len(Categories[i].Checks) {
-			return false
+		if c == nil || c.Total != len(Categories[i].Checks) || row.NotApplicable && len(c.Skipped) != c.Total {
+			return false // SCR-2: a not-applicable row is one whose every check was skipped
 		}
 		seen := map[string]bool{}
 		for _, group := range [][]string{c.Proven, c.Findings, c.Unproven, c.Unknown, c.ScopedOut, c.Skipped, c.Missing} {
