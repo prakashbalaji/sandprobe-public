@@ -39,7 +39,7 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 		return false
 	}
 	if !x.Valid {
-		return x.Score == 0 && len(x.Rows) == 0
+		return x.Score == 0 && len(x.Rows) == 0 && x.Coverage == nil
 	}
 	if len(x.Rows) != len(Categories) {
 		return false
@@ -56,5 +56,5 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 			green++
 		}
 	}
-	return x.Score == green
+	return x.Score == green && validCardCoverage(x.Card)
 }

@@ -102,6 +102,9 @@ func printCard(o opts, c report.Card, statement string) {
 		return
 	}
 	fmt.Fprintf(w, "\nScore %d/%d\n\n", c.Score, c.Of)
+	if c.Coverage != nil {
+		fmt.Fprintln(w, c.Coverage.Description())
+	}
 	for _, row := range c.Rows {
 		mark, color := "RED  ", red
 		if row.Green {
@@ -113,6 +116,9 @@ func printCard(o opts, c report.Card, statement string) {
 		}
 		if row.NotProven != "" {
 			fmt.Fprintf(w, "  %-22s %s\n", "", row.NotProven)
+		}
+		if row.Coverage != nil {
+			fmt.Fprintf(w, "  %-22s %s\n", "", printable(row.Coverage.Description()))
 		}
 	}
 	if statement != "" {
