@@ -148,7 +148,7 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
 - **ARC-1 Image-compatible scheduling.** Receiver and control pods explicitly select kubernetes.io/arch=amd64,
   matching the tested linux/amd64 image in both local-build and CI-image modes. The agent's dedicated NodePool
   already selects amd64. This changes scheduling only; retain existing identity, network and cleanup controls.
-  Test both auxiliary pod types in deploy/eks-agent/test_runner.py before live provisioning.
+  Test both auxiliary pod types in experiments/eks-agent/test_runner.py before live provisioning.
 
 ## Auto Mode DNS and execution diagnostics, 19 November 2026
 
@@ -249,7 +249,7 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
 - **IMG-4 Tests.** Cover run metadata mismatch/fork/event/failure, malformed/oversized archives, config/source/
   archive digest/platform mismatch and nonregular/extra paths. CI verifies an archive of the actual tested
   image before upload. A missing/expired/mismatched artifact fails before creating paid resources. Existing
-  local Docker build mode remains supported. Map to deploy/eks-agent/test_image_artifact.py and test_runner.py.
+  local Docker build mode remains supported. Map to experiments/eks-agent/test_image_artifact.py and test_runner.py.
 - **IMG-5 Darwin transport.** macOS Skopeo cannot repeatedly open a shared-offset /dev/fd archive.
   On Darwin only, use the exact archive pathname beneath the run's owner-only0700 directories, retaining
   its verified read-only descriptor. Before and after each source operation require an owner-matching
@@ -382,7 +382,7 @@ implement or merge is not proof of third-party approval. No CI job uses cloud cr
 - **RUN-6 Tests and rollout.** Unit-test lifecycle failures/unknown creates, exact-identity cleanup, restrictive
   manifests/trust, functional task/repair/error budgets and assessment uncertainty. Execute known-good and
   deliberately-broken synthetic local containers plus controlled receiver tests in credential-free Linux CI.
-  Stub model replies are labeled and never become live model/Nitro results. Map to deploy/eks-agent/test_*.py
+  Stub model replies are labeled and never become live model/Nitro results. Map to experiments/eks-agent/test_*.py
   and .github/workflows/networked-agent.yml. Independent security and code reviews cover spec and code before
   merging; run data is credential-scanned and kept internal. No unattended continuous provider probing.
 
@@ -438,7 +438,7 @@ artifacts and local tests; it does not authorize a live EKS security assessment 
 - **NET-6 Offline tests.** Test render validation, exact egress/identity/resource configuration, scoped IAM,
   and workload success/error/wrong-answer cases using a stub SDK. A CI-only local container check uses the
   same pinned image and a stub model, no cloud credentials or external traffic. Stub success is explicitly not a
-  live model result or Nitro security pass. Map to deploy/eks-agent/test_profile.py and test_task.py.
+  live model result or Nitro security pass. Map to experiments/eks-agent/test_profile.py and test_task.py.
 
 ## Workload-aware grading, 20 November 2026
 
@@ -2588,12 +2588,12 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-19 | controller failure-step sanitization and unchanged model budget; contract mismatch metadata and refusal; setgid-workspace Linux smoke with unsafe-existing-cache refusal and nine cases; EGR-6 stage-count sanitization tests |
 | RUN-18 | actual environment-clearing subprocess and original-command/probe binding tests; legacy contract cannot select cleared observations; shared-policy Python workload checks; network-disabled/read-only Linux container with inherited synthetic authority and nine functional cases |
 | RUN-17 | host-controller protocol/remote execution/two-attempt/ambiguous-count and identity-absence tests; schema3 contract refusal matrix and report-version selection; original guest-mode regressions |
-| RUN-23 | `internal/host/agent_persistent_test.go`: durable deletion/create ordering, UID preconditions, lost-create uncertainty and replacement guards; `deploy/eks-agent/test_persistent_assessment.py`: profile intent, native artifact proof, recovery import, failed-child paths and independent cleanup; `internal/host/agent_workspace_test.go`: creator identity, both static storage profiles and actual pod volume/mount drift; `agent_reset_job_test.go`: original-manifest tampering and cross-language hashes from the real Python renderer; `deploy/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls and artifact storage leaves coding/cache paths local; `test_persistent_storage.py`: EBS ownership, metadata/attachment guards and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, same-volume recreation, context guards, unknown-create recovery and terminal tombstone identity; `daytona_artifact_test.go`: exact bounded agent readback and failure metadata; managed Daytona runner tests cover profile forwarding and cleanup outcomes; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
+| RUN-23 | `internal/host/agent_persistent_test.go`: durable deletion/create ordering, UID preconditions, lost-create uncertainty and replacement guards; `experiments/eks-agent/test_persistent_assessment.py`: profile intent, native artifact proof, recovery import, failed-child paths and independent cleanup; `internal/host/agent_workspace_test.go`: creator identity, both static storage profiles and actual pod volume/mount drift; `agent_reset_job_test.go`: original-manifest tampering and cross-language hashes from the real Python renderer; `experiments/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls and artifact storage leaves coding/cache paths local; `test_persistent_storage.py`: EBS ownership, metadata/attachment guards and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, same-volume recreation, context guards, unknown-create recovery and terminal tombstone identity; `daytona_artifact_test.go`: exact bounded agent readback and failure metadata; managed Daytona runner tests cover profile forwarding and cleanup outcomes; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |
 | WGR-7 | `TestPortableWorkloadDeclaration`, `TestPortableWorkloadCalibration`; version1 retained Nitro report compatibility test |
 | WGR-6 | run where the operators keep their recorded collections, not in this repository |
-| WGR-1..5 | `internal/grade/workload_test.go` (allowed vs forbidden, mixed proof faults, immutable context, independent positive evidence); `internal/obs/workload_test.go`; `internal/host/workload_test.go`; `internal/probe/workload_test.go` (Linux root/nobody); `internal/report/workload_test.go`; `cmd/sandprobe-agent-grade/workload_test.go`; `deploy/eks-agent/test_workload_contract.py` |
+| WGR-1..5 | `internal/grade/workload_test.go` (allowed vs forbidden, mixed proof faults, immutable context, independent positive evidence); `internal/obs/workload_test.go`; `internal/host/workload_test.go`; `internal/probe/workload_test.go` (Linux root/nobody); `internal/report/workload_test.go`; `cmd/sandprobe-agent-grade/workload_test.go`; `experiments/eks-agent/test_workload_contract.py` |
 | RUN-8 | `TestAgentPodBindingGuardsEveryInvocation`, `TestAgentPodRejectsNonRunBindingBeforeKubectl`, `test_standard_grade.py`; same-pod standard grading, failed-task preservation, binding changes and independent canary cleanup |
 | PRV-5 | a Modal plan selects none of SEC-4, AMP-6, AMP-7 or EGR-3, lists each as skipped with its reason, and its manifest names no metadata address, vsock port, Kubernetes API or proxy |
 | PRV-5 (Sprites) | `TestSpritesExclusions`: Sprites excludes exactly SEC-4, EGR-3, AMP-6 and AMP-7, each one Execute accepts; `TestSpritesPlanContactsOnlyTheCanary`: the plan names no metadata address or box-named destination |

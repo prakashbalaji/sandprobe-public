@@ -265,7 +265,7 @@ def main(args):
         if state and state.get("zone")!=zone:
             raise Failure("recovery_DNS_scope_mismatch")
         return 0 if cleanup_owned(folder,args,env)["confirmed"] else 5
-    model_check=json.loads(call([args.model_python,"-I",str(ROOT/"deploy/daytona-agent/model.py"),"identity"],env,timeout=90))
+    model_check=json.loads(call([args.model_python,"-I",str(ROOT/"experiments/daytona-agent/model.py"),"identity"],env,timeout=90))
     if model_check.get("ready") is not True or model_check.get("client_version")!="1.44.6":
         raise Failure("model_client_preflight_failed")
     key = private_key(args.key_file)

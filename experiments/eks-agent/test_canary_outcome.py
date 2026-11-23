@@ -18,7 +18,7 @@ from lifecycle import Commands, Failure
 from runner import Runner
 from lifecycle import Journal
 
-API = runpy.run_path(str(Path(__file__).resolve().parents[1] / "canary_outcome.py"))
+API = runpy.run_path(str(Path(__file__).resolve().parents[2] / "deploy" / "canary_outcome.py"))
 
 
 class CanaryOutcomeTests(unittest.TestCase):
@@ -111,7 +111,7 @@ class CanaryOutcomeTests(unittest.TestCase):
     def test_real_delegate_refusal_is_nonmutating_and_isolated(self):
         with JournalContext(self.root / "journals") as journal:
             r = Runner(journal)
-            digest = hashlib.sha256((Path(__file__).resolve().parents[1]/"canary.sh").read_bytes()).hexdigest()
+            digest = hashlib.sha256((Path(__file__).resolve().parents[2]/"deploy"/"canary.sh").read_bytes()).hexdigest()
             journal.intent("canary", delegated_state="canary.state", namespace="sandprobe-canary-"+r.run_id,
                 outcome_file="canary-outcome.json", outcome_nonce=self.nonce, delegate_sha256=digest)
             tools = self.root / "bin"
@@ -144,7 +144,7 @@ class CanaryOutcomeTests(unittest.TestCase):
                 teardown.assert_not_called()
 
     def test_real_script_barrier_precedes_first_mutation(self):
-        script = (Path(__file__).resolve().parents[1]/"canary.sh").read_text()
+        script = (Path(__file__).resolve().parents[2]/"deploy"/"canary.sh").read_text()
         up = script.split("\nup() {",1)[1]
         self.assertLess(up.index("canary_outcome.py"),up.index("aws s3api create-bucket"))
         self.assertLess(up.index('durable_state.py" init'),up.index("canary_outcome.py"))
@@ -162,7 +162,7 @@ class CanaryOutcomeTests(unittest.TestCase):
         env=dict(os.environ,PROFILE="test-profile",PATH=str(tools)+os.pathsep+os.environ["PATH"],CALL_LOG=str(log),
             STATE=str(self.state),DURABLE_STATE="1",SANDPROBE_CANARY_OUTCOME_FILE=str(self.path),
             SANDPROBE_CANARY_OUTCOME_NONCE=self.nonce,SANDPROBE_CANARY_NAME="sandprobe-canary-"+self.run)
-        script=Path(__file__).resolve().parents[1]/"canary.sh"
+        script=Path(__file__).resolve().parents[2]/"deploy"/"canary.sh"
         result=subprocess.run(["bash",str(script),"up"],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
         self.assertNotEqual(result.returncode,0)
         self.assertTrue(self.state.exists())

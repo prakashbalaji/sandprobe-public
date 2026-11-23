@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("coding", ROOT / "deploy/eks-agent/coding.py")
+spec = importlib.util.spec_from_file_location("coding", ROOT / "experiments/eks-agent/coding.py")
 coding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(coding)
 

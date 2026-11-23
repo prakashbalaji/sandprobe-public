@@ -10,7 +10,7 @@ import sys
 REGION = "us-west-2"
 HOSTNAME = f"bedrock-runtime.{REGION}.amazonaws.com"
 LIGHTWEIGHT_MODEL = "mistral.ministral-3-3b-instruct"
-WORKLOAD_ENVIRONMENT = runpy.run_path(str(Path(__file__).resolve().parents[1] / "workload_environment.py"))["prefix"]()
+WORKLOAD_ENVIRONMENT = runpy.run_path(str(Path(__file__).resolve().parents[2] / "deploy" / "workload_environment.py"))["prefix"]()
 IDLE_COMMAND = WORKLOAD_ENVIRONMENT + ["python", "-I", "-c", "import time;time.sleep(1800)"]
 
 

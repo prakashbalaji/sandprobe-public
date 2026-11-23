@@ -84,7 +84,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_delegated_durable_metadata_rejects_nonregular_paths(self):
         import importlib.util
-        module_path = Path(__file__).resolve().parents[1]/"durable_state.py"
+        module_path = Path(__file__).resolve().parents[2]/"deploy"/"durable_state.py"
         spec = importlib.util.spec_from_file_location("durable_metadata", module_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

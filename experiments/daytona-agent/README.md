@@ -127,7 +127,7 @@ bounded cleanup; the two-model-request limit is unchanged.
 
 Use a clean reviewed source checkout, Go1.25.14, Python3, the hash-locked Daytona
 SDK environment, a separate Python3.10+ environment installed from
-`deploy/eks-agent/requirements.lock`, AWS CLI, Bash, make, jq, OpenSSL and the existing owned-zone `cf`
+`experiments/eks-agent/requirements.lock`, AWS CLI, Bash, make, jq, OpenSSL and the existing owned-zone `cf`
 helper. The DNS reference contains only an existing secret identifier and zone
 ID; its token is fetched in memory and never included in guest environments or
 records. AWS is restricted to the account named in `SANDPROBE_AWS_ACCOUNT`,
@@ -135,7 +135,7 @@ us-west-2 and the profile named in `SANDPROBE_AWS_PROFILE` (no default); the DNS
 `SANDPROBE_AWS_BOOTSTRAP_PROFILE`. No new model agreement is enabled.
 
 ```sh
-python3 deploy/daytona-agent/run.py \
+python3 experiments/daytona-agent/run.py \
   --key-file /path/to/owner-only-daytona.key \
   --sdk-python /path/to/pinned-sdk/bin/python \
   --model-python /path/to/pinned-nitro-bedrock-sdk/bin/python \

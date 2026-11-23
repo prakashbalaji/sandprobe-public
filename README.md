@@ -127,8 +127,8 @@ checks have usable or conclusive results, and which remain skipped, missing,
 scoped out, unknown or unproven. The exposure score and coverage answer different
 questions; six green categories do not mean every check was conclusively assessed.
 
-For a network-enabled model workload, the managed [Nitro](deploy/eks-agent/README.md)
-and [Daytona](deploy/daytona-agent/README.md) guides run the same nine-case coding
+For a network-enabled model workload, the managed [Nitro](experiments/eks-agent/README.md)
+and [Daytona](experiments/daytona-agent/README.md) guides run the same nine-case coding
 task and collect RC exposure plus a separate configuration assessment. Nitro uses
 guest-side model inference; Daytona uses host-controller inference without guest
 model credentials. Preserve that context when comparing results. Run records

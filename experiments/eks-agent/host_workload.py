@@ -48,7 +48,7 @@ def model_preflight(runner):
     if (runner.journal.data.get("model", MODEL) != MODEL or not program
             or not Path(program).is_absolute() or not os.access(program, os.X_OK)):
         raise Failure("host_model_interpreter_required")
-    raw = runner.ops.call([program, "-I", str(runner.source_root / "deploy/daytona-agent/model.py"), "identity"],
+    raw = runner.ops.call([program, "-I", str(runner.source_root / "experiments/daytona-agent/model.py"), "identity"],
                           env=controller_environment(runner), timeout=30)
     result = strict(raw.decode(), 4096)
     if result != {"ready": True, "client_version": "1.44.6"}:
@@ -108,7 +108,7 @@ def perform(runner, pod, config_sha):
                            payload=payload, timeout=90)
 
     def protocol(mode, value):
-        return strict(runner.ops.call([sys.executable, "-I", str(root / "deploy/daytona-agent/controller.py"), mode],
+        return strict(runner.ops.call([sys.executable, "-I", str(root / "experiments/daytona-agent/controller.py"), mode],
                       payload=json.dumps(value).encode(), env=controller_environment(runner), timeout=20).decode(), 131072)
 
     observation_script = "import sys,json;sys.path.insert(0,'/opt/sandprobe');import checks;print(json.dumps(checks.observe(sys.argv[1],sys.argv[2])))"
@@ -128,7 +128,7 @@ def perform(runner, pod, config_sha):
             status["stage"] = "model_request"
             request = protocol("request", previous)
             status["model_request_count_uncertain"] = True
-            raw = runner.ops.call([runner.model_python, "-I", str(root / "deploy/daytona-agent/model.py"), "request"],
+            raw = runner.ops.call([runner.model_python, "-I", str(root / "experiments/daytona-agent/model.py"), "request"],
                                   payload=json.dumps(request).encode(), env=controller_environment(runner), timeout=150)
             response = strict(raw.decode(), 131072)
             if type(response.get("converse_attempted")) is not bool:

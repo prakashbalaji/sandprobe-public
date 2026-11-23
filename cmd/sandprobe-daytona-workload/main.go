@@ -1,4 +1,4 @@
-// RUN-10: private managed entrypoint. Run through deploy/daytona-agent/run.py.
+// RUN-10: private managed entrypoint. Run through experiments/daytona-agent/run.py.
 package main
 
 import (
@@ -177,7 +177,7 @@ func verifySource(ctx context.Context, o options) error {
 	return nil
 }
 func controller(ctx context.Context, o options, mode string, input []byte) ([]byte, error) {
-	return command(ctx, input, "python3", "-I", filepath.Join(o.root, "deploy/daytona-agent/controller.py"), mode)
+	return command(ctx, input, "python3", "-I", filepath.Join(o.root, "experiments/daytona-agent/controller.py"), mode)
 }
 func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byte, bool) {
 	var envelope struct {
@@ -199,7 +199,7 @@ func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byt
 }
 func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 	result := taskResult{Schema: "sandprobe.agent-task/2", Workload: "synthetic-coding-v1", Model: "mistral.ministral-3-3b-instruct", Pattern: "host_controller_no_guest_credentials", Independent: "failed"}
-	files := map[string]string{"coding.py": "deploy/eks-agent/coding.py", "project_exec.py": "deploy/eks-agent/project_exec.py", "worker.py": "deploy/eks-agent/worker.py"}
+	files := map[string]string{"coding.py": "experiments/eks-agent/coding.py", "project_exec.py": "experiments/eks-agent/project_exec.py", "worker.py": "experiments/eks-agent/worker.py"}
 	for name, path := range files {
 		data, e := os.ReadFile(filepath.Join(o.root, path))
 		if e != nil || b.WorkloadUpload(ctx, name, data) != nil {
@@ -236,7 +236,7 @@ func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 			return result
 		}
 		mctx, cancel := context.WithTimeout(ctx, 150*time.Second)
-		raw, e = command(mctx, request, o.modelPython, "-I", filepath.Join(o.root, "deploy/daytona-agent/model.py"), "request")
+		raw, e = command(mctx, request, o.modelPython, "-I", filepath.Join(o.root, "experiments/daytona-agent/model.py"), "request")
 		cancel()
 		var valid bool
 		raw, valid = decodeModelResponse(raw, e, &result)
@@ -364,7 +364,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = client.Available(ctx); e != nil {
 		return e
 	}
-	modelIdentity, modelError := command(ctx, nil, o.modelPython, "-I", filepath.Join(o.root, "deploy/daytona-agent/model.py"), "identity")
+	modelIdentity, modelError := command(ctx, nil, o.modelPython, "-I", filepath.Join(o.root, "experiments/daytona-agent/model.py"), "identity")
 	var modelReady struct {
 		Ready   bool   `json:"ready"`
 		Version string `json:"client_version"`
