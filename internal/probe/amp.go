@@ -56,6 +56,9 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 		if why := reachPast(); why != "" { // a mount can hide a sudo (TWN-4)
 			return unknownObs(why)
 		}
+		if _, ok := pathEntries(); !ok { // the launcher may look where the probe didn't
+			return unknownObs(pathUnset)
+		}
 		return obs.Observation{Result: obs.Absent, Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root,
 			Discovered: map[string]int{"path_sudo": 0}, Targets: ts}}
 	}
@@ -77,8 +80,8 @@ func amp1(e *env, ck *catalog.Check) obs.Observation {
 	return unknownObs("no sudo at a fixed path can be trusted to run, so none ran: " + strings.Join(refused, "; "))
 }
 
-// pathSudo: sudo in any PATH directory other than the fixed ones. Each entry is taken as given, never cleaned, an empty
-// or relative one from the working directory (fromPath, SBX-2); it is skipped as a fixed path's directory, or one
+// pathSudo: sudo in any PATH directory other than the fixed ones. PATH is split as execvp splits it (pathEntries), each
+// entry taken as given, never cleaned, an empty or relative one from the working directory (fromPath, SBX-2); it is skipped as a fixed path's directory, or one
 // already looked in, only when the kernel reaches that very directory, never by its spelling. Only lstat; nothing
 // found here ever runs.
 func pathSudo(fixed []string) ([]string, error) {
@@ -97,8 +100,9 @@ func pathSudo(fixed []string) ([]string, error) {
 		}
 	}
 	wd, _ := os.Getwd()
+	entries, _ := pathEntries() // unset: none here, and amp1 says why it can't be absent
 	var out []string
-	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+	for _, d := range entries {
 		d, err := fromPath(d, wd)
 		if err != nil {
 			return nil, err

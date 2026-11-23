@@ -181,14 +181,16 @@ func TestPathDirs(t *testing.T) {
 		"/opt/x:/usr/bin:/evil": {"/opt/x"}, "/usr/local/bin:/usr/bin": nil,
 		// as given, never cleaned: link/.. is for the walk to resolve (SBX-2)
 		"/opt/link/..:/usr/bin": {"/opt/link/.."}, "/usr/local/bin/link/..:/usr/bin": {"/usr/local/bin/link/.."},
-		"l/../x:/usr/bin": {"/w/l/../x"}}
+		"l/../x:/usr/bin": {"/w/l/../x"},
+		// split as execvp splits it: an empty PATH is one empty entry, the working directory, as is each beside a colon
+		"": {"/w"}, "::": {"/w"}, "/opt/x:": {"/opt/x", "/w"}}
 	for path, want := range cases {
-		got, err := pathDirs(path, "/w")
+		got, err := pathDirs(strings.Split(path, ":"), "/w")
 		if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("PATH=%s: want %v, got %v %v", path, want, got, err)
 		}
 	}
-	if _, err := pathDirs(".:/usr/bin", ""); err == nil {
+	if _, err := pathDirs([]string{".", "/usr/bin"}, ""); err == nil {
 		t.Error("a relative entry with no working directory must fail")
 	}
 }

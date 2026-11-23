@@ -279,9 +279,12 @@ func sec3(e *env, ck *catalog.Check) obs.Observation {
 // writable is PER-1 to PER-4, AMP-4 and AMP-8's kernel settings: write or replace, never opened for writing.
 func writable(e *env, ck *catalog.Check) obs.Observation {
 	found := map[string][]string{}
+	unset := false // PATH is unset, so where the agent's launcher looks can't be told: PER-2 can't pass
 	if ck.ID == "PER-2" {
 		wd, _ := os.Getwd()
-		dirs, err := pathDirs(os.Getenv("PATH"), wd)
+		entries, ok := pathEntries()
+		unset = !ok
+		dirs, err := pathDirs(entries, wd)
 		if err != nil {
 			return unknownObs(err.Error())
 		}
@@ -296,7 +299,7 @@ func writable(e *env, ck *catalog.Check) obs.Observation {
 	if err != nil {
 		return sweepErr(err)
 	}
-	return e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
+	o := e.judgeWrite(ck, ts, counts, how, func(now []obs.Target, made []string) (string, string) {
 		variant := "writable"
 		if ck.ID == "AMP-8.sys" {
 			variant = "writable_sysctl"
@@ -310,6 +313,10 @@ func writable(e *env, ck *catalog.Check) obs.Observation {
 		}
 		return variant, strings.Join(ev, "; ")
 	})
+	if unset && o.Result != obs.Finding {
+		return unknownObs(pathUnset)
+	}
+	return o
 }
 
 // AMP-4: the known control sockets, each an existing socket the agent may connect to, never connected.
@@ -653,12 +660,12 @@ func dotenvs(home, wd string) ([]string, error) {
 // pathDirs are the PATH entries ahead of the first system directory, other than the planned /usr/local/bin, each as
 // given, never cleaned (SBX-2). An empty or relative entry is searched relative to the working directory, so it
 // resolves against wd; without one, it can't be judged.
-func pathDirs(path, wd string) ([]string, error) {
+func pathDirs(entries []string, wd string) ([]string, error) {
 	system := map[string]bool{"/usr/sbin": true, "/usr/bin": true, "/sbin": true, "/bin": true}
 	seen := map[string]bool{}
 	var out []string
 	var err error
-	for _, d := range filepath.SplitList(path) {
+	for _, d := range entries {
 		if system[d] {
 			break
 		}
@@ -673,6 +680,22 @@ func pathDirs(path, wd string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// pathEntries is PATH split as execvp splits it in glibc and musl: on every colon, so the whole of an empty PATH, or an
+// entry at either end or between two colons, is one empty entry, the working directory (filepath.SplitList drops an
+// empty PATH altogether). ok is false when PATH is unset (pathUnset).
+func pathEntries() (entries []string, ok bool) {
+	p, ok := os.LookupEnv("PATH")
+	if !ok {
+		return nil, false
+	}
+	return strings.Split(p, ":"), true
+}
+
+// pathUnset is why a check that lists PATH can't pass, or be absent, when PATH is unset.
+const pathUnset = "PATH is unset, and where commands are then looked up depends on the agent's launcher, which the " +
+	"probe can't tell: glibc's execvp searches /bin:/usr/bin, dash and bash their compiled defaults, and Debian's " +
+	"bash ends its default in \".\", the working directory"
 
 // fromPath is a PATH entry as the shell searches it: an absolute one as given, an empty one the working directory,
 // and any other relative one under it, never cleaned (SBX-2). Without a working directory a relative one can't be told.

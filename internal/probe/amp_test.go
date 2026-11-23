@@ -320,6 +320,39 @@ func TestAMP1Absent(t *testing.T) {
 	}
 }
 
+// PATH is split as execvp splits it (SBX-2): all of an empty PATH, "::" and a trailing colon are empty entries, each the
+// working directory; an unset PATH leaves the search to the agent's launcher, which the probe can't tell. With a
+// writable working directory holding a file named sudo, PER-2 and AMP-1 each find or are unknown, never a pass or
+// absent.
+func TestPATHWorkingDirectory(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/sudo"); err == nil {
+		t.Skip("sudo is installed here")
+	}
+	per2, _ := catalog.Get("PER-2")
+	ck, _ := catalog.Get("AMP-1")
+	targets, discover := catalog.Plan([]string{"AMP-1"})
+	for path, why := range map[string]string{"": "only off the fixed paths", "::": "only off the fixed paths",
+		"/nonexistent:": "only off the fixed paths", "unset": "PATH is unset"} {
+		dir := t.TempDir()
+		chdir(t, dir)
+		os.WriteFile(filepath.Join(dir, "sudo"), []byte("#!/bin/sh\n"), 0o755) // only ever lstat'd
+		t.Setenv("PATH", path)
+		if path == "unset" {
+			os.Unsetenv("PATH")
+		}
+		o := writable(testEnv(t, map[string][]string{"PER-2": {"/usr/local/bin"}}), per2)
+		if o.Result != obs.Finding && o.Result != obs.Unknown {
+			t.Errorf("PER-2, PATH %q, a writable working directory: want a finding or unknown, got %s", path, o.Result)
+		}
+		a := amp1(&env{in: obs.Input{Targets: targets, Discover: discover}, root: root}, ck)
+		if a.Result != obs.Unknown || !strings.Contains(a.Reason, why) {
+			t.Errorf("AMP-1, PATH %q, a sudo in the working directory: want unknown saying %q, got %s %q", path, why,
+				a.Result, a.Reason)
+		}
+		t.Logf("PATH %q: PER-2 %s %s%s; AMP-1 %s %s", path, o.Result, o.Evidence, o.Reason, a.Result, a.Reason)
+	}
+}
+
 // AMP-7 contacts only the API the plan named, never a local one.
 func TestAMP7Gate(t *testing.T) {
 	ck, _ := catalog.Get("AMP-7")
