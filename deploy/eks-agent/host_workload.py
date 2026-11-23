@@ -113,7 +113,7 @@ def perform(runner, pod, config_sha):
         if network != {"intended_model_tls": True}:
             raise Failure("intended_model_tls_unavailable")
         previous = {}
-        for _ in range(2):
+        for attempt in range(1, 3):
             status["stage"] = "model_request"
             request = protocol("request", previous)
             status["model_request_count_uncertain"] = True
@@ -140,6 +140,13 @@ def perform(runner, pod, config_sha):
             verified = strict(guest("/opt/sandprobe/worker.py", "verify", digest).decode(), 4096)
             if type(verified.get("functional_tests")) is not int or verified["functional_tests"] != 9 or verified.get("artifact_sha256") != digest:
                 raise Failure("host_artifact_verification_unproven")
+            diagnostic = protocol("diagnostic", verified)
+            fd = os.open(runner.journal.folder / ("functional-attempt-%d.json" % attempt),
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as stream:
+                json.dump({"schema":"sandprobe.functional-attempt/1", "attempt":attempt,
+                           "artifact_sha256":digest, "diagnostic":diagnostic},stream)
+                stream.flush();os.fsync(stream.fileno())
             if verified.get("independent_verification") == "passed":
                 task = {"schema": "sandprobe.agent-task/2", "workload": "synthetic-coding-v1",
                         "model_requests": status["model_requests"], "functional_tests": 9, "independent_verification": "passed",

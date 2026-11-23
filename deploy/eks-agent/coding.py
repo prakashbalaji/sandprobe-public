@@ -90,40 +90,86 @@ def child_limits():
     resource.setrlimit(resource.RLIMIT_AS, (256 << 20, 256 << 20))
 
 
-def functional_checks(workspace, source_sha=None, *, home=None):
+DIAGNOSTIC_KEYS = {"schema", "failure_kind", "outputs_complete", "matched_cases", "expected_cases", "failed_case_ids"}
+DIAGNOSTIC_FAILURES = {"passed", "case_mismatch", "checker_setup_failed", "artifact_unverified", "dependency_error", "syntax_error", "memory_error", "execution_error", "child_failed", "deadline", "invalid_output"}
+
+
+def validated_verification_diagnostic(value):
+    # RUN-22: whitelist data, never return an exception, candidate output or source.
+    if not isinstance(value, dict) or set(value) != {"functional_tests", "independent_verification", "artifact_sha256", "diagnostics"}:
+        raise ValueError("invalid functional diagnostic")
+    d = value["diagnostics"]
+    if (not isinstance(d, dict) or set(d) != DIAGNOSTIC_KEYS
+            or d["schema"] != "sandprobe.functional-diagnostic/1" or not isinstance(d["failure_kind"], str) or d["failure_kind"] not in DIAGNOSTIC_FAILURES
+            or type(d["outputs_complete"]) is not bool or type(d["matched_cases"]) is not int
+            or type(d["expected_cases"]) is not int or d["expected_cases"] != len(CASES)
+            or not isinstance(d["failed_case_ids"], list) or len(d["failed_case_ids"]) > len(CASES)
+            or any(type(i) is not int or not 1 <= i <= len(CASES) for i in d["failed_case_ids"])):
+        raise ValueError("invalid functional diagnostic")
+    ids = d["failed_case_ids"]
+    if ids != sorted(set(ids)):
+        raise ValueError("invalid functional diagnostic")
+    if d["failure_kind"] in {"passed", "case_mismatch"}:
+        consistent = (d["outputs_complete"] and d["matched_cases"] == len(CASES) - len(ids)
+                      and (d["failure_kind"] == "passed") == (not ids))
+    else:
+        consistent = not d["outputs_complete"] and d["matched_cases"] == 0 and not ids
+    if (not consistent or type(value["functional_tests"]) is not int or value["functional_tests"] != len(CASES)
+            or not isinstance(value["independent_verification"], str) or value["independent_verification"] not in {"passed", "failed"}
+            or (value["independent_verification"] == "passed") != (d["failure_kind"] == "passed")
+            or not isinstance(value["artifact_sha256"], str) or not re.fullmatch("[a-f0-9]{64}", value["artifact_sha256"])):
+        raise ValueError("invalid functional diagnostic")
+    return {**d, "failed_case_ids": list(ids)}
+
+
+def functional_checks(workspace, source_sha=None, *, home=None, diagnostics=None):
     # Production invokes this inside the Job only, never in the host runner.
-    if source_sha is None: # Known local calibration fixtures only.
-        fd = os.open(Path(workspace) / "solution.py", os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, "rb") as source:
-            source_sha = hashlib.sha256(source.read(16385)).hexdigest()
-    with tempfile.TemporaryFile() as output:
-        process = subprocess.Popen(
-            [sys.executable, "-I", str(Path(__file__).with_name("project_exec.py")),
-             str(Path(workspace) / "solution.py"), source_sha], cwd=workspace,
-            env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home if home is not None else workspace),
-                 "XDG_CACHE_HOME":str(Path(workspace)/'.cache'),
-                 "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"},
-            stdin=subprocess.PIPE, stdout=output, stderr=subprocess.DEVNULL,
-            start_new_session=True, preexec_fn=child_limits)
-        try:
-            process.communicate(json.dumps([c[0] for c in CASES]).encode(), timeout=5)
-        except subprocess.TimeoutExpired:
-            return False
-        finally:
+    def finish(kind, matched=0, failed=None, complete=False):
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update(schema="sandprobe.functional-diagnostic/1", failure_kind=kind,
+                               outputs_complete=complete, matched_cases=matched,
+                               expected_cases=len(CASES), failed_case_ids=list(failed or []))
+        return kind == "passed"
+    try:
+        if source_sha is None: # Known local calibration fixtures only.
+            fd = os.open(Path(workspace) / "solution.py", os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as source:
+                source_sha = hashlib.sha256(source.read(16385)).hexdigest()
+        with tempfile.TemporaryFile() as output:
+            process = subprocess.Popen(
+                [sys.executable, "-I", str(Path(__file__).with_name("project_exec.py")),
+                 str(Path(workspace) / "solution.py"), source_sha], cwd=workspace,
+                env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home if home is not None else workspace),
+                     "XDG_CACHE_HOME":str(Path(workspace)/'.cache'),
+                     "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"},
+                stdin=subprocess.PIPE, stdout=output, stderr=subprocess.DEVNULL,
+                start_new_session=True, preexec_fn=child_limits)
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        if process.returncode != 0:
-            return False
-        output.seek(0)
-        try:
-            actual = strict(output.read(32769).decode(), 32768)
-            return json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(
-                [c[1] for c in CASES], sort_keys=True, allow_nan=False)
-        except (ValueError, UnicodeError, TypeError):
-            return False
+                process.communicate(json.dumps([c[0] for c in CASES]).encode(), timeout=5)
+            except subprocess.TimeoutExpired:
+                return finish("deadline")
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+            if process.returncode != 0:
+                return finish({20:"artifact_unverified", 21:"dependency_error", 22:"syntax_error",
+                               23:"memory_error", 24:"execution_error"}.get(process.returncode, "child_failed"))
+            output.seek(0)
+            try:
+                actual = strict(output.read(32769).decode(), 32768)
+                if not isinstance(actual, list) or len(actual) != len(CASES):
+                    return finish("invalid_output")
+                canonical = lambda item: json.dumps(item, sort_keys=True, allow_nan=False)
+                failed = [i + 1 for i, (got, case) in enumerate(zip(actual, CASES)) if canonical(got) != canonical(case[1])]
+                return finish("case_mismatch" if failed else "passed", len(CASES)-len(failed), failed, True)
+            except (ValueError, UnicodeError, TypeError):
+                return finish("invalid_output")
+    except (OSError, subprocess.SubprocessError):
+        return finish("checker_setup_failed")
 
 
 def perform(client, model_id, workspace, *, home=None):

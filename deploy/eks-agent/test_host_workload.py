@@ -60,8 +60,12 @@ class HostWorkloadTests(unittest.TestCase):
                 r.source = payload
                 return json.dumps({"artifact_sha256": hashlib.sha256(payload).hexdigest()}).encode()
             if "verify" in args:
+                outcome=outcomes.pop(0)
                 return json.dumps({"functional_tests": 9, "artifact_sha256": hashlib.sha256(r.source).hexdigest(),
-                                   "independent_verification": outcomes.pop(0)}).encode()
+                                   "independent_verification": outcome, "diagnostics": {
+                                       "schema":"sandprobe.functional-diagnostic/1", "failure_kind":"passed" if outcome=="passed" else "case_mismatch",
+                                       "expected_cases":9,"matched_cases":9 if outcome=="passed" else 8,
+                                       "outputs_complete":True,"failed_case_ids":[] if outcome=="passed" else [9]}}).encode()
             return json.dumps({"identity": "reported_restricted", "protected_file": "reported_refusal",
                                "workspace": "reported_writable", "image_root": "reported_refusal", "receiver_egress": "reported_refusal"}).encode()
 
@@ -78,7 +82,11 @@ class HostWorkloadTests(unittest.TestCase):
             self.assertEqual(result["task"]["functional_tests"], 9)
             self.assertIsNotNone(guest_document(json.dumps(result), r.run_id, "original-pod", "c" * 64))
             self.assertEqual(r.models, 2)
-            self.assertEqual(list(Path(folder).iterdir()), [Path(folder) / "host-controller-status.json"])
+            self.assertEqual({p.name for p in Path(folder).iterdir()}, {"host-controller-status.json","functional-attempt-1.json","functional-attempt-2.json"})
+            for attempt,kind in [(1,"case_mismatch"),(2,"passed")]:
+                p=Path(folder)/("functional-attempt-%d.json"%attempt)
+                self.assertEqual(json.loads(p.read_text())["diagnostic"]["failure_kind"],kind)
+                self.assertEqual(p.stat().st_mode&0o777,0o600)
 
     def test_ambiguous_model_transport_stops_without_retry(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -151,6 +159,22 @@ class HostWorkloadTests(unittest.TestCase):
                 self.assertEqual(r.models, 0)
                 self.assertFalse(status["model_request_count_uncertain"])
                 self.assertNotIn("synthetic credential-shaped diagnostic", raw)
+
+    def test_invalid_diagnostics_cannot_pass_or_escape_into_records(self):
+        with tempfile.TemporaryDirectory() as folder:
+            r=self.fixture(folder);original=r.kube
+            def kube(*args,**kwargs):
+                raw=original(*args,**kwargs)
+                if "verify" in args:
+                    value=json.loads(raw);value["diagnostics"]["extra"]="synthetic-private-detail"
+                    return json.dumps(value).encode()
+                return raw
+            r.kube=kube
+            result=json.loads(host_workload.perform(r,"original-pod","c"*64))
+            self.assertEqual(result["workload"],"reported_failed")
+            self.assertEqual(r.models,1)
+            self.assertFalse(list(Path(folder).glob("functional-attempt-*.json")))
+            self.assertNotIn("synthetic-private-detail",(Path(folder)/"host-controller-status.json").read_text())
 
     def test_model_child_environment_drops_dns_authority_and_overrides(self):
         r = types.SimpleNamespace(env={"SANDPROBE_CF_TOKEN": "synthetic-not-secret", "AWS_ENDPOINT_URL_STS": "https://fixture.invalid",

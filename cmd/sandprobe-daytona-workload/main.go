@@ -232,6 +232,12 @@ func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 		if e != nil || json.Unmarshal(raw, &verified) != nil || verified.Tests != 9 || verified.SHA != result.SHA {
 			return result
 		}
+		diagnostic, diagnosticError := controller(ctx, o, "diagnostic", raw)
+		if diagnosticError != nil || save(o.folder, fmt.Sprintf("functional-attempt-%d.json", attempt), map[string]any{
+			"schema": "sandprobe.functional-attempt/1", "attempt": attempt, "artifact_sha256": result.SHA, "diagnostic": json.RawMessage(diagnostic),
+		}) != nil {
+			return result
+		}
 		result.FunctionalTests = verified.Tests
 		if verified.Independent == "passed" {
 			result.Independent = "passed"

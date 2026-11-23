@@ -21,6 +21,8 @@ def main():
             messages.extend([{"role": "assistant", "content": [{"text": value["previous"]}]},
                              {"role": "user", "content": [{"text": "The fixed functional checks failed. Return corrected solution.py JSON only."}]}])
         return coding.converse_request("mistral.ministral-3-3b-instruct", messages)
+    if mode == "diagnostic":
+        return coding.validated_verification_diagnostic(value)
     if mode == "parse":
         blocks = value["output"]["message"]["content"]
         if len(blocks) != 1 or set(blocks[0]) != {"text"}:
