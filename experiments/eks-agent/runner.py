@@ -32,6 +32,7 @@ completion_message = runpy.run_path(str(ROOT / "deploy/managed_status.py"))["com
 STATE_ROOT = Path.home() / ".config/sandprobe/agent-evaluation"
 PROFILE = os.environ.get("SANDPROBE_AWS_PROFILE", "")
 KUBERNETES_VERSION = "1.37"
+EKS_NO_IDENTITY = 3  # CLN-2: eks.sh up's identity refusal; it wrote nothing and created nothing
 
 
 def kubectl_version(data):
@@ -277,7 +278,15 @@ class Runner:
         self.journal.intent("cluster", delegated_state="eks.state")
         env = dict(self.env, PROFILE=self.profile, REGION=REGION, DURABLE_STATE="1", VERSION=KUBERNETES_VERSION,
                    STATE=str(self.journal.folder / "eks.state"))
-        self.ops.call(["bash", str(ROOT / "deploy/eks.sh"), "up"], env=env, timeout=1800)
+        try:
+            self.ops.call(["bash", str(ROOT / "deploy/eks.sh"), "up"], env=env, timeout=1800)
+        except Failure:
+            # CLN-2: only exit 3 with no state file, not even a link, proves no create. Anything else stays unresolved.
+            if (getattr(self.ops, "last_returncode", None) == EKS_NO_IDENTITY
+                    and not os.path.lexists(env["STATE"])):
+                self.journal.data["resources"]["cluster"]["status"] = "not_created"
+                self.journal.save()
+            raise
         values = self.delegated_state()
         cluster = values.get("cluster", "")
         if not re.fullmatch(r"sandprobe-[a-f0-9]{8}", cluster):
@@ -1152,7 +1161,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                 elif str(error) != "unknown_association_create":
                     failures.append("association_cleanup_unconfirmed")
             self.journal.save()
-        if "cluster" in resources and resources["cluster"].get("status") != "deleted":
+        if "cluster" in resources and resources["cluster"].get("status") not in ("deleted", "not_created"):
             try:
                 state = self.journal.folder / "eks.state"
                 if not state.exists():
@@ -1253,7 +1262,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         self.ops.deadline = time.monotonic() + 900
         if "canary" in resources and resources["canary"].get("status") not in ("deleted", "not_created", "reconciled_no_cloud_create"):
             try:
-                if resources.get("cluster", {}).get("status", "deleted") != "deleted":
+                if resources.get("cluster", {}).get("status", "deleted") not in ("deleted", "not_created"):
                     raise Failure("probe_cluster_stop_unconfirmed")
                 if self.canary_no_create(resources["canary"]):
                     resources["canary"]["status"] = "not_created"

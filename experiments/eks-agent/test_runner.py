@@ -94,6 +94,39 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(j.data["execution_stage"],"identity_association")
             j.close()
 
+    def eks_up_fails(self, runner, code):
+        def call(args, **kwargs):
+            runner.ops.calls.append((args, kwargs))
+            if args[-1] == "up":
+                runner.ops.last_returncode = code
+                raise Failure("command_failed")
+            return b""
+        runner.ops.call = call
+
+    def test_cln2_identity_refusal_records_cluster_not_created(self):
+        with tempfile.TemporaryDirectory() as root:
+            j=Journal(root,"a"*16,create=True);r=FakeRunner(j,{("sts","get-caller-identity"):ACCOUNT})
+            self.eks_up_fails(r,3)
+            with self.assertRaisesRegex(Failure,"^command_failed$"):r.cluster_up()
+            self.assertEqual(json.loads(j.path.read_text())["resources"]["cluster"]["status"],"not_created")
+            self.assertTrue(r.cleanup())
+            self.assertEqual([c[0][-1] for c in r.ops.calls],["up"])
+            self.assertEqual((j.data["cleanup_confirmed"],j.data["cleanup_failures"]),(True,[]))
+            j.close()
+
+    def test_cln2_other_missing_state_stays_unconfirmed(self):
+        for code,state in [(1,None),(None,None),(3,"link")]:
+            with self.subTest(code=code,state=state),tempfile.TemporaryDirectory() as root:
+                j=Journal(root,"a"*16,create=True);r=FakeRunner(j,{("sts","get-caller-identity"):ACCOUNT})
+                if state=="link":(j.folder/"eks.state").symlink_to(j.folder/"missing")
+                self.eks_up_fails(r,code)
+                with self.assertRaisesRegex(Failure,"^command_failed$"):r.cluster_up()
+                self.assertEqual(j.data["resources"]["cluster"]["status"],"creating")
+                self.assertFalse(r.cleanup())
+                self.assertIn("cluster_cleanup_unconfirmed",j.data["cleanup_failures"])
+                self.assertEqual([c[0][-1] for c in r.ops.calls],["up"])
+                j.close()
+
     def test_unknown_association_resolves_only_after_parent_absence(self):
         for initial,description,down_fails,expected in [
             ("created",Failure("resource_not_found"),False,True),
