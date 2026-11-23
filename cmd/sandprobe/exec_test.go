@@ -116,20 +116,25 @@ func TestRunExecPlanNeverEchoesPastedSecrets(t *testing.T) {
 	}
 }
 
+// HCN-7: canary check keeps HCN-5's refusals, each before any canary is asked. None of these reaches a network.
 func TestCanaryCheckRefusals(t *testing.T) {
 	for _, tc := range []struct {
-		args []string
-		says string
+		args   []string
+		envPin string
+		says   string
 	}{
-		{[]string{"canary"}, "canary takes check"},
-		{[]string{"canary", "check"}, "-canary-url and -canary-pin"},
-		{[]string{"canary", "check", "-canary-url", "https://control.sandprobe.test"}, "-canary-url and -canary-pin"},
-		{[]string{"plan", "exec", "-tls-insecure", "--", "sh"}, "only to canary check"},
-		{[]string{"canary", "check", "-canary-url", "http://control.sandprobe.test", "-canary-pin", testPin}, "isn't proven"},
+		{[]string{"canary"}, "", "canary takes check"},
+		{[]string{"canary", "check", "-canary-url", "https://control.sandprobe.test"}, "", "-canary-url needs -canary-pin"},
+		{[]string{"canary", "check", "-canary-pin", testPin}, "", "needs -canary-url"},
+		{[]string{"canary", "check"}, testPin, "needs -canary-url"},
+		{[]string{"plan", "exec", "-tls-insecure", "--", "sh"}, "", "only to canary check"},
+		{[]string{"canary", "check", "-canary-url", "http://control.sandprobe.test", "-canary-pin", testPin}, "", "https://control.<domain>"},
 	} {
+		isolateCanary(t)
+		t.Setenv("SANDPROBE_CANARY_PIN", tc.envPin)
 		var out, errs bytes.Buffer
-		if code := run(tc.args, &out, &errs); code == 0 || !strings.Contains(out.String()+errs.String(), tc.says) {
-			t.Errorf("%q: exit %d, %q", tc.args, code, out.String()+errs.String())
+		if code := run(tc.args, &out, &errs); code != exitUsage || !strings.Contains(out.String()+errs.String(), tc.says) {
+			t.Errorf("%q (pin in the environment %q): exit %d, %q", tc.args, tc.envPin, code, out.String()+errs.String())
 		}
 	}
 }
