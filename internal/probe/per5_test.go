@@ -178,10 +178,15 @@ func TestMarkRefuses(t *testing.T) {
 // that the agent can't write it, which is never that root's negative (TWN-3). Nothing is created either way.
 func TestMarkUnlisted(t *testing.T) {
 	const run = "r1"
+	searchOnly := filepath.Join(t.TempDir(), "searchonly") // mode 0111: searchable, not readable, so pinned with O_PATH
+	os.Mkdir(searchOnly, 0o111)
+	t.Cleanup(func() { os.Chmod(searchOnly, 0o700) })
 	cases := map[string]string{t.TempDir(): "the survey didn't list it, though the agent can write it now",
-		"/usr": "the agent can't write it (EACCES), so the survey didn't list it"}
+		"/usr":     "its current permissions don't let the agent write it (EACCES), so the survey didn't list it",
+		searchOnly: "its current permissions don't let the agent write it (EACCES), so the survey didn't list it"}
 	if root {
 		cases["/usr"] = "the survey didn't list it, though the agent can write it now"
+		cases[searchOnly] = "the survey didn't list it, though the agent can write it now"
 	}
 	for dir, want := range cases {
 		m := obs.PlannedMark{Root: dir, Path: filepath.Join(dir, obs.MarkerPrefix+run)}
@@ -191,6 +196,21 @@ func TestMarkUnlisted(t *testing.T) {
 		if _, err := os.Lstat(m.Path); err == nil {
 			t.Errorf("a marker was created in the unlisted root %s", dir)
 		}
+	}
+}
+
+// A root the agent can write and search but not read (mode 0300) is still marked and rechecked: both pin it with O_PATH.
+func TestMarkUnreadableRoot(t *testing.T) {
+	const run = "r1"
+	dir := filepath.Join(t.TempDir(), "writeonly")
+	os.Mkdir(dir, 0o300)
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	p := markOne(t, plannedIn(t, dir, run), run)
+	if !p.Placed {
+		t.Fatalf("a root the agent can write but not read: want the marker placed, got %+v", p)
+	}
+	if r := recheckOne(p, run); r.State != "survived" {
+		t.Errorf("and rechecked: want survived, got %+v", r)
 	}
 }
 

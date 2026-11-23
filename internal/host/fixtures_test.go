@@ -137,7 +137,7 @@ var fixtures = []fixture{
 		expect: expectPER5(obs.NotFound, "something other than the reset may have removed it"), opts: noNet},
 	{name: "reset-refusing-root", image: "reset", volumes: []string{"/home/agent/persist", "/home/agent/locked"},
 		box: hooked(cleaner("/home/agent/persist")), opts: noNet,
-		expect: expectPER5(obs.Unknown, "/home/agent/locked took no marker: the agent can't write it (EACCES), so the survey didn't list it")},
+		expect: expectPER5(obs.Unknown, "/home/agent/locked took no marker: its current permissions don't let the agent write it (EACCES), so the survey didn't list it")},
 	{name: "reset-substitute", image: "reset", volumes: []string{"/home/agent/persist"}, box: hooked(substitute("/home/agent/persist")),
 		expect: expectSubstitute, opts: noNet},
 	{name: "reset-held-volume", image: "reset", volumes: []string{"/home/agent/persist"}, hold: true, tdErr: "volume",
@@ -171,10 +171,19 @@ var fixtures = []fixture{
 	sudors("norule", "plain", obs.NotFound, "", "run from "+sudoChain),
 	// a hardened agent: no capabilities and NoNewPrivs, under which the kernel ignores setuid and sudo-rs stops at once
 	sudors("hardened", "plain", obs.NotFound, "", "run from "+sudoChain, "--cap-drop", "ALL", "--security-opt", "no-new-privileges"),
-	sudors("root", "root", obs.Unknown, "", "the agent can write /usr/bin, so it could replace /usr/bin/sudo"),
-	sudors("writable-link", "agent", obs.Unknown, "", "the agent can write /etc/alternatives, so it could replace /etc/alternatives/sudo"),
-	sudors("writable-real", "agent", obs.Unknown, "", "the agent can write /opt/alt, so it could replace /opt/alt/alternatives/sudo"),
+	sudors("root", "root", obs.Unknown, "", "the agent is root and holds CAP_CHOWN"),
+	sudors("writable-link", "agent", obs.Unknown, "", "/etc/alternatives is writable by anyone"),
+	sudors("writable-real", "agent", obs.Unknown, "", "/opt/alt is writable by anyone"),
 	sudors("dangling", "agent", obs.Unknown, "", "its links can't be followed to a file"),
+	sudors("dirlinks", "agent", obs.Unknown, "", "more than 8 links on the way"),
+	sudors("owned", "agent", obs.Unknown, "", "/opt/own is owned by uid 1001, not root"),
+	// the agent (uid 1001) holding only CAP_FOWNER, launched through a wrapper that grants it; it redirected the chain
+	// to su while leaving every link root's, so a capability, not a mode, must stop the run
+	func() fixture {
+		f := sudors("fowner", "root", obs.Unknown, "", "the agent holds CAP_FOWNER, so")
+		f.box = func(d *DockerBox) Box { d.ProbePath = "/opt/fowner/probe"; return d }
+		return f
+	}(),
 }
 
 const sudoChain = "/usr/bin/sudo -> /etc/alternatives/sudo -> /usr/lib/cargo/bin/sudo"
