@@ -647,7 +647,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = save(o.folder, "legacy-standard-report.json", d); e != nil {
 		return e
 	}
-	page, e := report.HTML(d, "modern")
+	page, e := report.HTML(d, "graphite")
 	if e != nil {
 		return e
 	}

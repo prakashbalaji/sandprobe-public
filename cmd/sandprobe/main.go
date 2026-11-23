@@ -234,7 +234,7 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
   sandprobe explain <check>        what a check does, what a finding means, and its fix
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
--min <letter> to exit 6 below a grade; -theme modern|mission; -allow-local-proxy.
+-min <letter> to exit 6 below a grade; -theme graphite|mission; -allow-local-proxy.
 Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names a public canary you run, and
 -canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
 SANDPROBE_CANARY* variable aside. run docker always starts its own canary and takes no canary flag.

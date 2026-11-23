@@ -70,7 +70,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.canary, "canary", os.Getenv("SANDPROBE_CANARY"), "an operator canary's state file (deploy/canary.sh), used only when named; the hosted canary otherwise (HCN-5)")
 	fs.StringVar(&r.outDir, "out", "sandprobe-reports", "where the JSON and web reports go")
 	fs.StringVar(&r.min, "min", "", "exit 6 when the grade is below this letter")
-	fs.StringVar(&r.theme, "theme", "modern", "the web report's palette: modern or mission")
+	fs.StringVar(&r.theme, "theme", "graphite", "the web report's palette: graphite or mission")
 	fs.BoolVar(&r.allowLocalProxy, "allow-local-proxy", false, "docker, aws-nitro, and exec or a recipe with -provider-endpoints EGR-3: let EGR-3 use a proxy on the box's own loopback (UX-4); providers that exclude EGR-3 ignore or refuse it")
 	fs.StringVar(&r.setup, "setup", "", "sprites: your sandbox's setup script, run once in the new sprite before the checkpoint (SPR-1)")
 	fs.StringVar(&r.as, "as", "", "docker and exec: the agent's user in the box (docker default: the image's own user, else root)")
