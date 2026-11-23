@@ -1,13 +1,14 @@
 name: Release
 # REL-1 to REL-3. Every pull request: build the release twice, on separate runners from separate clean checkouts, and
 # compare every file byte for byte. A release (run by hand from main, naming its version): the same, then the version
-# check, a build attestation for each .gz, and the GitHub release with the tag v<version>.
+# check, a build attestation for each .gz, and the GitHub release with the tag v<version>, a pre-release never marked
+# Latest when the version is x.y.z-rc.N.
 on:
   pull_request:
   workflow_dispatch:
     inputs:
       version:
-        description: "The version to release, without a leading v; it must equal the CLI's Version"
+        description: "The version to release, x.y.z or x.y.z-rc.N, without a leading v; it must equal the CLI's Version"
         required: true
 permissions:
   contents: read
@@ -36,6 +37,8 @@ jobs:
           echo "workflows that could write contents: $writers"
           [ "$writers" = ".github/workflows/release.yml" ]
           python3 .github/workflow-writers.py
+      - name: A version is x.y.z, or x.y.z-rc.N as a pre-release (REL-2)
+        run: bash .github/release-version_test.sh
       - name: Build the release (REL-1)
         run: make release
       - name: The embedded probe carries the CLI's version (REL-2)
@@ -96,7 +99,8 @@ jobs:
           WANT: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          [[ "$WANT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          kind=$(bash .github/release-version.sh "$WANT")
+          echo "v$WANT publishes as: $kind"
           [ "$(sed -n 's/^const Version = "\(.*\)"$/\1/p' cmd/sandprobe/main.go)" = "$WANT" ]
           gunzip -c release/sandprobe-linux-amd64.gz > "$RUNNER_TEMP/sandprobe"
           chmod +x "$RUNNER_TEMP/sandprobe"
@@ -113,8 +117,11 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          kind=$(bash .github/release-version.sh "$VERSION")
+          flags=()
+          if [ "$kind" = prerelease ]; then flags=(--prerelease --latest=false); fi
           gh release create "v$VERSION" release/*.gz release/SHA256SUMS release/SHA256SUMS-binaries \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Sandprobe $VERSION" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Sandprobe $VERSION" "${flags[@]}" \
             --notes "$(cat <<NOTES
           Built twice on separate runners from $GITHUB_SHA and published only because both builds matched byte for byte (REL-2).
 
