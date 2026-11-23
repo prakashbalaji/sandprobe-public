@@ -664,6 +664,17 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   verification remain. Stop on a completed workload/assessment, suspected provider
   vulnerability or uncertain cleanup; no repetition to obtain a better grade.
 
+- **MEAS-5 Shared public canary for managed workloads.** Nitro and Daytona's standard
+  collectors use the same HCN-5 hosted URL and shipped control-key pin as the CLI.
+  Verify signed status and reserve one slot before collection; a failure stops the
+  assessment without an operator-canary fallback. Release the slot under a fresh,
+  bounded cleanup context even after cancellation, and report an unconfirmed release.
+  State HCN-4's retention in the managed guides. The separately bound run-owned
+  receiver remains only for its independent A/C delivery controls and restricted
+  receiver test: a shared public canary cannot establish reachability to that receiver.
+  Its original-ID cleanup remains mandatory. Do not delete the shared hosted service
+  or another run's resources. No idle dedicated receiver is retained after a run.
+
 - **SCR-4 Workload exposure headline.** The six-category scorecard (SCR-1)
   is the common exposure ranking for Nitro and Daytona workload runs. Compute it from
   the same standard observations and proofs using SCR-2, never from a supplied
@@ -2310,6 +2321,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-4 | existing managed original-ID cleanup and request-budget tests; retained accuracy-validation provenance |
 | MEAS-1/MEAS-2 | shared frozen binding, receiver lifecycle ordering, replay/identity/control/receipt/stop failures and positive-delivery grading |
 | MEAS-3 | bounded expected-ack/wrong-reply/EOF cases; host receipt requirements unchanged |
+| MEAS-5 | `TestManagedHostedCanaryLifecycle`, `TestManagedHostedCanaryFailureIsClosedAndSanitized`: local signed-control fixture, shipped trust anchors, reserved slot, release after cancellation, reservation failure, sanitization and unconfirmed-release recovery; CLI and managed collector regressions |
 | MEAS-4 | generic SSM/Docker transport fixtures, Daytona original-ID pre-finalization shutdown and cleanup recovery; fresh managed validation |
 | PRV-15 (identity) | `internal/probe/whoami_test.go` in `test/probe.sh`, as nobody and as root: the four uids from the kernel's Uid line, `-whoami` resolving names and numbers with no check run, and the shipped probe bound to another uid writing nothing and running no survey while bound to its own it runs; `cmd/sandprobe-probe` argument tests (`-expect-uid` binds a run only, never `-whoami` or `-quick`) |
 | PRV-15 (transport) | `internal/host/exec_test.go`: through a real `sh`, nothing runs before the preflight, a refused preflight stops everything, every run is bound with `-expect-uid`, banners outside the markers are ignored, SEC-1's twin is set, a pre-existing scratch path is left alone even when its "already exists" answer is lost, and a path the box swaps in during a run survives the wrapper's own trap (only a path carrying this box's owner token is ever removed, by the trap, the removal invocation or the suggested command), an invocation killed past its limit is cleared by the separate removal invocation, an unreachable box leaves the path and its removal command reported and blocks further runs, a command that fails after running the script counts for nothing, a removal through a failing command or under an unsearchable parent isn't "gone", arguments with shell syntax are refused; `TestExecBoxDocker` (SANDPROBE_FIXTURES=1): the shipped probe through `docker exec -i` as nobody, a switch to root refused with nothing written, no scratch left |

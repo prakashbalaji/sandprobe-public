@@ -309,6 +309,15 @@ func execute(ctx context.Context, o options) (err error) {
 	if e != nil || canary.Profile == "" || canary.Profile != os.Getenv("SANDPROBE_AWS_PROFILE") || canary.Region != "us-west-2" || canary.Domain() != "daytona-"+o.runID+".probe.ac0.dev" {
 		return errors.New("run canary binding failed")
 	}
+	public, e := host.OpenHostedCanary(ctx) // MEAS-5: the run-owned receiver keeps its independent calibration.
+	if e != nil {
+		return e
+	}
+	defer func() {
+		if host.CloseHostedCanary(public) != nil {
+			err = errors.New("hosted canary release unconfirmed")
+		}
+	}()
 	for _, arch := range []string{"amd64", "arm64"} {
 		if _, _, e := probes.Probe(arch); e != nil {
 			return errors.New("probe artifact unavailable")
@@ -438,7 +447,7 @@ func execute(ctx context.Context, o options) (err error) {
 		return e
 	}
 	stage = "standard-collection"
-	r, e := host.Execute(ctx, b, canary, collectionOptions(sha, contract))
+	r, e := host.Execute(ctx, b, public, collectionOptions(sha, contract))
 	if e != nil {
 		return errors.New("standard configuration collection failed")
 	}
@@ -453,7 +462,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if !r.Report.Valid {
 		r.Report.Invalid = "standard observation evidence invalid or incomplete"
 	}
-	d := report.Build(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment."})
+	d := report.Build(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	d.Statement = "Legacy generic diagnostic only. The primary workload configuration assessment is workload-report.json/html."
 	if e = save(o.folder, "legacy-standard-report.json", d); e != nil {
 		return e
