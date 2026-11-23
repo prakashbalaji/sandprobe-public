@@ -84,9 +84,11 @@ sandprobe run exec -as "$AGENT_USER" -y -- kubectl --kubeconfig "$KUBECONFIG" --
 any check if that user isn't `$AGENT_USER`, or if the pod has no such user. `amazonlinux:2023`, the EKS docs'
 example, runs as root. [`run exec`](exec.md#run-it) has the details.
 
-Both commands leave SEC-4, EGR-3, AMP-6 and AMP-7 off by default: each contacts the provider's own endpoints, and
-neither command knows who hosts your cluster. `run aws-nitro` excludes none of them. Read
-[Terms and consent](#terms-and-consent) before you turn any on with `-provider-endpoints`.
+Both commands leave SEC-4, EGR-3, AMP-6 and AMP-7 off by default, since neither knows who hosts your cluster. SEC-4,
+EGR-3 and AMP-7 would contact the provider's own endpoints: cloud metadata, the pod's proxy and the Kubernetes API.
+AMP-6 contacts nothing: it only checks for a vsock device, and on `run exec`'s existing pod it doesn't run at all.
+`run aws-nitro` excludes none of them. Read [Terms and consent](#terms-and-consent) before you turn any on with
+`-provider-endpoints`.
 
 ## What's skipped, and why
 
