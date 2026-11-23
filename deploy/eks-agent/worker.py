@@ -16,12 +16,24 @@ if sys.argv[1] == "prepare":
     for name in ["coding.py", "project_exec.py", "worker.py"]:
         metadata = os.lstat("/opt/sandprobe/" + name)
         assert stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0 and not metadata.st_mode & 0o022
+    created = False
     try:
         os.mkdir("/workspace/.cache", 0o700)
+        created = True
     except FileExistsError:
         pass
-    cache = os.lstat("/workspace/.cache")
-    assert stat.S_ISDIR(cache.st_mode) and cache.st_uid == 10001 and stat.S_IMODE(cache.st_mode) == 0o700
+    fd = os.open("/workspace/.cache", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        cache = os.fstat(fd)
+        assert stat.S_ISDIR(cache.st_mode) and cache.st_uid == 10001
+        # RUN-19: Kubernetes fsGroup volumes can inherit setgid on mkdir.
+        # Normalize only a newly created private directory, through its open fd.
+        if created:
+            assert stat.S_IMODE(cache.st_mode) in (0o700, 0o2700)
+            os.fchmod(fd, 0o700)
+        assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o700
+    finally:
+        os.close(fd)
     print(json.dumps({"worker_ready": True}))
 elif sys.argv[1] == "network":
     # Use a frozen, approved address and retain TLS hostname verification.

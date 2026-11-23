@@ -53,7 +53,7 @@ GUARD_FAILURES = frozenset({
     "unexpected_container_hook_or_arguments", "unexpected_task_command", "unexpected_pod_routing_or_process_override",
     "intended_identity_token_not_present", "returned_task_configuration_mismatch", "task_not_on_dedicated_enforcement_nodepool",
     "startup_network_policy_not_declared", "task_image_identity_mismatch", "task_pod_identity_missing", "invalid_config_projection",
-    "workload_home_configuration_mismatch",
+    "workload_home_configuration_mismatch", "pre_workload_contract_changed",
 })
 
 
@@ -656,6 +656,10 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
             home_context=guard['validate'](strict(raw.decode(),8192))
         except (ValueError,TypeError,KeyError):
             raise Failure('workload_home_configuration_mismatch') from None
+        # RUN-19: validated synthetic fixture metadata only, never directory contents.
+        phase = "after" if "workload_contract" in self.journal.data else "before"
+        self.journal.data["workload_home_" + phase] = home_context
+        self.journal.save()
         contract = {"schema": "sandprobe.workload-contract/1", "profile": "networked-coding-v1",
                 "managed_run_id": self.run_id, "box_id": self.journal.data["context"]["pod_uid"],
                 "image": self.image, "config_sha256": self.journal.data["context"]["config_sha256"],
@@ -687,7 +691,13 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
             output.write(encoded(evidence)); output.flush(); os.fsync(output.fileno())
 
     def verify_frozen_workload_contract(self, pod_name):
-        if self.workload_contract(pod_name) != self.journal.data.get("workload_contract"):
+        observed = self.workload_contract(pod_name)
+        frozen = self.journal.data.get("workload_contract", {})
+        if observed != frozen:
+            # RUN-19: persist source-defined field names, never untrusted values.
+            self.journal.data["workload_contract_changed_fields"] = sorted(
+                key for key in observed if observed[key] != frozen.get(key))
+            self.journal.save()
             raise Failure("pre_workload_contract_changed")
 
     def finalize_workload_grade(self, workload):

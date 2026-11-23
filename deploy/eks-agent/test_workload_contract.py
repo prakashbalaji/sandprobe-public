@@ -49,6 +49,7 @@ class WorkloadContractTests(unittest.TestCase):
             self.assertEqual(j.data['workload_contract']['token_inode'],1)
             with self.assertRaisesRegex(Failure,'pre_workload_contract_changed'):r.verify_frozen_workload_contract('original-pod')
             self.assertEqual(j.data['workload_contract']['token_inode'],1)
+            self.assertEqual(j.data['workload_contract_changed_fields'],['token_inode'])
             with self.assertRaisesRegex(Failure,'already_frozen'):r.freeze_workload_contract('original-pod')
             j.close()
 

@@ -90,7 +90,7 @@ finally:os.close(d)
 def perform(runner, pod, config_sha):
     root = runner.source_root
     status = {"schema": "sandprobe.host-controller/1", "deployment_pattern": "host_controller_no_guest_credentials", "model": MODEL,
-              "model_requests": 0, "model_request_count_uncertain": False, "stage": "execution"}
+              "model_requests": 0, "model_request_count_uncertain": False, "stage": "execution", "step": "worker_prepare"}
 
     def guest(*args, payload=None):
         return runner.kube("exec", "-i", pod, "-n", runner.ns, "--", *WORKLOAD_ENVIRONMENT, "python", "-I", *args,
@@ -107,6 +107,7 @@ def perform(runner, pod, config_sha):
         prepared = strict(guest("/opt/sandprobe/worker.py", "prepare").decode(), 4096)
         if prepared != {"worker_ready": True}:
             raise Failure("host_worker_preparation_failed")
+        status["step"] = "intended_model_tls"
         address = runner.journal.data["endpoint_resolution"]["ipv4"][0]
         network = strict(guest("/opt/sandprobe/worker.py", "network", address).decode(), 4096)
         if network != {"intended_model_tls": True}:
@@ -146,7 +147,8 @@ def perform(runner, pod, config_sha):
                 break
             previous = {"previous": parsed["previous"]}
     except Exception:
-        pass  # The fixed stage/count record preserves failure without SDK/model/guest diagnostics.
+        # RUN-19: never persist arbitrary exceptions or guest/provider diagnostics.
+        status["failure_code"] = (status["step"] if status["stage"] == "execution" else status["stage"]) + "_failed"
     finally:
         status["completed"] = task is not None
         path = runner.journal.folder / "host-controller-status.json"
