@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -60,5 +61,41 @@ func TestAgentResetClonesOnlyBoundOriginalJob(t *testing.T) {
 	bad, _ := json.Marshal(changed)
 	if _, _, err = agentResetJob(bad, b); err == nil {
 		t.Fatal("unbound job option accepted")
+	}
+}
+
+// RUN-23: exercise the actual Python renderer/hash rather than a Go fixture
+// whose encoding could agree with itself and differ from the managed parent.
+func TestAgentResetAcceptsPythonRenderedProfiles(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python renderer unavailable")
+	}
+	script := `import runpy,json,hashlib,sys
+n=runpy.run_path("../../deploy/eks-agent/render_profile.py")
+p=n["render"](sys.argv[1],sys.argv[2],"111122223333",n["LIGHTWEIGHT_MODEL"],["8.8.8.8"],"172.20.0.10",controller="host",storage_profile=sys.argv[3],workspace_volume={"id":"vol-"+"5"*17,"zone":"us-west-2a"})
+j=p["kubernetes"]["items"][-1]
+h=hashlib.sha256(json.dumps(j,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+j["spec"]["template"]["spec"]["containers"][0]["env"].append({"name":"SANDPROBE_CONFIG_SHA256","value":h})
+print(json.dumps({"hash":h,"job":j}))`
+	for _, profile := range []string{"persistent-workspace", "persistent-artifacts"} {
+		t.Run(profile, func(t *testing.T) {
+			b := agentFixture()
+			raw, err := exec.Command(python, "-I", "-c", script, b.RunID, b.Image, profile).Output()
+			if err != nil {
+				t.Fatal("actual Python renderer failed", err)
+			}
+			var rendered struct {
+				Hash string          `json:"hash"`
+				Job  json.RawMessage `json:"job"`
+			}
+			if json.Unmarshal(raw, &rendered) != nil {
+				t.Fatal("invalid render fixture")
+			}
+			b.ConfigSHA256 = rendered.Hash
+			if _, _, err = agentResetJob(rendered.Job, b); err != nil {
+				t.Fatal("Python configuration hash disagrees with reset", err)
+			}
+		})
 	}
 }
