@@ -26,6 +26,7 @@ from configuration_evidence import runtime_image_matches, verified_configuration
 # The operator's own AWS account and CLI profile, from the environment. Unset, every account check fails closed.
 ACCOUNT = os.environ.get("SANDPROBE_AWS_ACCOUNT", "")
 ROOT = Path(__file__).resolve().parents[2]
+completion_message = runpy.run_path(str(ROOT / "deploy/managed_status.py"))["completion_message"]
 STATE_ROOT = Path.home() / ".config/sandprobe/agent-evaluation"
 PROFILE = os.environ.get("SANDPROBE_AWS_PROFILE", "")
 KUBERNETES_VERSION = "1.37"
@@ -1319,8 +1320,12 @@ def main():
         journal.save()
         print(json.dumps(report, sort_keys=True))
         if scoped["security_grade"] == "F" or (assessment and assessment["configuration_grade"] in {"D", "F"}):
-            return 6
-        return 0 if (assessment and assessment["benchmark_requirements_met"] and clean and error is None) else 5
+            exit_code = 6
+        else:
+            exit_code = 0 if (assessment and assessment["benchmark_requirements_met"] and clean and error is None) else 5
+        print(completion_message(report["exposure_scorecard"], scoped["workload"] == "reported_passed",
+                                 clean, assessment, exit_code, error is None), file=sys.stderr)
+        return exit_code
     except (Exception, KeyboardInterrupt) as error:
         code = str(error) if isinstance(error, Failure) else "invalid_request_or_preflight_failed"
         # Failure values originate only in fixed messages, never SDK/subprocess text.
