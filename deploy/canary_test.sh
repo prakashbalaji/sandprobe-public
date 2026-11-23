@@ -108,13 +108,18 @@ for staging in 0 1; do
 done
 check "only staging skips WebPKI for the check" 'grep -q -- "-tls-insecure" "$LOG"'
 # RUN-20: no real network; the external clients are explicit stubs.
-cat >"$tmp/bin/openssl" <<'EOF'
+cat >"$tmp/bin/go" <<'EOF'
 #!/bin/sh
-case "$1" in
-s_client) [ "${TLS_FAIL:-0}" = 0 ] || { echo 'synthetic-private-diagnostic' >&2; exit 2; }; printf synthetic-public-key; [ "${TLS_CLOSE_FAIL:-0}" = 0 ] ;;
-x509 | pkey) cat ;;
-*) exit 9 ;;
+[ "$1 $2" = 'run ./deploy/canary-health' ] || exit 9
+[ -f deploy/canary-health/main.go ] || exit 9
+[ "${TLS_FAIL:-0}" = 0 ] || { echo unproven; echo synthetic-private-diagnostic >&2; exit 1; }
+[ "${TLS_BAD:-0}" = 0 ] || { echo synthetic-private-diagnostic; exit 0; }
+case "$*" in
+*'-pin invalid') echo invalid; exit 1 ;;
+*'-pin ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff') echo pin_mismatch; exit 1 ;;
 esac
+echo verified
+[ "${TLS_CLOSE_FAIL:-0}" = 0 ]
 EOF
 cat >"$tmp/bin/nc" <<'EOF'
 #!/bin/sh
@@ -125,21 +130,23 @@ read -r line
 echo sandprobe:health
 [ "${NC_CLOSE_FAIL:-0}" != "$4" ]
 EOF
-chmod +x "$tmp/bin/openssl" "$tmp/bin/nc"
+chmod +x "$tmp/bin/go" "$tmp/bin/nc"
 pin=$(printf synthetic-public-key | shasum -a 256 | cut -d' ' -f1)
-for scenario in tls tlsclose pin tcp22 tcp80 tcp8080 bad80 close80 success readonly; do
+for scenario in tls tlsclose invalid badresult pin tcp22 tcp80 tcp8080 bad80 close80 success readonly; do
   state
-  track=1 tls=0 tlsclose=0 nf=0 nb=0 nclose=0 expected=ready usepin=$pin
+  track=1 tls=0 tlsclose=0 tlsbad=0 nf=0 nb=0 nclose=0 expected=ready usepin=$pin
   case $scenario in
-    tls) tls=1; expected=tls_command_failed ;;
-    tlsclose) tlsclose=1; expected=tls_command_failed_matching_pin ;;
-    pin) usepin=wrong; expected=tls_pin_mismatch ;;
+    tls) tls=1; expected=tls_unproven ;;
+    tlsclose) tlsclose=1; expected=tls_unproven ;;
+    invalid) usepin=invalid; expected=tls_metadata_invalid ;;
+    badresult) tlsbad=1; expected=tls_unproven ;;
+    pin) usepin=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff; expected=tls_pin_mismatch ;;
     tcp*) nf=${scenario#tcp}; expected="tcp${nf}_transport_failed" ;;
     bad80) nb=80; expected=tcp80_health_mismatch ;;
     close80) nclose=80 ;;
     readonly) track=0; expected= ;;
   esac
-  out=$(TLS_FAIL=$tls TLS_CLOSE_FAIL=$tlsclose NC_FAIL=$nf NC_BAD=$nb NC_CLOSE_FAIL=$nclose bash -c 'source "$1"; track_readiness=$3; outside 192.0.2.1 "$2"' -- "$here/canary.sh" "$usepin" "$track" 2>&1) && rc=0 || rc=$?
+  out=$(cd "$tmp" && TLS_FAIL=$tls TLS_CLOSE_FAIL=$tlsclose TLS_BAD=$tlsbad NC_FAIL=$nf NC_BAD=$nb NC_CLOSE_FAIL=$nclose bash -c 'source "$1"; track_readiness=$3; outside 192.0.2.1 "$2"' -- "$here/canary.sh" "$usepin" "$track" 2>&1) && rc=0 || rc=$?
   stage=$(sed -n 's/^readiness_stage=//p' "$STATE" | tail -1)
   check "$scenario records only the fixed readiness stage" '[ "$stage" = "$expected" ] && ! grep -q synthetic-private-diagnostic "$STATE" && ! grep -q synthetic-private-diagnostic <<<"$out"'
   if [ "$scenario" = success ] || [ "$scenario" = readonly ] || [ "$scenario" = close80 ]; then

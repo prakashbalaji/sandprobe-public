@@ -4,6 +4,7 @@ on:
     paths:
       - deploy/eks-agent/**
       - deploy/canary.sh
+      - deploy/canary-health/**
       - cmd/sandprobe-agent-grade/**
       - internal/host/agent_nitro*
       - internal/host/workload_environment*

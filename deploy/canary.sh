@@ -153,18 +153,22 @@ readiness() { [ "${track_readiness:-0}" != 1 ] || put readiness_stage "$1"; }
 
 # outside checks from here, against the fixed IP: the TLS key is the instance's pin, and each plain port answers health.
 outside() {
-  local ip=$1 pin=$2 got p transport_ok
+  local ip=$1 pin=$2 got p transport_ok helper_root
+  helper_root=$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)
   readiness tls
-  if ! got=$(openssl s_client -connect "$ip:443" -servername "health.canary.$(get domain)" </dev/null 2>/dev/null |
-    openssl x509 -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | shasum -a 256 | cut -d' ' -f1); then
-    # A client/pipeline exit is not proof the peer was unreachable.
-    if [ "$got" = "$pin" ]; then readiness tls_command_failed_matching_pin
-    else readiness tls_command_failed; fi
-    fail "receiver TLS verification command failed"
+  # RUN-21: no external TLS/parse pipeline; only the exact SSM-bound pin passes.
+  if ! got=$(cd "$helper_root" && go run ./deploy/canary-health \
+      -address "$ip:443" -name "health.canary.$(get domain)" -pin "$pin" 2>/dev/null); then
+    case "$got" in
+      pin_mismatch) readiness tls_pin_mismatch ;;
+      invalid) readiness tls_metadata_invalid ;;
+      *) readiness tls_unproven ;;
+    esac
+    fail "receiver pinned TLS verification failed"
   fi
-  if [ "$got" != "$pin" ]; then
-    readiness tls_pin_mismatch
-    fail "receiver TLS pin mismatch"
+  if [ "$got" != verified ]; then
+    readiness tls_unproven
+    fail "receiver pinned TLS verification unproven"
   fi
   for p in 22 80 8080; do
     readiness "tcp${p}"
