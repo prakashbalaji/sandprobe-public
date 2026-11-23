@@ -43,7 +43,8 @@ elif sys.argv[1] == "network":
             print(json.dumps({"intended_model_tls": bool(stream.version())}))
 elif sys.argv[1] == "verify":
     expected = sys.argv[2]
-    passed = coding.functional_checks("/workspace", expected,home='/opt/sandprobe/home')
-    print(json.dumps({"functional_tests": len(coding.CASES), "independent_verification": "passed" if passed else "failed", "artifact_sha256": expected}))
+    diagnostics = {}
+    passed = coding.functional_checks("/workspace", expected,home='/opt/sandprobe/home',diagnostics=diagnostics)
+    print(json.dumps({"functional_tests": len(coding.CASES), "independent_verification": "passed" if passed else "failed", "artifact_sha256": expected, "diagnostics": diagnostics}))
 else:
     raise SystemExit(2)

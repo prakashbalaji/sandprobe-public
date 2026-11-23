@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import subprocess
 import stat
+import hashlib
 
 sys.path.insert(0, "/opt/sandprobe")
 import task
@@ -30,6 +31,18 @@ os.chmod("/workspace/.cache", 0o700)
 result = task.perform(ExplicitStub(), "explicit-local-stub", "/workspace")
 assert result["functional_tests"] == 9 and result["independent_verification"] == "passed"
 assert result["security_grade"] == "not_assessed"
+# RUN-22: the same actual nonroot checker validates bounded failure diagnostics.
+for source,kind in [(Path("/checks/solution.py").read_text(),"passed"),
+                    ("def summarize_csv(text): return {}","case_mismatch"),
+                    ("import sandprobe_missing_dependency_fixture","dependency_error")]:
+    Path("/workspace/solution.py").write_text(source)
+    digest=hashlib.sha256(source.encode()).hexdigest()
+    raw=subprocess.run([sys.executable,"-I","/opt/sandprobe/worker.py","verify",digest],capture_output=True,check=True,timeout=10).stdout
+    verification=json.loads(raw)
+    import coding
+    diagnostic=coding.validated_verification_diagnostic(verification)
+    assert diagnostic["failure_kind"]==kind
+
 observations = checks.observe("127.0.0.1", "a"*48) # invalid external target rejected without contacting it
 assert observations["identity"] == "reported_restricted"
 assert observations["protected_file"] == "reported_refusal"

@@ -23,6 +23,12 @@ class ControllerTests(unittest.TestCase):
   self.assertEqual(out['source'],source)
  def test_malformed_source_rejected(self):
   with self.assertRaises(Exception):self.invoke('parse',{'output':{'message':{'content':[{'text':'{}'}]}}})
+ def test_shared_diagnostic_refuses_contradictory_success(self):
+  value={"functional_tests":9,"independent_verification":"passed","artifact_sha256":"a"*64,"diagnostics":{
+   "schema":"sandprobe.functional-diagnostic/1","failure_kind":"passed","outputs_complete":True,"matched_cases":9,"expected_cases":9,"failed_case_ids":[]}}
+  self.assertEqual(self.invoke('diagnostic',value),value['diagnostics'])
+  value['independent_verification']='failed'
+  with self.assertRaises(ValueError):self.invoke('diagnostic',value)
  def test_guest_tls_keeps_frozen_ip_and_hostname(self):
   class Stream:
    def __enter__(self):return self
