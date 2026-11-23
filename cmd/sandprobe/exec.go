@@ -76,7 +76,7 @@ func (r runFlags) chooseCanary() (canaryChoice, error) {
 		if r.canary != "" || r.canaryURL != "" || r.canaryPin != "" {
 			return canaryChoice{}, fail("usage", "-no-canary can't be combined with -canary, -canary-url or -canary-pin", "pick one", exitUsage)
 		}
-		return canaryChoice{none: true, describe: noCanaryLine(nil, false)}, nil
+		return canaryChoice{none: true, describe: noCanaryLine(nil)}, nil
 	}
 	if r.canaryPin != "" && r.canaryURL == "" { // a pin names a canary the person trusts: never quietly use another one
 		return canaryChoice{}, fail("usage", "-canary-pin (or SANDPROBE_CANARY_PIN) needs -canary-url: the canary that pin is for", "-canary-url https://control.<domain> -canary-pin <pin>", exitUsage)
@@ -120,7 +120,7 @@ func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, a
 	}
 	contacts, named := []string{c.describe}, []string{"none: SEC-4, EGR-3, AMP-6 and AMP-7 are off, since they'd contact your provider's own endpoints (PRV-15)"}
 	if c.none { // HCN-5: the connections the attested checks still make are named, never hidden behind "no canary"
-		contacts[0] = noCanaryLine(attested, true)
+		contacts[0] = noCanaryLine(attested)
 	}
 	lines, extra, boxNamed := attestedPlan(attested, host.ExecExclusions(), true, c.none, "PRV-15")
 	if len(attested) > 0 {

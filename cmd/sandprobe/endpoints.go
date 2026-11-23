@@ -59,6 +59,9 @@ func attestedPlan(attested []string, off map[string]string, existing, noCanary b
 		if id == "AMP-6" && existing {
 			line += "; it still won't run, since an existing box gets no vsock connects (PRV-1)"
 		}
+		if id == "AMP-6" && !existing {
+			line += "; it only checks for a vsock device and connects to nothing, since the host ports to try aren't set yet"
+		}
 		if id == "EGR-3" && noCanary {
 			line += "; it still won't run, since it carries its nonce to a canary and -no-canary names none (HCN-5)"
 		}
@@ -95,9 +98,8 @@ func metadataContacts() []string {
 
 // noCanaryLine is HCN-5's plan line for -no-canary: no test traffic goes to any canary, and each connection the
 // checks turned on with -provider-endpoints still make is named (PRV-15): SEC-4's addresses from the catalog list the
-// probe dials (UX-4), AMP-7's handshake, and AMP-6's vsock connects on a box the run created. EGR-3 needs a canary, so
-// it makes none. existing is run exec's box, where AMP-6 never connects (PRV-1).
-func noCanaryLine(attested []string, existing bool) string {
+// probe dials (UX-4), and AMP-7's handshake. EGR-3 needs a canary and AMP-6 dials nothing, so neither is named.
+func noCanaryLine(attested []string) string {
 	line := "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run can't grade above C)"
 	var still []string
 	for _, id := range slices.Sorted(slices.Values(attested)) {
@@ -108,8 +110,6 @@ func noCanaryLine(attested []string, existing bool) string {
 				addrs = append(addrs, d.Addr)
 			}
 			still = append(still, "SEC-4 to the metadata addresses "+strings.Join(addrs, ", ")+", each listed here")
-		case id == "AMP-6" && !existing:
-			still = append(still, "AMP-6's vsock connects to the host, if the box has a vsock device")
 		case id == "AMP-7":
 			still = append(still, "AMP-7's TCP and TLS handshake, with no request, to a Kubernetes API the box's environment names")
 		}

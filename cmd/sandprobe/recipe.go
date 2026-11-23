@@ -97,7 +97,7 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string,
 	residual := withRetention(host.RecipeResidual(rc, b.Target, attested), c)
 	contacts, boxNamed := []string{c.describe}, []string{named}
 	if c.none { // HCN-5: the connections the attested checks still make are named, never hidden behind "no canary"
-		contacts[0] = noCanaryLine(attested, false)
+		contacts[0] = noCanaryLine(attested)
 	}
 	lines, extra, attestedNamed := attestedPlan(attested, recipeExclusions(rc), false, c.none, "RCP-4")
 	if len(attested) > 0 {
