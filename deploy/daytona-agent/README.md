@@ -24,10 +24,21 @@ permits the resolved IPv4 addresses of the fixed regional model endpoint; the
 workload checks its TLS certificate separately. The network configuration is
 unchanged for collection.
 
-The primary outputs are `workload-report.json/html` and `evaluation.json`, using
-our workload-aware grading. Legacy generic reports and raw observations remain
-separate so another scoring approach can be compared later without silently
-rewriting the measurement.
+SCR-4 makes RC's six-category exposure score the primary assessment.
+`evaluation.json` declares `primary_assessment: rc_exposure_scorecard` and includes
+`exposure_scorecard`; `exposure-scorecard.json` retains that score separately.
+`workload-report.html` leads with RC exposure, followed by the conditional workload
+configuration grade. `workload-report.json` is the configuration assessment.
+Legacy generic reports and raw observations remain separate diagnostic records.
+
+SCR-5 adds catalog-wide measurement coverage to source builds. Usable results,
+conclusive results and every skipped, missing, scoped-out, unknown or unproven
+check remain visible beside the score. Six green categories do not establish
+that every check was conclusively assessed. Changing ranking does not remove
+missing runtime-image/process proof or authorize additional endpoint checks.
+Nitro's managed profile uses guest-side model inference and an assigned model
+identity; this profile uses host-controller inference. That difference matters
+when comparing exposure scores.
 
 EVD-1 also exports `evidence-coverage.json` and includes an evidence section in
 the primary HTML. It uses the scorecard's six published category names (SCR-1) while
@@ -96,7 +107,9 @@ it makes no sandbox create or model request. Never delete by a guessed name.
 The script exits5 on incomplete execution, assessment or cleanup, and6 on a
 configuration exposure graded D/F. Exit0 requires passing workload/benchmark
 requirements and confirmed cleanup. Inspect the primary assessment for grade
-and unknowns; exit0 is not a deployment-security gate.
+and unknowns; exit0 is not a deployment-security gate or a claim of RC6/6.
+Exit5 can accompany a passed nine-case workload when configuration evidence is
+incomplete. Check workload success, RC exposure, coverage and cleanup separately.
 
 Run records remain private until credential-scanned and reviewed for internal
 publication. Neither exported records nor host declarations are attestations.
