@@ -87,6 +87,9 @@ func kind(c catalog.Check) string {
 // Validate checks exported consistency only. The saved letter is unverified and
 // never used for profile/comparison decisions (ANL-1); raw proofs are unavailable.
 func Validate(d *report.Doc) error {
+	if c := d.Manifest.WorkloadContract; c != nil && c.Schema == "sandprobe.workload-contract/3" && d.Run.Provider != "aws-nitro" {
+		return ErrInput
+	}
 	if hosts := d.Manifest.Targets["EGR-6"]; len(hosts) > 0 && (!slices.Contains(d.Manifest.Selected, "EGR-6") || catalog.ValidateUploadHosts(hosts) != nil) {
 		return ErrInput
 	}

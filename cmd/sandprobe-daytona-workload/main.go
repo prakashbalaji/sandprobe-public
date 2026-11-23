@@ -158,13 +158,21 @@ func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byt
 }
 func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 	result := taskResult{Schema: "sandprobe.agent-task/2", Workload: "synthetic-coding-v1", Model: "mistral.ministral-3-3b-instruct", Pattern: "host_controller_no_guest_credentials", Independent: "failed"}
-	files := map[string]string{"coding.py": "deploy/eks-agent/coding.py", "project_exec.py": "deploy/eks-agent/project_exec.py", "worker.py": "deploy/daytona-agent/worker.py"}
+	files := map[string]string{"coding.py": "deploy/eks-agent/coding.py", "project_exec.py": "deploy/eks-agent/project_exec.py", "worker.py": "deploy/eks-agent/worker.py"}
 	for name, path := range files {
 		data, e := os.ReadFile(filepath.Join(o.root, path))
 		if e != nil || b.WorkloadUpload(ctx, name, data) != nil {
 			result.Stage = "artifact_prepare"
 			return result
 		}
+	}
+	prepared, e := b.WorkloadCommand(ctx, "python3 -I /opt/sandprobe/worker.py prepare")
+	var preparation struct {
+		Ready bool `json:"worker_ready"`
+	}
+	if e != nil || json.Unmarshal(prepared, &preparation) != nil || !preparation.Ready {
+		result.Stage = "artifact_prepare"
+		return result
 	}
 	result.Stage = "intended_network"
 	address := strings.TrimSuffix(strings.Split(o.network, ",")[0], "/32")

@@ -258,7 +258,7 @@ func TestReportSchemaVersions(t *testing.T) {
 	} {
 		var out, errs bytes.Buffer
 		code := run([]string{"scorecard", tc.path}, &out, &errs)
-		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 report file") {
+		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 report file") {
 			t.Errorf("%s: exit %d, %s", name, code, errs.String())
 		}
 	}

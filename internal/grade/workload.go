@@ -84,11 +84,11 @@ func WorkloadGrade(m obs.Manifest, raw []byte, evidence *obs.CanaryEvidence, wor
 		}
 	}
 	uid, gid := 10001, 10001
-	if c.Schema == "sandprobe.workload-contract/2" {
+	if c.Schema == "sandprobe.workload-contract/2" || c.Schema == "sandprobe.workload-contract/3" {
 		// WGR-7: the provider-specific principal was frozen before execution.
 		uid, gid = c.AgentUID, c.AgentGID
 		r.Limits[3] = "Identity verification concerns the no-guest-credentials declaration; host controller permissions are outside the sandbox assessment."
-		r.Limits = append(r.Limits, "Host-controller model calls with no guest model credentials are a different deployment pattern from Nitro in-guest inference; compare control coverage explicitly.",
+		r.Limits = append(r.Limits, "Compare host-controller runs with other host-controller runs; legacy Nitro in-guest inference uses a different deployment pattern and identity.",
 			"The identity-policy digest binds a no-guest-credentials declaration; it is not an effective-permission audit or attestation.")
 		if c.ImageContentVerified {
 			add("image-content-binding", "required", obs.Pass, "Host declared verification of the exact OCI image digest; not attestation.")

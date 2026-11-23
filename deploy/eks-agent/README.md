@@ -1,5 +1,17 @@
 # Managed network-enabled EKS coding evaluation
 
+For a comparable Daytona evaluation, select the explicit Nitro host-controller mode:
+`--controller host --model-python /path/to/pinned-bedrock-sdk/bin/python`.
+Both providers then use the same model protocol, maximum two requests, nine sandbox
+functional cases and UID/GID10001, with model credentials confined to the trusted
+controller. Nitro creates no model role or Pod Identity association in this mode;
+the host verifies their absence, the two ephemeral mounts, fixed environment,
+read-only pinned image and original pod/container identity before and after work.
+The new contract/report use version3; existing guest-mode runs retain version1.
+The default remains guest mode for compatibility. Kernel/filesystem controls differ
+by provider and remain explicit in the evidence; equivalent intent is not identical
+provider implementation or an assurance claim.
+
 Standard probe checks use RC's shared hosted canary at `control.pub.probe.ac0.dev`,
 verified under the control-key pin shipped with the CLI. It keeps the guest IP and
 run nonces in memory for at most 30 minutes and the controller IP in a rate counter

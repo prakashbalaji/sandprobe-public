@@ -32,6 +32,6 @@ class ControllerTests(unittest.TestCase):
   context=types.SimpleNamespace(wrap_socket=lambda conn,server_hostname:(calls.append(server_hostname) or Stream()))
   def connect(addr,timeout):calls.append(addr);return Stream()
   with patch.dict(sys.modules,{'coding':c.coding}),patch.object(sys,'argv',['worker','network','52.94.0.1']),patch('socket.create_connection',side_effect=connect),patch('ssl.create_default_context',return_value=context),contextlib.redirect_stdout(io.StringIO()):
-   runpy.run_path(str(Path(__file__).with_name('worker.py')),run_name='__main__')
+   runpy.run_path(str(Path(__file__).resolve().parents[1]/'eks-agent/worker.py'),run_name='__main__')
   self.assertEqual(calls,[('52.94.0.1',443),'bedrock-runtime.us-west-2.amazonaws.com'])
 if __name__=='__main__':unittest.main()

@@ -112,6 +112,13 @@ func ValidateWorkloadContract(c *WorkloadContract) error {
 		} else if !workloadImage.MatchString(c.Image) {
 			return errors.New("invalid image binding")
 		}
+	case "sandprobe.workload-contract/3": // RUN-17: explicit Nitro host-controller identity, never a schema1 waiver.
+		if c.Provider != "aws-nitro" || c.IdentityMode != "host_controller_no_guest_credentials" ||
+			c.AgentUID != 10001 || c.AgentGID != 10001 || c.SnapshotID != "" || !c.ImageContentVerified ||
+			!workloadImage.MatchString(c.Image) || !workloadHex.MatchString(c.AgentHomeSHA256) ||
+			c.TokenCanonical != "" || c.TokenDevice != 0 || c.TokenInode != 0 {
+			return errors.New("invalid Nitro host-controller contract")
+		}
 	default:
 		return errors.New("unsupported workload contract schema")
 	}

@@ -20,7 +20,9 @@ runs on the trusted host; generated code executes only inside the original owned
 Daytona sandbox. No operator, model or Daytona management credentials enter the guest.
 The host model client uses the exact hash-locked Nitro boto3/botocore environment;
 its version, request shape and experiment-account identity are checked before provisioning.
-This deployment pattern differs from Nitro's in-guest model inference.
+Compare with Nitro's explicit `--controller host --model-python <pinned interpreter>` mode,
+which uses the same host-controller pattern and shared worker. Legacy Nitro guest-mode
+runs contain an assigned model identity and must be labeled separately.
 
 Trusted management first records its actual guest UID and utility availability.
 When needed it uses the image's configured noninteractive administrator, separately

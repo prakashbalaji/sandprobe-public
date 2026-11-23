@@ -8,9 +8,14 @@ import sys
 REGION = "us-west-2"
 HOSTNAME = f"bedrock-runtime.{REGION}.amazonaws.com"
 LIGHTWEIGHT_MODEL = "mistral.ministral-3-3b-instruct"
+IDLE_COMMAND = ["python", "-I", "-c", "import time;time.sleep(1800)"]
 
 
-def render(run_id, image, account, model, endpoint_ips, dns_ip):
+def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="guest"):
+    if controller == "host" and model != LIGHTWEIGHT_MODEL:
+        raise ValueError("host controller requires the fixed regional model")
+    if controller not in {"guest", "host"}:
+        raise ValueError("invalid controller pattern")
     if not re.fullmatch(r"[0-9a-f]{16}", run_id):
         raise ValueError("invalid run identity")
     if not re.fullmatch(r"[0-9]{12}", account):
@@ -79,7 +84,7 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip):
          "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 180, "completions": 1,
                   "parallelism": 1, "template": pod}},
     ]
-    return {"schema": "sandprobe.networked-agent-plan/1", "live_status": "not_executed",
+    plan = {"schema": "sandprobe.networked-agent-plan/1", "live_status": "not_executed",
             "security_grade": "not_assessed", "run_id": run_id,
             "endpoint_context": {"hostname": HOSTNAME, "ipv4": sorted(ips),
                                  "provenance": "caller_supplied_unverified"},
@@ -99,6 +104,16 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip):
                        "Endpoint changes fail connectivity; regenerate rather than broaden policy.",
                        "The intended workload-role credential is authorized; operator credentials are never mounted.",
                        "No protected-resource/reset calibration or overall security grade is supplied."]}
+    if controller == "host":
+        container["command"] = list(IDLE_COMMAND)
+        for resource in items:
+            if resource.get("kind") == "NetworkPolicy" and resource["metadata"]["name"] == "model-task-egress":
+                resource["spec"]["egress"] = resource["spec"]["egress"][:2]
+        plan["iam_policy"] = None
+        plan["deployment_pattern"] = "host_controller_no_guest_credentials"
+        plan["prerequisites"][4] = "Pinned host model client/account; no guest role or identity association"
+        plan["limits"][-2] = "Model credentials remain on the trusted controller; no guest identity is assigned."
+    return plan
 
 
 class FixedErrorParser(argparse.ArgumentParser):
@@ -111,9 +126,10 @@ def main():
     for name in ["run-id", "image", "account", "model", "dns-ip"]:
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--endpoint-ip", action="append", required=True)
+    parser.add_argument("--controller", choices=["guest", "host"], default="guest")
     try:
         args = parser.parse_args()
-        plan = render(args.run_id, args.image, args.account, args.model, args.endpoint_ip, args.dns_ip)
+        plan = render(args.run_id, args.image, args.account, args.model, args.endpoint_ip, args.dns_ip, controller=args.controller)
     except ValueError:
         print("profile: unsupported or unsafe configuration", file=sys.stderr)
         return 2
