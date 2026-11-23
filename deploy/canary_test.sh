@@ -34,6 +34,7 @@ state() {
   printf '%s\n' did=feedc0de zone=z1 domain=probe.example dns=rec1 instance=i-0123456789abcdef0 volume=vol-0123456789abcdef0 \
     eip=eipalloc-0123456789abcdef0 sg=sg-0123456789abcdef0 iprofile=sandprobe-canary-feedc0de role=sandprobe-canary-feedc0de \
     bucket=sandprobe-canary-feedc0de >"$STATE"
+  chmod 600 "$STATE"
   : >"$LOG"
 }
 fails=0
@@ -106,4 +107,44 @@ for staging in 0 1; do
   check "publiccheck runs with ACME_STAGING=$staging" '[ $rc -eq 0 ] && grep -q "canary check .*-canary-url https://control.pub.example -canary-pin 0123" "$LOG"'
 done
 check "only staging skips WebPKI for the check" 'grep -q -- "-tls-insecure" "$LOG"'
+# RUN-20: no real network; the external clients are explicit stubs.
+cat >"$tmp/bin/openssl" <<'EOF'
+#!/bin/sh
+case "$1" in
+s_client) [ "${TLS_FAIL:-0}" = 0 ] || { echo 'synthetic-private-diagnostic' >&2; exit 2; }; printf synthetic-public-key ;;
+x509 | pkey) cat ;;
+*) exit 9 ;;
+esac
+EOF
+cat >"$tmp/bin/nc" <<'EOF'
+#!/bin/sh
+read -r line
+[ "$line" = health ] || exit 9
+[ "${NC_FAIL:-0}" != "$4" ] || { echo 'synthetic-private-diagnostic' >&2; exit 2; }
+[ "${NC_BAD:-0}" != "$4" ] || { echo synthetic-private-diagnostic; exit 0; }
+echo sandprobe:health
+[ "${NC_CLOSE_FAIL:-0}" != "$4" ]
+EOF
+chmod +x "$tmp/bin/openssl" "$tmp/bin/nc"
+pin=$(printf synthetic-public-key | shasum -a 256 | cut -d' ' -f1)
+for scenario in tls pin tcp22 tcp80 tcp8080 bad80 close80 success readonly; do
+  state
+  track=1 tls=0 nf=0 nb=0 nclose=0 expected=ready usepin=$pin
+  case $scenario in
+    tls) tls=1; expected=tls_transport_failed ;;
+    pin) usepin=wrong; expected=tls_pin_mismatch ;;
+    tcp*) nf=${scenario#tcp}; expected="tcp${nf}_transport_failed" ;;
+    bad80) nb=80; expected=tcp80_health_mismatch ;;
+    close80) nclose=80 ;;
+    readonly) track=0; expected= ;;
+  esac
+  out=$(TLS_FAIL=$tls NC_FAIL=$nf NC_BAD=$nb NC_CLOSE_FAIL=$nclose bash -c 'source "$1"; track_readiness=$3; outside 192.0.2.1 "$2"' -- "$here/canary.sh" "$usepin" "$track" 2>&1) && rc=0 || rc=$?
+  stage=$(sed -n 's/^readiness_stage=//p' "$STATE" | tail -1)
+  check "$scenario records only the fixed readiness stage" '[ "$stage" = "$expected" ] && ! grep -q synthetic-private-diagnostic "$STATE" && ! grep -q synthetic-private-diagnostic <<<"$out"'
+  if [ "$scenario" = success ] || [ "$scenario" = readonly ] || [ "$scenario" = close80 ]; then
+    check "$scenario keeps success" '[ $rc -eq 0 ]'
+  else
+    check "$scenario remains failed" '[ $rc -ne 0 ]'
+  fi
+done
 exit $fails
