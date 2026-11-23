@@ -38,7 +38,7 @@ type view struct {
 	Map                                                                                      template.HTML
 	Findings, Unknowns, NotProven                                                            []card
 	Passes                                                                                   []group
-	Skipped, Identity, Hosts, Markers, Reset, Calls                                          [][2]string
+	Skipped, Identity, Hosts, Markers, Reset, Calls, Attested                                [][2]string
 	ScopedOut, NotTested, Notes                                                              []string
 	Cleanup, Residual, Saved                                                                 string
 	Data                                                                                     Doc
@@ -267,6 +267,13 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 			byCat[ck.Category].Checks = append(byCat[ck.Category].Checks, c)
 		case "skipped":
 			v.Skipped = append(v.Skipped, [2]string{ck.ID + " · " + ck.Title, ck.Reason})
+		}
+		if ck.Attestation != "" { // PRV-15: shown for every run, valid or not
+			result := ck.Result
+			if ck.Reason != "" {
+				result += " (" + ck.Reason + ")"
+			}
+			v.Attested = append(v.Attested, [2]string{ck.ID + " · " + ck.Title, ck.Attestation + " Result: " + result + "."})
 		}
 	}
 	v.NotProvenN = len(v.NotProven)

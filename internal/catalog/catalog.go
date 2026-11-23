@@ -41,6 +41,26 @@ type Variant struct {
 // TLS handshake EGR-2 makes to it.
 func NeedsCanary(c *Check) bool { return c.Canary != nil || c.ID == "EGR-4" }
 
+// SEC-4's fixed metadata addresses (SBX-3), each with its port.
+const (
+	MetadataIMDS        = "169.254.169.254:80" // AWS and GCP instance metadata
+	MetadataECS         = "169.254.170.2:80"   // the ECS credential endpoint
+	MetadataPodIdentity = "169.254.170.23:80"  // EKS Pod Identity
+)
+
+// Destination is a fixed address a check may contact: what it is, when it's contacted, and what is sent.
+type Destination struct{ Addr, What, When, How string }
+
+// Metadata is every fixed address SEC-4 may contact (UX-4): the probe dials exactly these, and every plan and report
+// names them from here, each with its port and condition, so the plan and the probe can't disagree.
+var Metadata = []Destination{
+	{Addr: MetadataIMDS, What: "AWS and GCP instance metadata", How: "role and service-account listings only, never a credential"},
+	{Addr: MetadataECS, What: "the ECS credential endpoint", When: "only if the agent's environment names it (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)",
+		How: "a connection only, no request"},
+	{Addr: MetadataPodIdentity, What: "EKS Pod Identity", When: "only if the agent's environment names it (AWS_CONTAINER_CREDENTIALS_FULL_URI)",
+		How: "a connection only, no request"},
+}
+
 // ProviderEndpoints are the checks that contact a provider-owned endpoint: the only ones a provider's rules (PRV-5) or
 // PRV-15's and RCP-4's defaults may exclude (GRD-3), and the only ones a skip kind may name (SCR-2).
 var ProviderEndpoints = map[string]bool{"SEC-4": true, "AMP-6": true, "AMP-7": true, "EGR-3": true}
