@@ -8,7 +8,8 @@
 ## Prerequisites
 
 - An installed `sandprobe`. The recipe is built into it, so you don't need a clone of this repository.
-- `kubectl`, and a kubeconfig context for the cluster.
+- `kubectl`, and a kubeconfig context for the cluster. `kubectl` reads the kubeconfig that `KUBECONFIG` names, or
+  `~/.kube/config` when it's unset. If your cluster's context is in another file, set `KUBECONFIG` to that file.
 - In the namespace you name: permission to create, get and delete pods, and to create `pods/exec`. The plan checks
   this with `kubectl auth can-i` before anything is created.
 
@@ -22,24 +23,66 @@ often holds production clusters too.
 | `SANDPROBE_KUBE_CONTEXT` | Required. The kubeconfig context to create the pod in. |
 | `SANDPROBE_KUBE_NAMESPACE` | Optional. Defaults to `default`. |
 | `SANDPROBE_KUBE_IMAGE` | Optional. Defaults to the debian image pinned by digest in `test/probe.sh`. |
-| `SANDPROBE_KUBE_OVERRIDES` | Optional. A JSON merge patch over the generated pod: your agent's `securityContext`, `serviceAccountName`, `runtimeClassName`, `nodeSelector` and so on. |
+| `SANDPROBE_KUBE_OVERRIDES` | Optional. The path to a file that holds a JSON merge patch over the generated pod: your agent's `securityContext`, `serviceAccountName`, `runtimeClassName`, `nodeSelector` and so on. `kubectl` reads the file with `--patch-file`. Inline JSON isn't a file, so the run stops with "can't read SANDPROBE_KUBE_OVERRIDES". A `containers` list replaces the generated one, so give it the image and a long-running command. |
+| `KUBECONFIG` | Optional, and `kubectl`'s own setting: the kubeconfig file that holds the context. If it's unset, `kubectl` reads `~/.kube/config`. |
 
 ## Run it
 
 ```sh
-SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe plan kubernetes -as agent
-SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as agent -y
+AGENT_USER=root   # set it to the user your agent runs as in the pod; the default debian image runs as root
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe plan kubernetes -as "$AGENT_USER"
+SANDPROBE_KUBE_CONTEXT=my-cluster sandprobe run kubernetes -as "$AGENT_USER" -y
+```
+
+If the cluster's context is in another kubeconfig file, name that file with `KUBECONFIG`:
+
+```sh
+AGENT_USER=root   # the user your agent runs as in the pod
+KUBECONFIG=$HOME/.kube/staging.yaml SANDPROBE_KUBE_CONTEXT=staging sandprobe run kubernetes -as "$AGENT_USER" -y
 ```
 
 The pod carries `activeDeadlineSeconds: 3600`, so it stops on its own if cleanup never comes. It is deleted only
 through its UID, as a precondition, so no other pod can be deleted. If the plan's context, API server, namespace or
 cluster settings change during the run, every later call refuses.
 
+### Who the probe runs as: `-as`
+
+`-as` takes the user your agent really runs as in the pod: a name, or a numeric uid. It doesn't switch users.
+`kubectl exec` runs as the container's user, and `-as` checks that user before any check runs. The default debian
+image has no `agent` user and runs as root. To run as your agent's user, set it in your overrides
+(`securityContext.runAsUser`), or use your agent's own image with `SANDPROBE_KUBE_IMAGE`.
+
+- If the pod's `/etc/passwd` has no user by that name, the run stops before any check with
+  `the box has no user "agent"`. The pod already exists by then, so Sandprobe deletes it, and the run exits 5 (7 if
+  the delete isn't confirmed). A numeric uid, such as `-as 1000`, doesn't need a passwd entry.
+- If the user exists but the pod runs as someone else, the run stops in the same way, for example with
+  `the command runs as uids 0/0/0/0, not agent's 1000`.
+- Without `-as`, the probe runs as the pod's user, and the report says that user isn't confirmed as the agent's.
+
+### AWS Nitro Sandboxes on your own EKS cluster
+
+To grade a pod with the `isolated-sandbox` runtime class, put the runtime class in an overrides file:
+
+```sh
+cat > nitro-overrides.json <<'EOF'
+{"spec": {"runtimeClassName": "isolated-sandbox"}}
+EOF
+AGENT_USER=root   # the user your agent runs as in the pod
+SANDPROBE_KUBE_CONTEXT=my-eks SANDPROBE_KUBE_OVERRIDES=./nitro-overrides.json \
+  sandprobe run kubernetes -as "$AGENT_USER" -y
+```
+
+The cluster must offer that runtime class: `kubectl get runtimeclass isolated-sandbox` names it. For the cluster that
+`deploy/eks.sh up` makes, `PROFILE="$AWS_PROFILE" deploy/eks.sh status` prints its kubeconfig and its
+cluster name. Set `KUBECONFIG` to that kubeconfig and `SANDPROBE_KUBE_CONTEXT` to the cluster name, which is also
+the context's name. The four checks below stay off by default under the recipe, while `run aws-nitro` excludes none
+of them ([AWS Nitro on EKS](aws-nitro.md)).
+
 ## What's skipped, and why
 
 | Check | Why |
 |-|-|
-| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default. Whoever hosts the cluster has terms the recipe can't know, so the checks that contact a provider's own endpoints stay off (the recipe's header, PRV-16). |
+| SEC-4, EGR-3, AMP-6, AMP-7 | Off by default, since whoever hosts the cluster has terms the recipe can't know (the recipe's header, PRV-16). SEC-4, EGR-3 and AMP-7 would contact the provider's own endpoints: cloud metadata, the pod's proxy, the Kubernetes API. AMP-6 only checks for a vsock device and connects to nothing. |
 | PER-5 | The recipe has no reset (RCP-3). |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 
@@ -47,7 +90,8 @@ cluster settings change during the run, every later call refuses.
 
 The recipe's header says: "Kubernetes is Apache-2.0 software and the cluster is yours. Whoever hosts it (EKS, GKE,
 AKS) has terms this recipe can't know, so the checks that contact a provider's own endpoints stay off." Read your
-host's terms before you turn any of them on.
+host's terms before you turn any of them on. For EKS, [AWS Nitro on EKS](aws-nitro.md#terms-and-consent) quotes
+AWS's penetration testing policy.
 
 ## What the score can and can't reach
 

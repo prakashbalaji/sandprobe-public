@@ -28,17 +28,21 @@ const nitroResidual = "Pods are reached by name (the readiness check, the upload
 // podImage is the EKS docs' own example of an isolated pod (PRV table).
 const podImage = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 
+// eksFix starts each command a fix names: deploy/eks.sh needs PROFILE, your AWS CLI profile, and has no default
+// for it. Taken from AWS_PROFILE, the fix runs as pasted; with that unset, eks.sh says to set PROFILE.
+const eksFix = `PROFILE="$AWS_PROFILE" deploy/eks.sh`
+
 // eksTarget is the only EKS deployment deploy/eks.sh recorded: its kubeconfig and the context named for its cluster,
 // bound to the cluster by the API endpoint recorded when the cluster was made, so no edit to the kubeconfig can send a
 // run to another cluster.
 func eksTarget() (kc, context string, err error) {
 	found, _ := filepath.Glob(filepath.Join(configDir(), "eks-*.state"))
 	if len(found) != 1 {
-		return "", "", fail("not_logged_in", "no single EKS cluster of Sandprobe's own found", "deploy/eks.sh up", exitLogin)
+		return "", "", fail("not_logged_in", "no single EKS cluster of Sandprobe's own found", eksFix+" up", exitLogin)
 	}
 	b, err := os.ReadFile(found[0])
 	if err != nil {
-		return "", "", fail("not_logged_in", "the EKS state can't be read", "deploy/eks.sh status", exitLogin)
+		return "", "", fail("not_logged_in", "the EKS state can't be read", eksFix+" status", exitLogin)
 	}
 	kv := map[string]string{}
 	for _, line := range strings.Split(string(b), "\n") {
@@ -48,13 +52,13 @@ func eksTarget() (kc, context string, err error) {
 	}
 	kc, context = kv["kubeconfig"], kv["cluster"]
 	if kc == "" || context == "" || kv["endpoint"] == "" {
-		return "", "", fail("not_logged_in", "the EKS deployment isn't whole yet", "deploy/eks.sh status", exitLogin)
+		return "", "", fail("not_logged_in", "the EKS deployment isn't whole yet", eksFix+" status", exitLogin)
 	}
 	if err := bindContext(kc, context, kv["endpoint"]); err != nil {
-		return "", "", fail("not_logged_in", err.Error(), "deploy/eks.sh status", exitLogin)
+		return "", "", fail("not_logged_in", err.Error(), eksFix+" status", exitLogin)
 	}
 	if exec.Command("kubectl", "--kubeconfig", kc, "--context", context, "get", "runtimeclass", "isolated-sandbox", "-o", "name").Run() != nil {
-		return "", "", fail("not_logged_in", "the cluster doesn't answer, or offers no isolated-sandbox runtime class", "deploy/eks.sh status", exitLogin)
+		return "", "", fail("not_logged_in", "the cluster doesn't answer, or offers no isolated-sandbox runtime class", eksFix+" status", exitLogin)
 	}
 	return kc, context, nil
 }
@@ -186,13 +190,13 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		defer tcancel()
 		step("deleting pod %s", pod.Name)
 		if terr := pod.Destroy(tctx); terr != nil {
-			cleanup, cleaned = fmt.Sprintf("NOT confirmed deleted: delete pod %s (%s) by hand, or run deploy/eks.sh down", pod.Name, pod.UID), false
+			cleanup, cleaned = fmt.Sprintf("NOT confirmed deleted: delete pod %s (%s) by hand, or run %s down", pod.Name, pod.UID, eksFix), false
 			fmt.Fprintf(stderr, "sandprobe: %s\n  %v\n", cleanup, terr)
 		}
 	}
 	if err != nil {
 		teardown()
-		return 0, fail("provider_error", err.Error(), "deploy/eks.sh status", failExit(cleaned))
+		return 0, fail("provider_error", err.Error(), eksFix+" status", failExit(cleaned))
 	}
 	var run *host.Run
 	bin, sum, err := probes.Probe(pod.Arch)

@@ -61,6 +61,17 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(Failure, "command_unavailable_or_timed_out"):
             commands.call([sys.executable, "-c", "import time;time.sleep(5)"], timeout=0.05)
 
+    def test_commands_keep_the_last_exit_code(self):
+        commands = Commands()
+        commands.call([sys.executable, "-c", "pass"])
+        self.assertEqual(commands.last_returncode, 0)
+        with self.assertRaisesRegex(Failure, "^command_failed$"):
+            commands.call([sys.executable, "-c", "import sys;sys.exit(3)"])
+        self.assertEqual(commands.last_returncode, 3)
+        with self.assertRaisesRegex(Failure, "command_unavailable_or_timed_out"):
+            commands.call([sys.executable, "-c", "import time;time.sleep(5)"], timeout=0.05)
+        self.assertIsNone(commands.last_returncode)
+
     def test_fifo_state_is_rejected_without_blocking(self):
         with tempfile.TemporaryDirectory() as root:
             j = Journal(root, "a"*16, create=True)
