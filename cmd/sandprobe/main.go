@@ -223,8 +223,8 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
                                    also test cloud access, attesting your provider's terms allow it on your account
   sandprobe run kubernetes [-as <user>] -y
                                    grade a throwaway pod in your cluster, by recipe; set SANDPROBE_KUBE_CONTEXT (PRV-16)
-  sandprobe canary check -canary-url <url> -canary-pin <pin>
-                                   ask a public canary for its signed status (HCN-1); reserves nothing
+  sandprobe canary check [-canary-url <url> -canary-pin <pin>]
+                                   ask the hosted canary, or one you name, for its signed status; reserves nothing
   sandprobe cleanup baseten -baseten-state <journal> -y  verify/delete a retained sandbox
   sandprobe cleanup exe.dev -exedev-state <journal> -y   reconcile a recorded VM
   sandprobe scorecard <report.json>  the six-category score of a saved report; -out <dir> re-renders its page (offline)

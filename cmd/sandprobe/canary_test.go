@@ -294,6 +294,64 @@ func TestNativeRunOnTheHostedCanary(t *testing.T) {
 	}
 }
 
+// HCN-7: canary check with nothing named, beside a stray operator state file, asks the canary a run would use: the
+// hosted one under this release's pin, here a stand-in on a local port. It names that canary in text and JSON and
+// reserves nothing. An operator canary, which answers only over SSM, and -tls-insecure without -canary-url are refused
+// before any canary is asked, and a canary that doesn't sign under the pin is unproven.
+func TestCanaryCheckDefaultsToTheHostedCanary(t *testing.T) {
+	stray := strayState(t)
+	pub := standInHosted(t)
+	asked, open := 0, newPublicCanary
+	newPublicCanary = func(ctx context.Context, control string, pins []string) (*host.HTTPSCanary, error) {
+		asked++
+		return open(ctx, control, pins)
+	}
+	t.Cleanup(func() { newPublicCanary = open })
+
+	var out, errs bytes.Buffer
+	if code := run([]string{"canary", "check"}, &out, &errs); code != 0 ||
+		!strings.Contains(out.String(), "the hosted canary at "+hostedCanaryURL+", signed by the pinned control key") ||
+		!strings.Contains(out.String(), "receipt address 127.0.0.1") || strings.Contains(out.String(), strayIP) {
+		t.Fatalf("text: exit %d, %s%s", code, out.String(), errs.String())
+	}
+	out.Reset()
+	var got map[string]string
+	if code := run([]string{"canary", "check", "-o", "json"}, &out, &errs); code != 0 || json.Unmarshal(out.Bytes(), &got) != nil ||
+		got["control"] != hostedCanaryURL || got["address"] != "127.0.0.1" || got["domain"] != "sandprobe.test" {
+		t.Fatalf("json: exit %d, %s", code, out.String())
+	}
+	if asked != 2 {
+		t.Fatalf("the hosted canary was asked %d times, not 2", asked)
+	}
+	slotsFree(t, pub)
+
+	for _, tc := range []struct {
+		args []string
+		env  string
+		says string
+	}{
+		{[]string{"canary", "check", "-canary", stray}, "", "answers only over SSM"},
+		{[]string{"canary", "check"}, stray, "answers only over SSM"},
+		{[]string{"canary", "check", "-tls-insecure"}, "", "-tls-insecure needs -canary-url"},
+	} {
+		t.Setenv("SANDPROBE_CANARY", tc.env)
+		out.Reset()
+		errs.Reset()
+		if code := run(tc.args, &out, &errs); code != exitUsage || !strings.Contains(errs.String(), tc.says) || asked != 2 {
+			t.Errorf("%q (SANDPROBE_CANARY %q): exit %d, asked %d, %s", tc.args, tc.env, code, asked, errs.String())
+		}
+	}
+	t.Setenv("SANDPROBE_CANARY", "")
+
+	// Under a pin the stand-in doesn't sign with, nothing it says is believed.
+	hostedCanaryPins = []string{testPin}
+	errs.Reset()
+	if code := run([]string{"canary", "check"}, &out, &errs); code != exitLogin || !strings.Contains(errs.String(), "isn't proven") ||
+		!strings.Contains(errs.String(), "reaches "+hostedCanaryURL) {
+		t.Errorf("an unpinned key: exit %d, %s", code, errs.String())
+	}
+}
+
 // HCN-5: the command line beats the environment. A stale SANDPROBE_CANARY never outranks an explicit -canary-url and
 // -canary-pin; once any canary flag is given, every SANDPROBE_CANARY* value is set aside; with none, they stand in.
 func TestCanaryFlagsBeatTheEnvironment(t *testing.T) {

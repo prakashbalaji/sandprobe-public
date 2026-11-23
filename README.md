@@ -147,7 +147,7 @@ lists each one with your attestation before anything runs, and the report record
     addresses. The box's public address, with the nonces its test traffic carries, is kept only for the run's
     lifetime, at most 30 minutes. The public address of the machine running Sandprobe, which reserves and arms the
     run, is kept in a rate counter for at most an hour. Both stay in memory: the canary writes no access log and
-    stores nothing.
+    stores nothing. `sandprobe canary check` asks it for its signed status and reserves nothing.
   - `run docker` always starts its own canary container on your machine, and refuses a canary flag.
   - The Modal proof of concept needs `-canary <state file>`, naming a canary you deployed with `deploy/canary.sh`.
   - To use a canary you run yourself, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
