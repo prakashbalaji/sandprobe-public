@@ -2494,7 +2494,8 @@ So an expired AWS session can't leave `deploy/eks.sh` stuck behind a state file 
 - **CLN-2 No record before AWS answers.** `deploy/eks.sh up` asks AWS who the profile is (`aws sts get-caller-identity`,
   with the profile and region) before it writes its state file. If that fails, such as on an expired SSO session, up
   stops with a fixed message that names the profile, says nothing was recorded or created, and gives the commands that
-  show AWS's error and sign an SSO profile in again. It prints none of the AWS CLI's own output. `down` makes no such
+  show AWS's error and sign an SSO profile in again. It prints none of the AWS CLI's own output, and it exits 3, a code
+  eks.sh uses for this refusal alone: identity not proven, nothing written, nothing created. `down` makes no such
   check, so a recorded deployment can be retired while the session is expired. up writes `crole`, `nrole` and
   `cluster` each before its create, so a state file with none of them records no create: an earlier up stopped before
   its first one, on a failed read or before this rule. For such a file, `status` and up's refusal say so before any AWS
@@ -2502,7 +2503,10 @@ So an expired AWS session can't leave `deploy/eks.sh` stuck behind a state file 
   and the state file when it isn't the default, so it reaches the same file as pasted. `down` on such a file makes no
   AWS call, keeps the record as `<state>.down-<time>`, as every down does, and says nothing was created. A state file
   with any of those keys is handled as before: down deletes what it records by ID and confirms each is gone, and a
-  cluster asked for but never seen stays unresolved (PRV-1).
+  cluster asked for but never seen stays unresolved (PRV-1). The managed runner (RUN-1) journals the cluster's intent
+  before it calls up. It records that cluster as `not_created`, durably, only when up exits 3 and no state file exists,
+  not even a link; its cleanup then makes no call for the cluster and counts it confirmed. Any other failed up with no
+  state file stays `cluster_cleanup_unconfirmed`. `Commands.call` keeps the last command's exit code for this check.
 
 ## Tests
 
@@ -2665,7 +2669,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | POC-6 | the relay against a local TLS server at a stand-in pinned IP: an owned nonce relayed with bytes counted and the pin intact through it; a non-owned SNI, a missing SNI and a name that would resolve elsewhere each refused, with no SNI and no payload in the log; `ready` only once listening; attribution unknown with a missing or truncated log; `look` against a planted marker, its absence, and a stop at the first sighting with no later row run |
 | POC-7, POC-8 | the summary from fixture reports: every finding bucketed by the table, an unbucketed one refused, no letter grade, the HTML under OUT-2's CSP with hostile strings rendered as text |
 | POC-9 | a fake Modal API: a sandbox terminated and confirmed by ID and tag, a failed terminate reported with its fix |
-| CLN-2 | `deploy/eks_test.sh` with a fake `aws`, run with and without `DURABLE_STATE=1`: up with a failing `sts get-caller-identity` writes no state file, makes no other AWS call and prints none of the fake's error; a failed read after it leaves a state file with no `crole`, `nrole` or `cluster`, and then `status` and up refuse with no AWS call, printing the retire command; that command, run as printed with `PROFILE` and `STATE` unset, retires the record with no AWS call and says nothing was created; and up then gets past its refusal to the identity check |
+| CLN-2 | `deploy/eks_test.sh` with a fake `aws`, run with and without `DURABLE_STATE=1`: up with a failing `sts get-caller-identity` writes no state file, makes no other AWS call and prints none of the fake's error; a failed read after it leaves a state file with no `crole`, `nrole` or `cluster`, and then `status` and up refuse with no AWS call, printing the retire command; that command, run as printed with `PROFILE` and `STATE` unset, retires the record with no AWS call and says nothing was created; and up then gets past its refusal to the identity check, and exits 3 only there; `experiments/eks-agent/test_runner.py`: `test_cln2_identity_refusal_records_cluster_not_created` (exit 3 with no `eks.state`: the cluster is journaled `not_created`, and cleanup confirms with no `eks.sh down` call) and `test_cln2_other_missing_state_stays_unconfirmed` (exit 1, no exit code, or exit 3 beside an `eks.state` link: the cluster stays `creating`, and cleanup records `cluster_cleanup_unconfirmed` with no `eks.sh down` call); `experiments/eks-agent/test_lifecycle.py`: `test_commands_keep_the_last_exit_code` |
 
 ## Open questions
 
