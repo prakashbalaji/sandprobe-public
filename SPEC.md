@@ -328,6 +328,12 @@ implement or merge is not proof of third-party approval. No CI job uses cloud cr
   feedback from trusted CASES, never candidate stdout, exception text or guest
   strings. Do not change the nine cases, first prompt, model or two-request cap.
   Failure to validate feedback stops repair; it cannot become a pass.
+  Both host-controller runners may explicitly select the shipped Ministral 3B
+  default or Ministral 8B through `--model`. Reject other IDs before provisioning.
+  Preserve the same first prompt, cases, structured JSON, token/request limits
+  and network/security intent. Record the selected model in the managed intent,
+  workload result and identity policy hash; compare runs using the same selection.
+  Selection never subscribes to a model, accepts an agreement or falls back.
 
 - **RUN-4 Controlled measurements.** Use only run-owned synthetic fixtures: an agent-owned writable workspace,
   a root-owned unreadable synthetic file built into the task image, an image-root write attempt at a dedicated

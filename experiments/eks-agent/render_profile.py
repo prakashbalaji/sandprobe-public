@@ -10,12 +10,13 @@ import sys
 REGION = "us-west-2"
 HOSTNAME = f"bedrock-runtime.{REGION}.amazonaws.com"
 LIGHTWEIGHT_MODEL = "mistral.ministral-3-3b-instruct"
+LIGHTWEIGHT_MODELS = (LIGHTWEIGHT_MODEL, "mistral.ministral-3-8b-instruct")
 WORKLOAD_ENVIRONMENT = runpy.run_path(str(Path(__file__).resolve().parents[2] / "deploy" / "workload_environment.py"))["prefix"]()
 IDLE_COMMAND = WORKLOAD_ENVIRONMENT + ["python", "-I", "-c", "import time;time.sleep(1800)"]
 
 
 def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="guest", storage_profile="ephemeral", workspace_volume=None):
-    if controller == "host" and model != LIGHTWEIGHT_MODEL:
+    if controller == "host" and model not in LIGHTWEIGHT_MODELS:
         raise ValueError("host controller requires the fixed regional model")
     if controller not in {"guest", "host"}:
         raise ValueError("invalid controller pattern")
@@ -37,7 +38,7 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
     repository = f"{account}.dkr.ecr.{REGION}.amazonaws.com/sandprobe-agent-{run_id}"
     if not re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", image):
         raise ValueError("expected a pinned run-owned task image")
-    if model != LIGHTWEIGHT_MODEL and not re.fullmatch(r"anthropic\.[a-z0-9][a-z0-9.:-]{1,150}", model):
+    if model not in LIGHTWEIGHT_MODELS and not re.fullmatch(r"anthropic\.[a-z0-9][a-z0-9.:-]{1,150}", model):
         raise ValueError("expected one supported regional foundation model")
     if not 1 <= len(endpoint_ips) <= 16 or len(set(endpoint_ips)) != len(endpoint_ips):
         raise ValueError("invalid endpoint address set")

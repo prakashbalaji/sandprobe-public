@@ -11,6 +11,9 @@ spec.loader.exec_module(coding)
 
 def main():
     mode = sys.argv[1]
+    model = sys.argv[2] if len(sys.argv) == 3 else "mistral.ministral-3-3b-instruct"
+    if len(sys.argv) not in (2, 3) or model not in {"mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"}:
+        raise ValueError()
     raw = sys.stdin.buffer.read(131073)
     if len(raw) > 131072:
         raise ValueError()
@@ -23,7 +26,7 @@ def main():
             feedback = coding.repair_feedback(value["verification"])
             messages.extend([{"role": "assistant", "content": [{"text": value["previous"]}]},
                              {"role": "user", "content": [{"text": feedback}]}])
-        return coding.converse_request("mistral.ministral-3-3b-instruct", messages)
+        return coding.converse_request(model, messages)
     if mode == "diagnostic":
         return coding.validated_verification_diagnostic(value)
     if mode == "parse":

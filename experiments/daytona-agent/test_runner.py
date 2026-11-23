@@ -23,6 +23,7 @@ class RunnerTests(unittest.TestCase):
    helper=home/'cf';helper.write_text('fixture')
    key=home/'key';key.write_text('synthetic-not-a-secret');key.chmod(0o600)
    args=argparse.Namespace(cleanup_run='',model_python='/fixture/model-python',go='/fixture/go',sdk_python='/fixture/python',key_file=str(key),cf_helper=str(helper),dns_reference='fixture',storage_profile=storage_profile)
+   args.model='mistral.ministral-3-8b-instruct'
    def call(argv,env,timeout=90,data=None):
     if argv[0]=='/fixture/model-python':return b'{"ready":true,"client_version":"1.44.6"}'
     if argv[:2]==['git','rev-parse']:return b'a'*40
@@ -32,10 +33,12 @@ class RunnerTests(unittest.TestCase):
     if argv[0].endswith('/runner'):
      folder=Path(argv[argv.index('--out')+1]);run=argv[argv.index('--run-id')+1]
      self.assertEqual(argv[argv.index('--storage-profile')+1],storage_profile)
+     self.assertEqual(argv[argv.index('--model')+1],args.model)
+     self.assertEqual(json.loads((folder/'intent.json').read_text())['model'],args.model)
      self.assertEqual(json.loads((folder/'intent.json').read_text())['storage_profile'],storage_profile)
      assessment={'run_id':'rfixture123','box_id':'original-box','configuration_grade':'C','complete':False,'benchmark_requirements_met':False}
      exposure={'schema':'sandprobe.workload-exposure/1','run_id':'rfixture123','box_id':'original-box','valid':True,'score':3,'of':6}
-     r.persist(folder/'evaluation.json',{'source_commit':'a'*40,'managed_run_id':run,'primary_assessment':'rc_exposure_scorecard','configuration_assessment':assessment,'exposure_scorecard':exposure,'functional_workload':{'independent_verification':'passed','functional_tests':9,'model_requests':2}})
+     r.persist(folder/'evaluation.json',{'source_commit':'a'*40,'managed_run_id':run,'primary_assessment':'rc_exposure_scorecard','configuration_assessment':assessment,'exposure_scorecard':exposure,'functional_workload':{'independent_verification':'passed','functional_tests':9,'model_requests':2,'model':args.model}})
     return b''
    output=io.StringIO()
    with patch.object(Path,'home',return_value=home),patch.object(r,'aws',return_value=r.ACCOUNT.encode()),patch.object(r,'sdk',side_effect=[{'available':True},{'id':r.SNAPSHOT}]),patch.object(r,'call',side_effect=call),patch.object(r,'auth_environment',side_effect=lambda a,e:(e,'zone')),patch.object(r.socket,'getaddrinfo',return_value=[(None,None,None,None,('52.94.0.1',443))]),patch.object(r,'cleanup_owned',return_value={'confirmed':True}) as cleanup,patch.object(r.signal,'signal'),contextlib.redirect_stdout(output):

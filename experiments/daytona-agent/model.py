@@ -5,6 +5,7 @@ import os
 import sys
 
 MODEL = "mistral.ministral-3-3b-instruct"
+MODELS = (MODEL, "mistral.ministral-3-8b-instruct")
 # The operator's own AWS profile and account, from the environment. Unset, every account check fails closed.
 PROFILE, REGION, ACCOUNT = os.environ.get("SANDPROBE_AWS_PROFILE", ""), "us-west-2", os.environ.get("SANDPROBE_AWS_ACCOUNT", "")
 VERSION = "1.44.6"
@@ -33,7 +34,7 @@ def identity(current, config):
 def request(value):
     # Same locked request shape/model/limit as the Nitro task's Converse call.
     if (not isinstance(value,dict) or set(value)-{"modelId","messages","inferenceConfig","outputConfig"}
-            or value.get("modelId")!=MODEL or value.get("inferenceConfig")!={"maxTokens":2048,"temperature":0}
+            or value.get("modelId") not in MODELS or value.get("inferenceConfig")!={"maxTokens":2048,"temperature":0}
             or not isinstance(value.get("messages"),list) or len(value["messages"]) not in (1,3)
             or "outputConfig" not in value):
         return {"error":"invalid_model_request","converse_attempted":False}

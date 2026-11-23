@@ -9,14 +9,21 @@ import io,json,sys,runpy,types,contextlib
 spec=importlib.util.spec_from_file_location('controller',Path(__file__).with_name('controller.py'))
 c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
 class ControllerTests(unittest.TestCase):
- def invoke(self,mode,value):
+ def invoke(self,mode,value,model=None):
   stdin=io.TextIOWrapper(io.BytesIO(json.dumps(value).encode()))
-  with patch.object(sys,'argv',['controller',mode]),patch.object(sys,'stdin',stdin):return c.main()
+  with patch.object(sys,'argv',['controller',mode]+([model] if model else [])),patch.object(sys,'stdin',stdin):return c.main()
  def test_shared_prompt_and_bounded_request(self):
   out=self.invoke('request',{})
   self.assertEqual(out['messages'][0]['content'][0]['text'],c.coding.PROMPT)
   self.assertEqual(out['modelId'],'mistral.ministral-3-3b-instruct')
   self.assertEqual(out['inferenceConfig']['maxTokens'],2048)
+ def test_explicit_8b_keeps_same_prompt_schema_and_limits(self):
+  request=self.invoke('request',{},'mistral.ministral-3-8b-instruct')
+  default=self.invoke('request',{})
+  self.assertEqual(request['modelId'],'mistral.ministral-3-8b-instruct')
+  request['modelId']=default['modelId']
+  self.assertEqual(request,default)
+  with self.assertRaises(ValueError):self.invoke('request',{},'other-model')
  def test_parser_preserves_source_as_data(self):
   source='raise RuntimeError("must not execute on host")'
   out=self.invoke('parse',{'output':{'message':{'content':[{'text':json.dumps({'solution.py':source})}]}}})

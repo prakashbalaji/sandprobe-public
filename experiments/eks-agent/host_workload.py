@@ -7,7 +7,7 @@ import sys
 
 from coding import strict
 from lifecycle import Failure
-from render_profile import IDLE_COMMAND, WORKLOAD_ENVIRONMENT
+from render_profile import IDLE_COMMAND, WORKLOAD_ENVIRONMENT, LIGHTWEIGHT_MODELS
 
 MODEL = "mistral.ministral-3-3b-instruct"
 
@@ -45,7 +45,7 @@ def valid_storage(volumes, mounts, artifacts=False):
 
 def model_preflight(runner):
     program = runner.model_python
-    if (runner.journal.data.get("model", MODEL) != MODEL or not program
+    if (runner.journal.data.get("model", MODEL) not in LIGHTWEIGHT_MODELS or not program
             or not Path(program).is_absolute() or not os.access(program, os.X_OK)):
         raise Failure("host_model_interpreter_required")
     raw = runner.ops.call([program, "-I", str(runner.source_root / "experiments/daytona-agent/model.py"), "identity"],
@@ -62,7 +62,10 @@ def identity_hash(runner):
                               "--namespace", runner.ns, "--service-account", "model-task", query="associations")
     if associations != []:
         raise Failure("unexpected_guest_model_identity")
-    policy = {"identity_mode": "host_controller_no_guest_credentials", "provider": "aws-nitro", "model": MODEL}
+    model = runner.journal.data.get("model", MODEL)
+    if model not in LIGHTWEIGHT_MODELS:
+        raise Failure("unsupported_host_model")
+    policy = {"identity_mode": "host_controller_no_guest_credentials", "provider": "aws-nitro", "model": model}
     return hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -100,7 +103,10 @@ finally:os.close(d)
 
 def perform(runner, pod, config_sha):
     root = runner.source_root
-    status = {"schema": "sandprobe.host-controller/1", "deployment_pattern": "host_controller_no_guest_credentials", "model": MODEL,
+    model = runner.journal.data.get("model", MODEL)
+    if model not in LIGHTWEIGHT_MODELS:
+        raise Failure("unsupported_host_model")
+    status = {"schema": "sandprobe.host-controller/1", "deployment_pattern": "host_controller_no_guest_credentials", "model": model,
               "model_requests": 0, "model_request_count_uncertain": False, "stage": "execution", "step": "worker_prepare"}
 
     def guest(*args, payload=None):
@@ -108,7 +114,7 @@ def perform(runner, pod, config_sha):
                            payload=payload, timeout=90)
 
     def protocol(mode, value):
-        return strict(runner.ops.call([sys.executable, "-I", str(root / "experiments/daytona-agent/controller.py"), mode],
+        return strict(runner.ops.call([sys.executable, "-I", str(root / "experiments/daytona-agent/controller.py"), mode, model],
                       payload=json.dumps(value).encode(), env=controller_environment(runner), timeout=20).decode(), 131072)
 
     observation_script = "import sys,json;sys.path.insert(0,'/opt/sandprobe');import checks;print(json.dumps(checks.observe(sys.argv[1],sys.argv[2])))"
@@ -127,6 +133,8 @@ def perform(runner, pod, config_sha):
         for attempt in range(1, 3):
             status["stage"] = "model_request"
             request = protocol("request", previous)
+            if request.get("modelId") != model:
+                raise Failure("host_model_request_mismatch")
             status["model_request_count_uncertain"] = True
             raw = runner.ops.call([runner.model_python, "-I", str(root / "experiments/daytona-agent/model.py"), "request"],
                                   payload=json.dumps(request).encode(), env=controller_environment(runner), timeout=150)
