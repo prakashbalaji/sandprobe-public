@@ -111,6 +111,18 @@ The report leads with a score out of six (Secrets, Exfiltration, Containment, Pr
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
 and nothing above Info was found.
 
+Current source builds also show catalog-wide measurement coverage (SCR-5): which
+checks have usable or conclusive results, and which remain skipped, missing,
+scoped out, unknown or unproven. The exposure score and coverage answer different
+questions; six green categories do not mean every check was conclusively assessed.
+
+For a network-enabled model workload, the managed [Nitro](deploy/eks-agent/README.md)
+and [Daytona](deploy/daytona-agent/README.md) guides run the same nine-case coding
+task and collect RC exposure plus a separate configuration assessment. Nitro uses
+guest-side model inference; Daytona uses host-controller inference without guest
+model credentials. Preserve that context when comparing results. Run records
+stay local and must not be committed to this public repository.
+
 Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 below `-min`, 7 a box not
 confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.
 

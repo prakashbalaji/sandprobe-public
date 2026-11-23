@@ -103,21 +103,35 @@ UID-preconditioned Kubernetes deletion do not remove that residual API limitatio
 Keep an incomplete journal and rerun cleanup; never delete unrelated resources or
 clear unresolved creates simply because a resource did not appear immediately.
 
-## Workload-aware configuration grading
+## RC exposure and workload configuration
 
-The live bridge in this directory accepts only the Nitro version1 contract.
-WGR-7 adds offline version2 grading support for a future managed Daytona run with
-a frozen non-root principal and an external model controller. That mode permits
-no guest model-credential projection and retains all required control proofs.
-It needs its own reviewed runner and provider configuration verification before
-live use; it does not supply a new Daytona result or upgrade historical reports.
+The live bridge in this directory uses the Nitro version1 contract, with model
+inference and an assigned model identity inside the guest. The separate
+[managed Daytona runner](../daytona-agent/README.md) uses the version2 contract
+and host-controller inference without guest model credentials. Both execute the
+same nine functional cases, but their credential placement differs. Compare
+tested configurations rather than treating the scores as provider-wide ratings.
 
-The primary outputs are `workload-report.json` and `workload-report.html`.
+SCR-4 makes RC's six-category exposure score the primary assessment. The managed
+JSON summary declares `primary_assessment: rc_exposure_scorecard` and includes
+`exposure_scorecard`; `exposure-scorecard.json` retains that score separately.
+`workload-report.html` leads with RC exposure, followed by the conditional workload
+configuration grade. `workload-report.json` is the configuration assessment.
+
+SCR-5 adds catalog-wide measurement coverage to source builds: usable and
+conclusive results, skipped, missing, scoped-out, unknown and unproven checks.
+Read this alongside the exposure score. Six green categories do not establish
+that every catalog check was conclusively assessed. Provider configuration
+declarations do not substitute for missing runtime proof. No scope exclusion is
+removed by choosing RC ranking.
+
 The summary schema is `sandprobe.workload-evaluation/2`; its
 `configuration_assessment.configuration_grade` is the fixed-workload grade.
 The generic standard report remains in `legacy-standard-report.json/html` as a **legacy
 diagnostic**, exposed as `legacy_generic_assessment` in the summary. Its F is not
-the new workload configuration grade. The older synthetic receiver assessment
+the workload configuration grade or the RC exposure score. Exit0 means the
+conditional workload benchmark and cleanup requirements passed; it does not mean
+RC6/6. The older synthetic receiver assessment
 is retained under `legacy_receiver_assessment`.
 
 Before the first model call, the host freezes a `networked-coding-v1` contract
