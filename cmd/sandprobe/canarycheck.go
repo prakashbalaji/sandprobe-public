@@ -25,7 +25,7 @@ func canaryCheck(o opts, r runFlags, args []string, insecure bool) (int, error) 
 		return 0, err
 	}
 	if choice.state != "" {
-		return 0, fail("usage", "canary check asks a public canary; the operator canary in "+choice.state+" answers only over SSM", "deploy/canary.sh status checks it", exitUsage)
+		return 0, fail("usage", "canary check asks a public canary; the operator canary in "+choice.state+" answers only over SSM", "PROFILE=<your AWS CLI profile> deploy/canary.sh status checks it", exitUsage)
 	}
 	hosted := r.canaryURL == ""
 	if insecure && hosted {
