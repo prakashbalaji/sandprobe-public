@@ -228,3 +228,12 @@ HTML layout, colors and incidental wording can change. If JSON keys or schemas c
 update the collector/finalizer consumers and compatibility migration in the same PR.
 The check makes that conflict visible before merge; it is not automatic human review
 or a guarantee against every regression. No cloud resources or model calls are used.
+
+For the same explicit EGR-6 workload-host measurement on both providers, add
+`--upload-hosts bedrock-runtime.us-west-2.amazonaws.com` to the managed run command.
+The common shipped policy is `internal/catalog/upload_hosts.json`; select at most
+four exact names separated by commas. This sends only a certificate-verified TLS
+handshake to one public address per name, with no HTTP request or upload. It is
+off by default. Invalid selections stop before provisioning. A reachable intended
+model endpoint remains an exposure indicator in RC scoring; it does not prove an
+upload or a violation of the workload contract. DNS/transport failures remain unknown.

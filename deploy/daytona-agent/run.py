@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import secrets
 import shutil
 import signal
@@ -209,6 +210,8 @@ def cleanup_owned(folder, args, env):
     return cleanup
 
 def main(args):
+    parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
+    approved_hosts = parse_hosts(getattr(args, "upload_hosts", ""))
     env = sanitized_environment()
     env["PATH"] = str(Path(args.go).parent) + os.pathsep + env.get("PATH", "")
     if aws(env, "sts", "get-caller-identity", "--query", "Account", "--output", "text").decode().strip() != ACCOUNT:
@@ -247,7 +250,7 @@ def main(args):
     folder.mkdir(mode=0o700)
     persist(folder / "intent.json", {"schema": "sandprobe.managed-daytona/1", "run_id": run_id,
             "source_commit": source, "model_client_version":model_check["client_version"], "profile": PROFILE, "region": REGION, "account": ACCOUNT,
-            "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials"})
+            "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials", "upload_hosts": approved_hosts})
     print("Managed run: " + run_id, flush=True)
     print("Private records: " + str(folder), flush=True)
     tools = folder / "tools"
@@ -278,7 +281,7 @@ def main(args):
         call([str(folder / "runner"), "--key-file", args.key_file, "--sdk-python", args.sdk_python,
               "--model-python",args.model_python,"--out", str(folder), "--run-id", run_id, "--snapshot", SNAPSHOT,
               "--network", ",".join(ip + "/32" for ip in network), "--source-root", str(ROOT),
-              "--canary-state", env["STATE"]], env, timeout=1000)
+              "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts)], env, timeout=1000)
     except (Failure, KeyboardInterrupt):
         failed = True
         persist(folder / "execution-failure.json", {"category": "managed_execution_incomplete"})
@@ -318,6 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--go", required=True)
     parser.add_argument("--cf-helper", required=True)
     parser.add_argument("--dns-reference", required=True)
+    parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not PROFILE:
         raise Failure("aws_account_and_profile_required")

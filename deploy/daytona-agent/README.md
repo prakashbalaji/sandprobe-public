@@ -122,3 +122,12 @@ incomplete. Check workload success, RC exposure, coverage and cleanup separately
 
 Run records remain private until credential-scanned and reviewed for internal
 publication. Neither exported records nor host declarations are attestations.
+
+For the same explicit EGR-6 workload-host measurement on both providers, add
+`--upload-hosts bedrock-runtime.us-west-2.amazonaws.com` to the managed run command.
+The common shipped policy is `internal/catalog/upload_hosts.json`; select at most
+four exact names separated by commas. This sends only a certificate-verified TLS
+handshake to one public address per name, with no HTTP request or upload. It is
+off by default. Invalid selections stop before provisioning. A reachable intended
+model endpoint remains an exposure indicator in RC scoring; it does not prove an
+upload or a violation of the workload contract. DNS/transport failures remain unknown.

@@ -59,8 +59,9 @@ These are not style preferences. Breaking one can produce a false result or harm
    which is never reset or deleted (PRV-15). Never production (PRV-2).
 5. **Read the provider's terms before any probe:** its security-research, bug-bounty, penetration-testing and
    acceptable-use terms. If they require consent, get it first.
-6. **Test traffic goes only to the canary,** or to names the probe only resolves. Checks a provider's rules exclude
-   are skipped, with the reason recorded.
+6. **Test traffic goes only to the canary,** or to names the probe only resolves, with MEAS-6's explicit,
+   bounded TLS-only workload-host measurement as the exception. Checks a provider's rules exclude are skipped,
+   with the reason recorded. This does not authorize provider-control or infrastructure probing.
 7. **Stop and report.** If a check suggests a real provider-side vulnerability, stop that line at once, and don't
    confirm, repeat or widen it. Delete the boxes, keep only minimal evidence, keep it out of every report and every
    public issue, and report it privately to the provider.
