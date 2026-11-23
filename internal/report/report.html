@@ -220,9 +220,10 @@ td.long { overflow-wrap: anywhere; font: 12px var(--mono); }
   {{if .Card.Valid}}<p class="kicker">SANDBOX SCORE</p>
   <p class="scorebig" role="img" aria-label="Score {{.Card.Score}} of {{.Card.Of}}"><b>{{.Card.Score}}</b><span>/{{.Card.Of}}</span></p>
   <p class="statement">{{.Statement}}</p>
+  {{with .Card.Coverage}}<p>{{.Description}}</p>{{end}}
   <ol class="cats">{{range .Card.Rows}}
     <li class="cat {{if .Green}}green{{else}}red{{end}}"><span class="dot" aria-hidden="true"></span>
-      <div><b>{{.Name}}</b><span class="q">{{.Question}}</span>{{if .Why}}<span class="why">{{.Why}}</span>{{end}}{{if .NotProven}}<span class="why np">{{.NotProven}}</span>{{end}}</div>
+      <div><b>{{.Name}}</b><span class="q">{{.Question}}</span>{{if .Why}}<span class="why">{{.Why}}</span>{{end}}{{if .NotProven}}<span class="why np">{{.NotProven}}</span>{{end}}{{with .Coverage}}<span class="why">{{.Description}}</span>{{end}}</div>
       <span class="verdict">{{if .Green}}GREEN{{else}}RED{{end}}</span></li>{{end}}
   </ol>{{else}}<p class="kicker"><em>INVALID RUN: NO SCORE</em></p>{{end}}
 </div>

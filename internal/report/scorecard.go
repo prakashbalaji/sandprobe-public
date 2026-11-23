@@ -76,22 +76,24 @@ func CategoryOf(id string) (Category, bool) {
 // Row is one category's verdict (SCR-2). Why is empty when the row is green; NotProven names the checks a green
 // row rests on without a negative proof (KND-2), so a green never reads as more than it is.
 type Row struct {
-	Name      string   `json:"name"`
-	Question  string   `json:"question"`
-	Green     bool     `json:"green"`
-	Why       string   `json:"why,omitempty"`
-	NotProven string   `json:"not_proven,omitempty"`
-	Found     []string `json:"found,omitempty"`
-	Unknown   []string `json:"unknown,omitempty"`
-	Unproven  []string `json:"unproven,omitempty"`
+	Name      string         `json:"name"`
+	Question  string         `json:"question"`
+	Green     bool           `json:"green"`
+	Why       string         `json:"why,omitempty"`
+	NotProven string         `json:"not_proven,omitempty"`
+	Found     []string       `json:"found,omitempty"`
+	Unknown   []string       `json:"unknown,omitempty"`
+	Unproven  []string       `json:"unproven,omitempty"`
+	Coverage  *CheckCoverage `json:"coverage,omitempty"`
 }
 
 // Card is the headline: Score green rows of Of. An invalid run has no score.
 type Card struct {
-	Valid bool  `json:"valid"`
-	Score int   `json:"score"`
-	Of    int   `json:"of"`
-	Rows  []Row `json:"rows"`
+	Valid    bool           `json:"valid"`
+	Score    int            `json:"score"`
+	Of       int            `json:"of"`
+	Rows     []Row          `json:"rows"`
+	Coverage *ScoreCoverage `json:"coverage,omitempty"`
 }
 
 // Score is SCR-2. A row is green only when one of its checks was tested, none is unknown, and none has a finding
@@ -156,6 +158,7 @@ func Score(d Doc) Card {
 		}
 		c.Rows = append(c.Rows, r)
 	}
+	attachCoverage(&c, got, unknown)
 	return c
 }
 

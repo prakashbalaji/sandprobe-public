@@ -71,6 +71,24 @@ report stay as they are; the scorecard is computed from a report's checks when i
   A green row that rests on a check with no finding but no negative proof says so in one line ("not proven: DNS"),
   since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. Six of six therefore means
   no finding above Info and nothing unknown, and is still bounded by GRD-4 and SBX-10.
+- **SCR-5 Exposure and measurement coverage are separate.** Preserve SCR-2's RC
+  score, but attach deterministic catalog-wide coverage to every valid scorecard.
+  Partition each category's checks into proven pass/absence, findings (including
+  Info), unproven not-found, unknown, scoped-out, skipped and missing. Only
+  pass/absence, finding and not-found results contribute usable-result coverage;
+  unknown, scoped-out, skipped and missing entries do not. An unknown check may
+  have executed but stayed inconclusive. Complete coverage
+  requires a pass/absence or finding for every check; a finding is a completed
+  observation, never a security pass. List all gaps by fixed catalog ID. State
+  category/check usable-result and completion counts beside the score in JSON,
+  terminal and HTML, including workload scorecards. A green category and a score
+  of six never imply complete coverage. Invalid runs claim no coverage; historical
+  scorecards without coverage remain readable and never gain an invented complete
+  status. Derive coverage only from graded checks and grading unknowns, never a
+  provider flag, supplied counter, workload pass or configuration declaration.
+  This adds no network checks, credential reads or provider-infrastructure probes,
+  changes no scope exclusion, and changes no RC exposure verdict. Only synthetic
+  public fixtures enter tests; private saved runs and accounts remain outside git.
 - **SCR-3 Headline first, details in the appendix.** OUT-2's page, the terminal summary after a run, and the offline
   `sandprobe scorecard <report.json>` lead with the score and the six rows: name, question, green or red, and a short
   reason built only from catalog IDs and titles, never from box strings. GRD-4's statement stays beside the score.
@@ -2087,6 +2105,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | --- | --- |
 | REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing; on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
+| SCR-5 | synthetic six-category coverage partition and malformed/missing/unknown/scoped-out cases, unchanged RC scores, invalid/historical coverage absence, terminal/HTML/workload coverage visibility and count validation |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression |
 | HCN-1 | `internal/canarycontrol`: the whole public path over HTTPS, every answer verified under the pinned control key and naming the canary's receipt address and domain (`TestPublicAnswersNameTheReceiptAddress`); an answer replayed for another challenge, altered, re-signed or under an unpinned key is refused; the control name never gets the receipt key and a box name never reaches the control server; method, path, unknown field, op mismatch, trailing data and oversize refusals; a long run label never makes an answer over the bound (`TestPublicAnswerBoundedForLongRun`, `TestControlAnswerBounded`); a control key file that's a symlink, not regular, open to others, not this user's, oversize or carrying trailing bytes is refused (`TestLoadKeyFileSafety`); a browser's cross-site POST (simple content type, Origin or Sec-Fetch-Site) is refused (`TestControlRefusesBrowserPosts`); `TestPublicNeedsAChallenge`; host: `TestHTTPSCanaryImpostor` (an impostor behind a trusted interception root and a redirected name is never believed, and Execute stops before the probe), `TestHTTPSCanaryRefusesRedirectAndOversize`, `TestNewHTTPSCanaryChecks`, `TestHTTPSCanaryAddressFromSignedStatus` (the receipt address comes from the signed status, never from where the control connection went, and a changed one is refused), `TestHTTPSCanaryErrorsRedact` |
 | HCN-2 | `TestPublicSecretGuardsTheRun`: without the secret a box can't query, disarm, re-arm its run or arm its nonce elsewhere, and the host's receipt survives; `TestPublicCantTouchOperatorRuns`; `TestPublicGenerationChangesOnRearm`; host: `TestHTTPSCanaryRearmedRun` (a re-armed run is never read: the old secret is refused, and the thief's secret shows another generation) |
