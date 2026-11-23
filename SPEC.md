@@ -1395,9 +1395,12 @@ one, the amended text lands in place only after review.
   the kubeconfig's current context is never used, since a kubeconfig often also holds production clusters),
   `SANDPROBE_KUBE_NAMESPACE` (default `default`, checked as a lowercase DNS label with its characters spelled out,
   since a range like `a-z` follows the locale), `SANDPROBE_KUBE_IMAGE` (default the debian image pinned by digest in
-  test/probe.sh) and `SANDPROBE_KUBE_OVERRIDES` (a JSON merge patch over the generated pod, read by kubectl through
-  `--patch-file` so its contents, an env value say, never sit on a command line: the agent's securityContext,
-  service account, runtime class and so on). Every kubectl call names the context, and every call to the cluster the
+  test/probe.sh) and `SANDPROBE_KUBE_OVERRIDES` (the path of a file holding a JSON merge patch over the generated pod:
+  the agent's securityContext, service account, runtime class and so on. kubectl reads it through `--patch-file`, so
+  its contents, an env value say, never sit on a command line, and `sp_ready` refuses a value that isn't a readable
+  file, inline JSON included). The recipe runs with the person's environment, so kubectl finds the context in the
+  kubeconfig its own `KUBECONFIG` names, else in `~/.kube/config`. Every kubectl call names the context, and every
+  call to the cluster the
   namespace. `sp_ready` checks that `create pods`, `get pods`, `delete pods` and `create pods/exec` are allowed there
   (`kubectl auth can-i`) and names the context, its API server, the namespace, and a SHA-256 of the context's cluster
   and context entries (CA, proxy, TLS server name, skip-verify, cluster and user names), shown as 12 hex digits and

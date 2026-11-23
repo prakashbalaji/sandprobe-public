@@ -19,15 +19,25 @@ None of Sandprobe's own. Your command reaches the box with whatever access it al
 ## Run it
 
 ```sh
-sandprobe plan exec -as agent -- docker exec -i my-agent-box sh
-sandprobe run exec -as agent -y -- docker exec -i my-agent-box sh
-sandprobe run exec -as agent -y -- kubectl exec -i pod/agent -c agent -- sh
-sandprobe run exec -as agent -y -- ssh agent@devbox sh
+sandprobe plan exec -as <agent user> -- docker exec -i my-agent-box sh
+sandprobe run exec -as <agent user> -y -- docker exec -i my-agent-box sh
+sandprobe run exec -as <agent user> -y -- kubectl exec -i pod/agent -c agent -- sh
+sandprobe run exec -as <agent user> -y -- ssh <agent user>@devbox sh
 ```
 
-`-as` names the agent's user. The run checks it before any check runs, and stops if the command runs as anyone
-else. Without `-as`, the report says the user wasn't confirmed as the agent's. If `/tmp` isn't writable in the box,
-name another absolute directory with `-scratch <dir>`.
+`-as` takes the user your agent really runs as in the box: a name, or a numeric uid. It doesn't switch users. Your
+command must already run as that user (`docker exec -u <user>`, the pod's `securityContext.runAsUser`,
+`ssh <user>@host`), and the run checks it before any check runs. Many images, debian and amazonlinux among them,
+have no `agent` user and run as root.
+
+- If the box's `/etc/passwd` has no user by that name, the run stops before any check with
+  `the box has no user "agent"`, removes its scratch directory and exits 5 (7 if the removal isn't confirmed). A
+  numeric uid, such as `-as 1000`, doesn't need a passwd entry.
+- If the user exists but your command runs as someone else, the run stops in the same way, for example with
+  `the command runs as uids 0/0/0/0, not agent's 1000`.
+- Without `-as`, the report says the user wasn't confirmed as the agent's.
+
+If `/tmp` isn't writable in the box, name another absolute directory with `-scratch <dir>`.
 
 ## What's skipped, and why
 
