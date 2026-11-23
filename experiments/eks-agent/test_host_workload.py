@@ -40,7 +40,7 @@ class HostWorkloadTests(unittest.TestCase):
             if model_failure:
                 raise Failure("command_failed")
             request = json.loads(payload)
-            self.assertEqual(request["modelId"], host_workload.MODEL)
+            self.assertEqual(request["modelId"], r.journal.data["model"])
             self.assertIn(len(request["messages"]), [1, 3])
             if len(request["messages"]) == 3:
                 feedback = request["messages"][2]["content"][0]["text"]
@@ -77,6 +77,31 @@ class HostWorkloadTests(unittest.TestCase):
         r.ops = types.SimpleNamespace(call=call)
         r.kube = kube
         return r
+
+    def test_wrong_selected_model_never_reaches_model_client(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runner = self.fixture(folder)
+            runner.journal.data["model"] = "mistral.ministral-3-8b-instruct"
+            original = runner.ops.call
+            def call(args, **kwargs):
+                if Path(args[2]).name == "controller.py" and args[3] == "request":
+                    return json.dumps({"modelId": host_workload.MODEL}).encode()
+                return original(args, **kwargs)
+            runner.ops.call = call
+            result = json.loads(host_workload.perform(runner, "original-pod", "c" * 64))
+            self.assertEqual(result["workload"], "reported_failed")
+            self.assertEqual(runner.models, 0)
+
+    def test_explicit_8b_uses_same_workload_and_two_request_cap(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runner = self.fixture(folder, ["failed", "passed"])
+            runner.journal.data["model"] = "mistral.ministral-3-8b-instruct"
+            result = json.loads(host_workload.perform(runner, "original-pod", "c" * 64))
+            self.assertEqual(result["workload"], "reported_passed")
+            self.assertEqual(result["task"]["functional_tests"], 9)
+            self.assertEqual(runner.models, 2)
+            status = json.loads((Path(folder) / "host-controller-status.json").read_text())
+            self.assertEqual(status["model"], "mistral.ministral-3-8b-instruct")
 
     def test_same_protocol_two_remote_attempts(self):
         with tempfile.TemporaryDirectory() as folder:

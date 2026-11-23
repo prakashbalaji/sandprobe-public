@@ -9,6 +9,17 @@ import render_profile as profile
 
 
 class ProfileTests(unittest.TestCase):
+    def test_8b_selection_preserves_host_security_and_network_intent(self):
+        args = self.settings(); args.update(controller="host", model=profile.LIGHTWEIGHT_MODEL)
+        default = profile.render(**args)
+        args["model"] = "mistral.ministral-3-8b-instruct"
+        selected = profile.render(**args)
+        env = default["kubernetes"]["items"][-1]["spec"]["template"]["spec"]["containers"][0]["env"]
+        for entry in env:
+            if entry["name"] == "SANDPROBE_MODEL_ID":
+                entry["value"] = args["model"]
+        self.assertEqual(selected, default)
+
     def test_persistent_artifacts_keeps_coding_workspace_cache_and_network(self):
         args=self.settings();args.update(controller="host",model=profile.LIGHTWEIGHT_MODEL)
         before=profile.render(**args)

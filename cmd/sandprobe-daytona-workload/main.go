@@ -32,7 +32,7 @@ import (
 var sourceCommit string
 var hexRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
 
-type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts, storageProfile string }
+type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts, storageProfile, model string }
 type taskResult struct {
 	Schema                     string `json:"schema"`
 	Workload                   string `json:"workload"`
@@ -176,8 +176,24 @@ func verifySource(ctx context.Context, o options) error {
 	}
 	return nil
 }
+func selectedModel(o options) string {
+	if o.model == "" {
+		return "mistral.ministral-3-3b-instruct"
+	}
+	return o.model
+}
+func validModel(model string) bool {
+	return model == "mistral.ministral-3-3b-instruct" || model == "mistral.ministral-3-8b-instruct"
+}
+
+func boundModelRequest(o options, raw []byte) bool {
+	var request struct {
+		Model string `json:"modelId"`
+	}
+	return json.Unmarshal(raw, &request) == nil && request.Model == selectedModel(o)
+}
 func controller(ctx context.Context, o options, mode string, input []byte) ([]byte, error) {
-	return command(ctx, input, "python3", "-I", filepath.Join(o.root, "experiments/daytona-agent/controller.py"), mode)
+	return command(ctx, input, "python3", "-I", filepath.Join(o.root, "experiments/daytona-agent/controller.py"), mode, selectedModel(o))
 }
 func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byte, bool) {
 	var envelope struct {
@@ -198,7 +214,7 @@ func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byt
 	return envelope.Response, true
 }
 func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
-	result := taskResult{Schema: "sandprobe.agent-task/2", Workload: "synthetic-coding-v1", Model: "mistral.ministral-3-3b-instruct", Pattern: "host_controller_no_guest_credentials", Independent: "failed"}
+	result := taskResult{Schema: "sandprobe.agent-task/2", Workload: "synthetic-coding-v1", Model: selectedModel(o), Pattern: "host_controller_no_guest_credentials", Independent: "failed"}
 	files := map[string]string{"coding.py": "experiments/eks-agent/coding.py", "project_exec.py": "experiments/eks-agent/project_exec.py", "worker.py": "experiments/eks-agent/worker.py"}
 	for name, path := range files {
 		data, e := os.ReadFile(filepath.Join(o.root, path))
@@ -232,7 +248,7 @@ func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
 	for attempt := 1; attempt <= 2; attempt++ {
 		result.Stage = "model_request"
 		request, e := controller(ctx, o, "request", previous)
-		if e != nil {
+		if e != nil || !boundModelRequest(o, request) {
 			return result
 		}
 		mctx, cancel := context.WithTimeout(ctx, 150*time.Second)
@@ -328,6 +344,9 @@ func execute(ctx context.Context, o options) (err error) {
 		return errors.New("output directory not owned")
 	}
 	stage := "preflight"
+	if !validModel(selectedModel(o)) {
+		return errors.New("unsupported workload model")
+	}
 	createAttempted := false
 	storageCreateAttempted := false
 	if o.storageProfile == "" {
@@ -539,7 +558,7 @@ func execute(ctx context.Context, o options) (err error) {
 		return e
 	}
 	// Native API lacks image-content/private-process verification; never invent it.
-	contract := &obs.WorkloadContract{Schema: "sandprobe.workload-contract/2", Profile: obs.WorkloadProfile, Provider: "daytona", IdentityMode: "host_controller_no_guest_credentials", AgentUID: 10001, AgentGID: 10001, ManagedRunID: o.runID, BoxID: b.ID(), SnapshotID: snapshot.ID, ConfigSHA256: hash(config), IdentityPolicySHA256: hash(map[string]string{"model_identity": "none_in_guest", "controller_model": "mistral.ministral-3-3b-instruct"}), ProtectedDevice: fixture.Device, ProtectedInode: fixture.Inode, IdentityConfigurationVerified: true, ProtectedFixtureVerified: true}
+	contract := &obs.WorkloadContract{Schema: "sandprobe.workload-contract/2", Profile: obs.WorkloadProfile, Provider: "daytona", IdentityMode: "host_controller_no_guest_credentials", AgentUID: 10001, AgentGID: 10001, ManagedRunID: o.runID, BoxID: b.ID(), SnapshotID: snapshot.ID, ConfigSHA256: hash(config), IdentityPolicySHA256: hash(map[string]string{"model_identity": "none_in_guest", "controller_model": selectedModel(o)}), ProtectedDevice: fixture.Device, ProtectedInode: fixture.Inode, IdentityConfigurationVerified: true, ProtectedFixtureVerified: true}
 	contract.ReceiverBindingSHA256 = receiverHash
 	contract.AgentHomeSHA256 = fixture.HomeSHA256
 	stage = "validate-contract"
@@ -742,6 +761,7 @@ func main() {
 	flag.StringVar(&o.snapshot, "snapshot", "", "CPU snapshot UUID")
 	flag.StringVar(&o.network, "network", "", "fixed regional model IPv4 /32 list")
 	flag.StringVar(&o.uploadHosts, "upload-hosts", "", "explicit comma-separated shipped workload names for TLS-only EGR-6")
+	flag.StringVar(&o.model, "model", "mistral.ministral-3-3b-instruct", "supported regional Ministral 3B or 8B model")
 	flag.StringVar(&o.storageProfile, "storage-profile", "ephemeral", "ephemeral, persistent-workspace or persistent-artifacts")
 	flag.StringVar(&o.root, "source-root", ".", "clean exact-source repository")
 	flag.Parse()

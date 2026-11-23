@@ -179,3 +179,11 @@ in `internal/host/workload_environment.json`; incidental image variables and
 credentials are not inherited. Nitro verifies its original container command uses
 that same prefix before each bound probe. This is a declared workload configuration,
 not a filter applied only while measuring. Legacy guest-identity mode is unchanged.
+
+Both host-controller evaluations support explicit
+`--model mistral.ministral-3-8b-instruct`, with Ministral 3B retained as the default.
+Select the same model for both providers. The choice changes no prompt, functional
+cases, token/request limits or sandbox security/network controls, and is recorded
+in the workload and identity policy. It never accepts an agreement, subscribes
+to a model, changes region or falls back. Use a model already available to the
+operator's account. [AWS model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-ministral-3-8b.html).

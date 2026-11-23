@@ -27,8 +27,10 @@ class ModelTests(unittest.TestCase):
    def get_caller_identity(self):return {'Account':m.ACCOUNT}
    def converse(self,**kwargs):calls.append(kwargs);return {'output':{'message':{'content':[{'text':'{}'}]}}}
   current=types.SimpleNamespace(client=lambda *a,**k:Client())
-  with patch.object(m,'session',return_value=(current,object())):out=m.request(self.request_value())
+  value=self.request_value();value['modelId']='mistral.ministral-3-8b-instruct'
+  with patch.object(m,'session',return_value=(current,object())):out=m.request(value)
   self.assertTrue(out['converse_attempted']);self.assertEqual(len(calls),1)
+  self.assertEqual(calls[0]['modelId'],'mistral.ministral-3-8b-instruct')
  def test_invalid_model_never_loads_credentials(self):
   value=self.request_value();value['modelId']='other-model'
   with patch.object(m,'session',side_effect=AssertionError('credentials loaded')):out=m.request(value)

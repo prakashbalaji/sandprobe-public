@@ -294,3 +294,11 @@ legitimately make the unchanged RC Persistence category red. Provider-restricted
 endpoints remain excluded, counted as skipped, and never claimed as tested.
 Actual coverage and unknowns come from each fresh report; this feature alone is
 not evidence that a live persistence check succeeded.
+
+Both host-controller evaluations support explicit
+`--model mistral.ministral-3-8b-instruct`, with Ministral 3B retained as the default.
+Select the same model for both providers. The choice changes no prompt, functional
+cases, token/request limits or sandbox security/network controls, and is recorded
+in the workload and identity policy. It never accepts an agreement, subscribes
+to a model, changes region or falls back. Use a model already available to the
+operator's account. [AWS model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-ministral-3-8b.html).

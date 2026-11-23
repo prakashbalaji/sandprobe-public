@@ -20,7 +20,7 @@ import persistent_assessment
 from persistent_storage import EBSWorkspace
 from coding import strict
 from lifecycle import Commands, Failure, Journal, directory
-from render_profile import HOSTNAME, REGION, FixedErrorParser, render
+from render_profile import HOSTNAME, REGION, FixedErrorParser, render, LIGHTWEIGHT_MODELS
 from image_artifact import artifact_name, validate_run, select_artifact, download as download_image, open_verified
 from image_artifact import archive_transport, validate_destination
 from configuration_evidence import runtime_image_matches, verified_configuration_evidence
@@ -183,7 +183,7 @@ class Runner:
         if not isinstance(approval, str) or not 3 <= len(approval) <= 512 or not approval.isprintable():
             raise Failure("aws_eks_testing_approval_reference_required")
         if self.controller == "host":
-            if model != host_workload.MODEL:
+            if model not in LIGHTWEIGHT_MODELS:
                 raise Failure("host_controller_requires_fixed_model")
             host_workload.model_preflight(self)
         # Validate the supported model syntax using the same renderer as live.

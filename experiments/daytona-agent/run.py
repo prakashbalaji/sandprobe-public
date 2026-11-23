@@ -239,6 +239,9 @@ def cleanup_owned(folder, args, env):
     return cleanup
 
 def main(args):
+    model = getattr(args, "model", "mistral.ministral-3-3b-instruct")
+    if model not in {"mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"}:
+        raise Failure("unsupported_model")
     storage_profile = getattr(args, "storage_profile", "ephemeral")
     if storage_profile not in ("ephemeral", "persistent-workspace", "persistent-artifacts"):
         raise Failure("unsupported_storage_profile")
@@ -283,7 +286,7 @@ def main(args):
     persist(folder / "intent.json", {"schema": "sandprobe.managed-daytona/1", "run_id": run_id,
             "source_commit": source, "model_client_version":model_check["client_version"], "profile": PROFILE, "region": REGION, "account": ACCOUNT,
             "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials", "upload_hosts": approved_hosts,
-            "storage_profile": storage_profile})
+            "storage_profile": storage_profile, "model": model})
     print("Managed run: " + run_id, flush=True)
     print("Private records: " + str(folder), flush=True)
     tools = folder / "tools"
@@ -315,7 +318,7 @@ def main(args):
               "--model-python",args.model_python,"--out", str(folder), "--run-id", run_id, "--snapshot", SNAPSHOT,
               "--network", ",".join(ip + "/32" for ip in network), "--source-root", str(ROOT),
               "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts),
-              "--storage-profile", storage_profile], env, timeout=1500 if storage_profile != "ephemeral" else 1000)
+              "--storage-profile", storage_profile, "--model", model], env, timeout=1500 if storage_profile != "ephemeral" else 1000)
     except (Failure, KeyboardInterrupt):
         failed = True
         persist(folder / "execution-failure.json", {"category": "managed_execution_incomplete"})
@@ -328,6 +331,8 @@ def main(args):
     evaluation=json.loads((folder/"evaluation.json").read_text())
     assessment=evaluation["configuration_assessment"]
     workload=evaluation["functional_workload"]
+    if workload.get("model") != model:
+        raise Failure("workload_model_mismatch")
     exposure=evaluation.get("exposure_scorecard",{})
     if (evaluation.get("primary_assessment")!="rc_exposure_scorecard"
             or evaluation.get("managed_run_id")!=run_id or evaluation.get("source_commit")!=source
@@ -361,6 +366,7 @@ if __name__ == "__main__":
     parser.add_argument("--go", required=True)
     parser.add_argument("--cf-helper", required=True)
     parser.add_argument("--dns-reference", required=True)
+    parser.add_argument("--model", choices=("mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"), default="mistral.ministral-3-3b-instruct")
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace", "persistent-artifacts"), default="ephemeral")
     args = parser.parse_args()

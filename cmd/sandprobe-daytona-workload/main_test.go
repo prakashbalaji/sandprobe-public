@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +158,35 @@ func TestUploadMeasurementUsesFrozenWorkloadPolicy(t *testing.T) {
 	}
 	if addresses, err := workloadUploadAddresses([]string{"github.com"}, ""); err != nil || len(addresses) != 0 {
 		t.Fatal("binding added an unselected model destination")
+	}
+}
+
+func TestSelectedModelReachesSharedController(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := controller(ctx, options{root: filepath.Join("..", ".."), model: "mistral.ministral-3-8b-instruct"}, "request", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request struct {
+		Model        string          `json:"modelId"`
+		OutputConfig json.RawMessage `json:"outputConfig"`
+		Inference    struct {
+			Max         int `json:"maxTokens"`
+			Temperature int `json:"temperature"`
+		} `json:"inferenceConfig"`
+	}
+	if json.Unmarshal(raw, &request) != nil || request.Model != "mistral.ministral-3-8b-instruct" || len(request.OutputConfig) == 0 || request.Inference.Max != 2048 || request.Inference.Temperature != 0 {
+		t.Fatal("selected model or limits lost")
+	}
+	if boundModelRequest(options{model: "mistral.ministral-3-8b-instruct"}, []byte(`{"modelId":"mistral.ministral-3-3b-instruct"}`)) {
+		t.Fatal("model fallback accepted")
+	}
+	folder := t.TempDir()
+	if os.Chmod(folder, 0700) != nil {
+		t.Fatal("private fixture directory")
+	}
+	if err = execute(ctx, options{model: "unapproved-model", folder: folder}); err == nil || err.Error() != "unsupported workload model" {
+		t.Fatal("unsupported model reached preparation", err)
 	}
 }

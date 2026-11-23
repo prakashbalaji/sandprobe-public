@@ -50,7 +50,7 @@ def failure_document(error, default="execution"):
 def converse_request(model_id, messages):
     request = {"modelId": model_id, "messages": messages,
                "inferenceConfig": {"maxTokens": 2048, "temperature": 0}}
-    if model_id == "mistral.ministral-3-3b-instruct":
+    if model_id in {"mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"}:
         # MOD-4: provider grammar enforcement supplements the strict local parser.
         schema = {"type": "object", "properties": {"solution.py": {"type": "string"}},
                   "required": ["solution.py"], "additionalProperties": False}
