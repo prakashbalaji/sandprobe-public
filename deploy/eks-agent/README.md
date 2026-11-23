@@ -257,3 +257,40 @@ in `internal/host/workload_environment.json`; incidental image variables and
 credentials are not inherited. Nitro verifies its original container command uses
 that same prefix before each bound probe. This is a declared workload configuration,
 not a filter applied only while measuring. Legacy guest-identity mode is unchanged.
+
+## Comparable persistent artifact profile
+
+Add `--storage-profile persistent-artifacts` with `--controller host` to assess
+owned persistent output while keeping `/workspace` and its private cache local.
+Daytona uses the same profile name and standard coding protocol. Both keep the
+same UID/GID10001, protected HOME, model, maximum two requests, nine functional
+cases and network intent. Nitro's existing read-only root and native seccomp
+controls remain enabled. This comparison measures a configured deployment;
+Daytona object storage and Nitro block storage have different filesystem semantics.
+
+Nitro explicitly creates an encrypted 1GiB gp3 volume in the recorded receiver
+node's zone and records its returned ID before a static Auto Mode PV references
+it. Both PV and PVC use `ReadWriteOncePod`, following
+[AWS Nitro storage guidance](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-storage.html).
+The external volume has the original cluster-name tag required for
+[Auto Mode static provisioning](https://docs.aws.amazon.com/eks/latest/userguide/create-storage-class.html).
+There is no dynamic CSI create, tag-based ownership discovery or existing-volume
+adoption. `/persist` must support a bounded synthetic artifact write/readback as
+the agent before any model call. The same artifact program is used on Daytona;
+neither path changes native mount ownership or permissions.
+
+After the workload, Sandprobe runs its generic PER-5 marker/recreate/recheck.
+The original Job is UID-deleted and confirmed gone before replacement. Only the
+name and configuration hash change in the original host-rendered Job; no second
+model workload runs. Replacement identities and unresolved creates remain in the
+private reset journal, imported even on grading failure. Both Jobs stop before
+final receiver calibration. Recovery reads the recorded storage profile and uses
+the same private run-folder lock. Cluster deletion confirms its Kubernetes
+children gone; separate EBS deletion requires original-cluster absence, no
+attachments and exact-volume-ID absence. A DELETE response alone is insufficient.
+
+Persistent artifacts are a separately labelled profile. Retained markers can
+legitimately make the unchanged RC Persistence category red. Provider-restricted
+endpoints remain excluded, counted as skipped, and never claimed as tested.
+Actual coverage and unknowns come from each fresh report; this feature alone is
+not evidence that a live persistence check succeeded.

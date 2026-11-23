@@ -142,7 +142,7 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
         items.insert(2, {"apiVersion": "v1", "kind": "PersistentVolume",
                          "metadata": {"name": storage_class,"labels":dict(labels)},
                          "spec": {"capacity":{"storage":"1Gi"},"volumeMode":"Filesystem",
-                                  "accessModes":["ReadWriteOnce"],"persistentVolumeReclaimPolicy":"Retain",
+                                  "accessModes":["ReadWriteOncePod"],"persistentVolumeReclaimPolicy":"Retain",
                                   "storageClassName":storage_class,
                                   "claimRef":{"namespace":namespace,"name":claim},
                                   "csi":{"driver":"ebs.csi.eks.amazonaws.com","volumeHandle":workspace_volume["id"],"fsType":"ext4"},
@@ -150,7 +150,7 @@ def render(run_id, image, account, model, endpoint_ips, dns_ip, controller="gues
                                       "key":"topology.kubernetes.io/zone","operator":"In","values":[workspace_volume["zone"]]}]}]}}}})
         items.insert(3, {"apiVersion": "v1", "kind": "PersistentVolumeClaim",
                          "metadata": metadata(claim),
-                         "spec": {"accessModes": ["ReadWriteOnce"], "volumeMode": "Filesystem",
+                         "spec": {"accessModes": ["ReadWriteOncePod"], "volumeMode": "Filesystem",
                                   "storageClassName": storage_class,
                                   "volumeName":storage_class,
                                   "resources": {"requests": {"storage": "1Gi"}}}})

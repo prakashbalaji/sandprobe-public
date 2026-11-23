@@ -22,6 +22,9 @@ class ProfileTests(unittest.TestCase):
         after_policies=[v for v in plan["kubernetes"]["items"] if v["kind"]=="NetworkPolicy"]
         self.assertEqual(before_policies,after_policies)
         self.assertEqual(plan["storage_context"]["mount_path"],"/persist")
+        storage = {item["kind"]: item for item in plan["kubernetes"]["items"] if item["kind"] in {"PersistentVolume", "PersistentVolumeClaim"}}
+        self.assertEqual(storage["PersistentVolume"]["spec"]["accessModes"], ["ReadWriteOncePod"])
+        self.assertEqual(storage["PersistentVolumeClaim"]["spec"]["accessModes"], ["ReadWriteOncePod"])
     def test_persistent_workspace_preserves_network_and_agent_controls(self):
         args = self.settings()
         args.update(controller="host", model=profile.LIGHTWEIGHT_MODEL)

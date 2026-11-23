@@ -203,16 +203,16 @@ class RunnerTests(unittest.TestCase):
             runner = FakeRunner(j, {})
             key = f"kube:Job:{runner.ns}:model-task"
             j.intent(key, name="model-task")
-            j.recorded(key, uid="original-uid")
+            j.recorded(key, uid="a" * 32)
             calls = []
-            runner.scalar = lambda *a: "original-uid"
+            runner.scalar = lambda *a: "a" * 32
             def kube(*args, **kwargs):
                 calls.append((args, kwargs))
                 return b""
             runner.kube = kube
             runner.delete_job()
             body = json.loads(calls[0][1]["payload"])
-            self.assertEqual(body["preconditions"], {"uid": "original-uid"})
+            self.assertEqual(body["preconditions"], {"uid": "a" * 32})
             self.assertEqual(body["propagationPolicy"], "Foreground")
             j.close()
 

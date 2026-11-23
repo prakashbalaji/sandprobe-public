@@ -60,6 +60,16 @@ func (p *PodBox) checkWorkspaceBinding(ctx context.Context, b AgentPodBinding) e
 	if err := p.checkWorkspacePodStorage(ctx, b); err != nil {
 		return err
 	}
+	if err := p.checkPersistentPrincipal(ctx, b); err != nil {
+		return err
+	}
+	return p.checkWorkspaceResources(ctx, b)
+}
+
+func (p *PodBox) checkWorkspaceResources(ctx context.Context, b AgentPodBinding) error {
+	if !validAgentWorkspace(b) {
+		return errors.New("persistent storage declaration invalid")
+	}
 	w := b.Workspace
 	if err := p.workspaceFields(ctx, "namespace", b.Namespace,
 		[]string{".metadata.uid", `.metadata.labels.sandprobe\.run`, ".metadata.deletionTimestamp"},
@@ -83,7 +93,7 @@ func (p *PodBox) checkWorkspaceBinding(ctx context.Context, b AgentPodBinding) e
 			".spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].key",
 			".spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].operator",
 			".spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[*]", ".metadata.deletionTimestamp"},
-		[]string{w.PVUID, "Bound", w.ClaimUID, b.Namespace, claim, "ebs.csi.eks.amazonaws.com", w.VolumeID, "ext4", name, "Filesystem", "1Gi", "ReadWriteOnce", "Retain", "topology.kubernetes.io/zone", "In", w.Zone, ""}); err != nil {
+		[]string{w.PVUID, "Bound", w.ClaimUID, b.Namespace, claim, "ebs.csi.eks.amazonaws.com", w.VolumeID, "ext4", name, "Filesystem", "1Gi", "ReadWriteOncePod", "Retain", "topology.kubernetes.io/zone", "In", w.Zone, ""}); err != nil {
 		return err
 	}
 	return p.workspaceFields(ctx, "storageclass", name,
@@ -130,6 +140,57 @@ func (p *PodBox) checkWorkspacePodStorage(ctx context.Context, b AgentPodBinding
 			if !reflect.DeepEqual(indexed[v["name"].(string)], v) {
 				return bad
 			}
+		}
+	}
+	return nil
+}
+
+// The replacement's actual admission result must preserve the original hardened
+// principal; the frozen env hash alone is not a hash of the live Pod spec.
+func (p *PodBox) checkPersistentPrincipal(ctx context.Context, b AgentPodBinding) error {
+	bad := errors.New("persistent workload principal changed or unavailable")
+	pod := map[string]any{"runAsUser": float64(10001), "runAsGroup": float64(10001), "runAsNonRoot": true, "fsGroup": float64(10001), "seccompProfile": map[string]any{"type": "RuntimeDefault"}}
+	if b.Workspace.StorageProfile != "persistent-artifacts" {
+		pod["fsGroupChangePolicy"] = "OnRootMismatch"
+	}
+	container := map[string]any{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "privileged": false, "capabilities": map[string]any{"drop": []any{"ALL"}}}
+	for _, check := range []struct {
+		field string
+		want  map[string]any
+	}{{".spec.securityContext", pod}, {".spec.containers[0].securityContext", container}} {
+		raw, err := p.run(ctx, nil, "get", "pod", b.Name, "-o", "jsonpath-as-json={"+check.field+"}")
+		var got []map[string]any
+		if err != nil || strictjson.Decode(raw, 8192, &got) != nil || len(got) != 1 {
+			return bad
+		}
+		if check.field == ".spec.securityContext" {
+			if got[0]["supplementalGroupsPolicy"] == "Merge" {
+				delete(got[0], "supplementalGroupsPolicy")
+			}
+		} else {
+			for key, value := range map[string]any{"runAsUser": float64(10001), "runAsGroup": float64(10001), "runAsNonRoot": true} {
+				if v, ok := got[0][key]; ok {
+					if !reflect.DeepEqual(v, value) {
+						return bad
+					}
+					delete(got[0], key)
+				}
+			}
+		}
+		if !reflect.DeepEqual(got[0], check.want) {
+			return bad
+		}
+	}
+	raw, err := p.run(ctx, nil, "get", "pod", b.Name, "-o", "jsonpath="+workspaceProjection([]string{
+		".spec.containers[*].name", ".spec.initContainers[*].name", ".spec.ephemeralContainers[*].name", ".spec.serviceAccountName", ".spec.automountServiceAccountToken",
+		".spec.hostNetwork", ".spec.hostPID", ".spec.hostIPC", ".spec.shareProcessNamespace", ".spec.containers[0].envFrom[*]"}))
+	values := strings.Split(string(raw), "\n")
+	if err != nil || len(values) != 10 || values[0] != "agent" || values[1] != "" || values[2] != "" || values[3] != "model-task" || values[4] != "false" || values[9] != "" {
+		return bad
+	}
+	for _, v := range values[5:9] {
+		if v != "" && v != "false" {
+			return bad
 		}
 	}
 	return nil

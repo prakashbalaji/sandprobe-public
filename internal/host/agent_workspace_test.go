@@ -24,7 +24,7 @@ func workspaceBindingFixture(profiles ...string) (AgentPodBinding, map[string][]
 	return b, map[string][]string{
 		"namespace":             {w.NamespaceUID, b.RunID, ""},
 		"persistentvolumeclaim": {w.ClaimUID, "Bound", name, name, ""},
-		"persistentvolume":      {w.PVUID, "Bound", w.ClaimUID, b.Namespace, claim, "ebs.csi.eks.amazonaws.com", w.VolumeID, "ext4", name, "Filesystem", "1Gi", "ReadWriteOnce", "Retain", "topology.kubernetes.io/zone", "In", w.Zone, ""},
+		"persistentvolume":      {w.PVUID, "Bound", w.ClaimUID, b.Namespace, claim, "ebs.csi.eks.amazonaws.com", w.VolumeID, "ext4", name, "Filesystem", "1Gi", "ReadWriteOncePod", "Retain", "topology.kubernetes.io/zone", "In", w.Zone, ""},
 		"storageclass":          {w.ClassUID, "ebs.csi.eks.amazonaws.com", "Retain", "WaitForFirstConsumer", ""},
 	}
 }
@@ -40,6 +40,22 @@ func TestAgentWorkspaceReadbacksRefuseReplacementAndConfigurationDrift(t *testin
 			p.kubectl = func(_ context.Context, _ io.Reader, out, errOut io.Writer, args ...string) error {
 				command := strings.Join(args, " ")
 				if strings.Contains(command, " get pod ") {
+					if strings.Contains(command, "jsonpath-as-json={.spec.securityContext}") {
+						extra := ""
+						if profile != "persistent-artifacts" {
+							extra = `,"fsGroupChangePolicy":"OnRootMismatch"`
+						}
+						_, e := io.WriteString(out, `[{"runAsUser":10001,"runAsGroup":10001,"runAsNonRoot":true,"fsGroup":10001,"seccompProfile":{"type":"RuntimeDefault"}`+extra+`}]`)
+						return e
+					}
+					if strings.Contains(command, "jsonpath-as-json={.spec.containers[0].securityContext}") {
+						_, e := io.WriteString(out, `[{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"privileged":false,"capabilities":{"drop":["ALL"]}}]`)
+						return e
+					}
+					if strings.Contains(command, ".spec.containers[*].name") {
+						_, e := io.WriteString(out, strings.Join([]string{"agent", "", "", "model-task", "false", "", "", "", "", ""}, "\n"))
+						return e
+					}
 					podReads++
 					volumes := []map[string]any{{"name": "workspace", "emptyDir": map[string]any{"sizeLimit": "64Mi"}}, {"name": "scratch", "emptyDir": map[string]any{"sizeLimit": "64Mi"}}}
 					mounts := []map[string]any{{"name": "workspace", "mountPath": "/workspace"}, {"name": "scratch", "mountPath": "/tmp"}}
