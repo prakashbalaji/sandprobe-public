@@ -3,6 +3,8 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
 ## 0.3.0-rc.1 (2026-11-23)
 
 The first release candidate for 0.3.0. Provider statuses are still being validated.
@@ -25,8 +27,11 @@ saved in it and never grade its observations again (ANL-1).
 - **AMP-2, root or capabilities.** 0.2.1 graded AMP-2 from the effective capability set alone, so an agent holding a
   capability only in its permitted set passed, though a process can raise a permitted capability into its effective
   set at will. Confirmed: `CAP_DAC_READ_SEARCH`, permitted but not effective, passed; it's now a Critical finding.
-  AMP-2 now counts the permitted and ambient sets as well. A 0.2.1 AMP-2 pass can't be trusted if the report's
-  `identity.cap_prm` isn't all zeros. ([#34](https://github.com/summationai/sandprobe/pull/34))
+  AMP-2 now counts the permitted and ambient sets as well. 0.2.1 also ignored the inheritable set. With `NoNewPrivs`
+  0, an exec of a file whose file capabilities name an inheritable capability makes it permitted, and the probe
+  doesn't look for such files; so while `NoNewPrivs` is 0, an inheritable capability now leaves AMP-2 unknown. A 0.2.1
+  AMP-2 pass can't be trusted if the report's `identity.cap_prm` isn't all zeros, or if `identity.no_new_privs` is 0
+  and `identity.cap_inh` isn't all zeros. ([#34](https://github.com/summationai/sandprobe/pull/34))
 - **AMP-3, new privileges.** With `NoNewPrivs` 0, 0.2.1 passed AMP-3 whenever it found no setuid-root file in the
   system binary directories. It never looked for files with file capabilities, or for setuid-root files elsewhere,
   and running either can raise the agent's privilege. Confirmed: an agent with every capability set empty gained
