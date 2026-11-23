@@ -29,9 +29,10 @@ type daytonaVolumeJournal struct {
 }
 
 type daytonaVolumeConsumer struct {
-	Journal string
-	ID      string
-	Gone    bool
+	Journal       string
+	ID            string
+	Gone          bool
+	RefusalSHA256 string `json:",omitempty"` // RUN-24: rejected create, never an invented deletion
 }
 
 // DaytonaVolume holds only storage created by this run. It is not an existing
@@ -150,7 +151,8 @@ func (c *DaytonaClient) RecoverDaytonaVolume(path string) (*DaytonaVolume, error
 	}
 	paths, ids := map[string]bool{}, map[string]bool{}
 	for _, consumer := range j.Consumers {
-		if filepath.Dir(consumer.Journal) != filepath.Dir(path) || !daytonaConsumerName.MatchString(filepath.Base(consumer.Journal)) || paths[consumer.Journal] || (consumer.ID != "" && (!daytonaID.MatchString(consumer.ID) || ids[consumer.ID])) || (consumer.Gone && consumer.ID == "") || ((j.Phase == "cleaned" || j.Phase == "delete_intent") && !consumer.Gone) {
+		rejected := regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(consumer.RefusalSHA256) && consumer.ID == "" && !consumer.Gone
+		if (consumer.RefusalSHA256 != "" && !rejected) || filepath.Dir(consumer.Journal) != filepath.Dir(path) || !daytonaConsumerName.MatchString(filepath.Base(consumer.Journal)) || paths[consumer.Journal] || (consumer.ID != "" && (!daytonaID.MatchString(consumer.ID) || ids[consumer.ID])) || (consumer.Gone && consumer.ID == "") || ((j.Phase == "cleaned" || j.Phase == "delete_intent") && !consumer.Gone && !rejected) {
 			return nil, errors.New("Daytona volume consumer record invalid")
 		}
 		paths[consumer.Journal], ids[consumer.ID] = true, true
@@ -330,6 +332,9 @@ func (v *DaytonaVolume) Destroy(ctx context.Context) error {
 		return nil
 	}
 	for _, c := range v.journal.Consumers {
+		if c.RefusalSHA256 != "" {
+			continue
+		}
 		if c.ID == "" || !c.Gone {
 			return errors.New("Daytona volume still has an unresolved sandbox consumer")
 		}

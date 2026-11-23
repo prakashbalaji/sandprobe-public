@@ -874,6 +874,21 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   deletion covers unknown Kubernetes children; independently delete the original
   EBS ID only after confirmed original-cluster absence and no attachments.
 
+- **RUN-24 Rejected Daytona replacement recovery.** An ID-less consumer remains
+  unresolved by default. A trusted management audit may resolve a rejected create
+  only after its 110-second transport budget plus ten seconds have elapsed: one
+  organization-bound sandbox-create event must record HTTP400, no target ID, and
+  the original request's exact random name, nonce, snapshot, network allowlist and
+  volume binding. Bound its timestamp to the journaled create window. Require an
+  independently authenticated, complete exact-name lookup with no matching object;
+  any object with that name, pagination, missing audit or contradictory event
+  blocks recovery. Never adopt or delete an object found by that lookup. Persist
+  a digest of the matched refusal evidence on the original volume consumer,
+  separately from a deleted consumer: no invented sandbox ID or deletion proof.
+  Only then may exact-ID volume cleanup proceed. Retain the failed create journal,
+  never retry the create, and leave failed reset/recheck evidence unknown. No raw
+  audit body, error message, key metadata or unrelated event leaves the adapter.
+
 - **RUN-15 Protected startup configuration, writable project.** Improve the
   configuration shared by the Nitro and Daytona workload runs: HOME points to an
   owner-root0555 directory under the owned /opt/sandprobe fixture, with protected
@@ -2595,6 +2610,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-19 | controller failure-step sanitization and unchanged model budget; contract mismatch metadata and refusal; setgid-workspace Linux smoke with unsafe-existing-cache refusal and nine cases; EGR-6 stage-count sanitization tests |
 | RUN-18 | actual environment-clearing subprocess and original-command/probe binding tests; legacy contract cannot select cleared observations; shared-policy Python workload checks; network-disabled/read-only Linux container with inherited synthetic authority and nine functional cases |
 | RUN-17 | host-controller protocol/remote execution/two-attempt/ambiguous-count and identity-absence tests; schema3 contract refusal matrix and report-version selection; original guest-mode regressions |
+| RUN-24 | `internal/host/daytona_runtime_test.py`: exact audit/request/organization/time/absence binding and refusal cases; `daytona_volume_test.go`, `daytona_persistent_test.go`: durable rejected consumer, exact-ID storage cleanup and unresolved/contradictory guards |
 | RUN-23 | `internal/host/agent_persistent_test.go`: durable deletion/create ordering, UID preconditions, lost-create uncertainty and replacement guards; `experiments/eks-agent/test_persistent_assessment.py`: profile intent, native artifact proof, recovery import, failed-child paths and independent cleanup; `internal/host/agent_workspace_test.go`: creator identity, both static storage profiles and actual pod volume/mount drift; `agent_reset_job_test.go`: original-manifest tampering and cross-language hashes from the real Python renderer; `experiments/eks-agent/test_profile.py`: static owned-volume intent preserves network/identity controls and artifact storage leaves coding/cache paths local; `test_persistent_storage.py`: EBS ownership, metadata/attachment guards and exact operation-scoped absence classification; `internal/host/daytona_runtime_test.py`, `daytona_volume_test.go`, `daytona_persistent_test.go`: original/consumer IDs, same-volume recreation, context guards, unknown-create recovery and terminal tombstone identity; `daytona_artifact_test.go`: exact bounded agent readback and failure metadata; managed Daytona runner tests cover profile forwarding and cleanup outcomes; `cmd/sandprobe-daytona-workload/persistent_test.go`: assessment/recovery exclusion and private lock guards |
 | RUN-11 | nullable native-network policy, fixed-stage/no-create status and failed-preparation retention regressions |
 | WGR-8 / RUN-10 | portable snapshot contract/grade calibration; managed Daytona lifecycle, principal, workload isolation and failure/cleanup tests |

@@ -13,6 +13,75 @@ import (
 
 const testDaytonaVolumeID = "12345678-1234-1234-1234-123456789abc"
 
+// RUN-24: an independently proven rejection is not a fabricated sandbox ID or
+// deletion. Missing/contradictory proof retains both intent and storage.
+func TestDaytonaRejectedConsumerRecovery(t *testing.T) {
+	for _, fault := range []string{"", "transport", "not-refused", "digest"} {
+		t.Run(fault, func(t *testing.T) {
+			c, dir, deleted, _ := volumeFixture(t)
+			v, err := c.CreateDaytonaVolume(context.Background(), dir, "/persist")
+			if err != nil {
+				t.Fatal(err)
+			}
+			j := daytonaJournal{Nonce: "n" + strings.Repeat("a", 24), Name: "sandprobe-" + strings.Repeat("b", 24), Requested: time.Now().UTC().Add(-3 * time.Minute), SnapshotID: testDaytonaVolumeID, NetworkAllowList: "52.94.0.1/32", Volume: &daytonaVolumeMount{ID: v.ID(), MountPath: "/persist"}}
+			path := filepath.Join(dir, "daytona-"+j.Nonce+".state")
+			raw, _ := json.Marshal(j)
+			if err = os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err = v.consumerIntent(path); err != nil {
+				t.Fatal(err)
+			}
+			base := c.runtime
+			c.runtime = func(ctx context.Context, in map[string]any) ([]byte, error) {
+				if in["op"] != "rejected_create" {
+					return base(ctx, in)
+				}
+				if in["name"] != j.Name || in["nonce"] != j.Nonce || in["organization"] != v.journal.Organization || in["snapshot_id"] != j.SnapshotID || in["network_allow_list"] != j.NetworkAllowList || in["requested"] != j.Requested.Format(time.RFC3339Nano) {
+					t.Fatal("refusal not bound to original intent")
+				}
+				if fault == "transport" {
+					return nil, errors.New("fixed unavailable audit")
+				}
+				digest := strings.Repeat("c", 64)
+				if fault == "digest" {
+					digest = "invalid"
+				}
+				return json.Marshal(map[string]any{"refused": fault != "not-refused", "evidence_sha256": digest})
+			}
+			result, err := c.CleanupDaytonaPersistentState(context.Background(), v.StatePath())
+			if fault != "" {
+				if err == nil || result.Confirmed || *deleted {
+					t.Fatal("unproven refusal released storage")
+				}
+				return
+			}
+			if err != nil || !result.Confirmed || !*deleted || len(result.BoxIDs) != 0 {
+				t.Fatal("refusal recovery failed or invented ID", err)
+			}
+			v, err = c.RecoverDaytonaVolume(v.StatePath())
+			if err != nil || len(v.journal.Consumers) != 1 {
+				t.Fatal("durable refusal missing", err)
+			}
+			consumer := v.journal.Consumers[0]
+			if consumer.RefusalSHA256 != strings.Repeat("c", 64) || consumer.ID != "" || consumer.Gone {
+				t.Fatal("refusal was mislabeled deletion")
+			}
+			if _, err = os.Stat(path); err != nil {
+				t.Fatal("failed create intent was removed")
+			}
+			// Contradictory local state cannot bypass the original-ID guard.
+			v.journal.Consumers[0].ID = testDaytonaVolumeID
+			if err = v.save(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = c.RecoverDaytonaVolume(v.StatePath()); err == nil {
+				t.Fatal("contradictory refused/created consumer accepted")
+			}
+		})
+	}
+}
+
 func volumeFixture(t *testing.T) (*DaytonaClient, string, *bool, *[]string) {
 	t.Helper()
 	client, _ := NewDaytonaClient("fixture-key", "")
@@ -27,6 +96,8 @@ func volumeFixture(t *testing.T) (*DaytonaClient, string, *bool, *[]string) {
 		calls = append(calls, op)
 		var out any
 		switch op {
+		case "rejected_create":
+			return nil, errors.New("fixture has no authenticated refusal evidence")
 		case "volume_create":
 			name = in["name"].(string)
 			raw, err := os.ReadFile(filepath.Join(dir, "workspace-volume.state"))
