@@ -67,8 +67,8 @@ Test traffic goes to the hosted canary at `control.pub.probe.ac0.dev` by default
 with the run's nonces, for the run's lifetime (at most 30 minutes), and your machine's public address in a rate
 counter for at most an hour, both in memory only. To use a canary you run, name it with
 `-canary-url <url> -canary-pin <pin>`, or with `-canary <state file>` for one from `deploy/canary.sh`. With
-`-no-canary`, the probe sends no test traffic to any canary: Exfiltration reads "Not tested", and the run can't
-grade above C. Checks you turn on with `-provider-endpoints` that don't need a canary still make the connections the
+`-no-canary`, the probe sends no test traffic to any canary: Exfiltration reads "Not tested", and the run finishes
+incomplete (exit 5). Checks you turn on with `-provider-endpoints` that don't need a canary still make the connections the
 plan names: SEC-4's requests to the cloud metadata addresses and AMP-7's TLS handshake with the Kubernetes API. EGR-3
 doesn't run, since it needs a canary, and AMP-6 never connects on an existing box.
 Cloud access reads "Not tested" and stays red, since SEC-4 and AMP-7 are off. **New in 0.3.0:** if your provider's

@@ -228,3 +228,69 @@ func TestScoreNoCanary(t *testing.T) {
 		t.Errorf("an unknown the canary doesn't explain: %+v", r)
 	}
 }
+
+// SCR-2: a green category whose tested checks are all find-only not_found (zero conclusive checks) carries
+// GreenNotProven and renders "GREEN · NOT PROVEN" on the page; a category with at least one conclusive pass/absent
+// alongside not_found stays proven GREEN; forged GreenNotProven flags are rejected.
+func TestGreenNotProven(t *testing.T) {
+	b, err := os.ReadFile("../../demo/reports/vibe.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vibe Doc
+	if err := json.Unmarshal(b, &vibe); err != nil {
+		t.Fatal(err)
+	}
+	vc := Score(vibe)
+	if vc.Score != 1 || vc.Of != 6 {
+		t.Fatalf("vibe score: want 1/6, got %d/%d", vc.Score, vc.Of)
+	}
+	cloud := row(t, vc, "Cloud access")
+	if !cloud.Green || !cloud.GreenNotProven || cloud.Coverage == nil || cloud.Coverage.Conclusive != 0 {
+		t.Fatalf("vibe Cloud access: want Green && GreenNotProven with 0 conclusive, got %+v (cov %+v)", cloud, cloud.Coverage)
+	}
+	page, err := HTML(vibe, "graphite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := string(page)
+	if !strings.Contains(p, `<li class="cat green gnp"`) || !strings.Contains(p, `<span class="verdict">GREEN · NOT PROVEN</span>`) {
+		t.Fatalf("HTML page missing Green · not proven badge")
+	}
+
+	// Exfiltration with EGR-1 not_found alongside proven EGR-2..EGR-5 passes has Conclusive > 0, so GreenNotProven is false.
+	mixed := Score(doc(obs.Pass, map[string]Check{"EGR-1": {Result: obs.NotFound}}))
+	if ex := row(t, mixed, "Exfiltration"); !ex.Green || ex.GreenNotProven || ex.NotProven != "not proven: DNS" {
+		t.Fatalf("mixed proven + not_found: want Green && !GreenNotProven, got %+v", ex)
+	}
+
+	// Forgery checks on validCardCoverage and validWorkloadExposure.
+	forgedProven := Score(doc(obs.Pass, nil))
+	forgedProven.Rows[0].GreenNotProven = true
+	if validCardCoverage(forgedProven) {
+		t.Error("accepted GreenNotProven on a category with conclusive passes")
+	}
+	droppedGNP := Score(vibe)
+	for i := range droppedGNP.Rows {
+		if droppedGNP.Rows[i].Name == "Cloud access" {
+			droppedGNP.Rows[i].GreenNotProven = false
+		}
+	}
+	if !validCardCoverage(droppedGNP) {
+		t.Error("rejected historical coverage without the optional display flag")
+	}
+	wx := WorkloadExposure{
+		Schema:            "sandprobe.workload-exposure/1",
+		RunID:             "r1",
+		BoxID:             "b1",
+		InputVerification: "proof_recomputation_unauthenticated_input",
+		Card:              Score(vibe),
+	}
+	if !validWorkloadExposure(wx) {
+		t.Fatal("honest GreenNotProven workload exposure rejected")
+	}
+	wx.Rows[0].GreenNotProven = true // Secrets is red in vibe.json
+	if validWorkloadExposure(wx) {
+		t.Error("accepted GreenNotProven on a red row")
+	}
+}

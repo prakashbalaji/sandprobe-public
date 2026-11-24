@@ -105,6 +105,7 @@ a { color: inherit; text-decoration: none; }
 .cat-top { display: flex; align-items: center; gap: 9px; }
 .cats .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--red); }
 .cats .green .dot { background: var(--green); }
+.cats .green.gnp .dot { background: none; border: 1.5px dashed var(--green); }
 .cats .na .dot { background: none; border: 1.5px solid var(--faint); }
 .cats b { flex: 1; font-weight: 500; font-size: 15px; letter-spacing: -.01em; }
 .cats .q { display: block; margin: 2px 0 0 16px; color: var(--muted); font-size: 13px; }
@@ -123,6 +124,7 @@ a.t.amber { color: var(--unk); border: 1px dashed var(--unk-edge); }
 .verdict { flex: none; padding: 1px 8px; border: 1px solid var(--red-edge); border-radius: var(--r-pill); background: var(--red-tint); color: var(--red);
   font: 500 10.5px/1.6 var(--mono); letter-spacing: .04em; white-space: nowrap; }
 .cat.green .verdict { color: var(--green); border-color: var(--green-edge); background: none; }
+.cat.green.gnp .verdict { border-style: dashed; }
 .cat.na .verdict { color: var(--muted); border-color: var(--line2); background: none; }
 
 /* What to fix: every test once, by severity */
@@ -323,8 +325,8 @@ footer p { margin: 0; color: var(--faint); font-size: 12px; }
   </div>
   <ul class="stats" aria-label="The tests by result">{{range .Strip}}<li><b class="{{.Class}}">{{.N}}</b><span>{{.Label}}</span></li>{{end}}</ul>
   <ol class="cats">{{range .Cats}}
-    <li class="cat {{if .Green}}green{{else if .NotApplicable}}na{{else}}red{{end}}" id="cat-{{.Num}}">
-      <div class="cat-top"><span class="dot" aria-hidden="true"></span><b>{{.Name}}</b><span class="verdict">{{if .Green}}GREEN{{else if .NotApplicable}}NOT APPLICABLE{{else}}RED{{end}}</span></div>
+    <li class="cat {{if .Green}}green{{if .GreenNotProven}} gnp{{end}}{{else if .NotApplicable}}na{{else}}red{{end}}" id="cat-{{.Num}}">
+      <div class="cat-top"><span class="dot" aria-hidden="true"></span><b>{{.Name}}</b><span class="verdict">{{if .GreenNotProven}}GREEN · NOT PROVEN{{else if .Green}}GREEN{{else if .NotApplicable}}NOT APPLICABLE{{else}}RED{{end}}</span></div>
       <span class="q">{{.Question}}</span>{{if .Why}}<span class="why">{{.Why}}</span>{{end}}{{if .NotProven}}<span class="why np">{{.NotProven}}</span>{{end}}{{with .Coverage}}<span class="why cv">{{.Description}}</span>{{end}}
       <p class="tl"><span class="ran">{{.Run}}/{{.Total}} tests run</span>{{range .Tests}}<a class="t {{.Class}}" href="#{{.ID}}" title="{{.ID}}: {{.Result}}">{{.ID}}</a>{{end}}</p></li>{{end}}
   </ol>{{else}}<p class="kicker"><em>Invalid run: no score</em></p>
