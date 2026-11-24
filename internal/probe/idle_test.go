@@ -20,14 +20,24 @@ import (
 func TestOtherPIDs(t *testing.T) {
 	names := []string{"1", "2", "40", "41", "self", "net", "01", "+3", "0"}
 	twins := map[int]bool{41: true}
-	if got, skipped := otherPIDs(names, 40, twins, false); !slices.Equal(got, []int{1, 2}) || skipped {
+	if got, skipped, _ := otherPIDs(names, 40, twins, false, 0); !slices.Equal(got, []int{1, 2}) || skipped {
 		t.Errorf("no PID named: want 1 and 2 counted, got %v (skipped %v)", got, skipped)
 	}
-	if got, skipped := otherPIDs(names, 40, twins, true); !slices.Equal(got, []int{2}) || !skipped {
+	if got, skipped, _ := otherPIDs(names, 40, twins, true, 0); !slices.Equal(got, []int{2}) || !skipped {
 		t.Errorf("PID 1 named: want only 2 counted and PID 1 skipped, got %v (skipped %v)", got, skipped)
 	}
-	if got, skipped := otherPIDs([]string{"1", "2"}, 1, nil, true); !slices.Equal(got, []int{2}) || skipped {
+	if got, skipped, _ := otherPIDs([]string{"1", "2"}, 1, nil, true, 0); !slices.Equal(got, []int{2}) || skipped {
 		t.Errorf("the probe is PID 1 itself: want 2 counted and no skip claimed, got %v (skipped %v)", got, skipped)
+	}
+	// LNC-3: a pinned wrapper is one more skip, and PID 1 is handled as before beside it.
+	if got, init, wrap := otherPIDs(names, 40, twins, true, 2); len(got) != 0 || !init || !wrap {
+		t.Errorf("PID 1 named and wrapper 2 pinned: want nothing counted, got %v (%v %v)", got, init, wrap)
+	}
+	if got, init, wrap := otherPIDs(names, 40, twins, false, 2); !slices.Equal(got, []int{1}) || init || !wrap {
+		t.Errorf("wrapper 2 pinned only: want PID 1 counted, got %v (%v %v)", got, init, wrap)
+	}
+	if got, init, wrap := otherPIDs(names, 40, twins, false, 1); !slices.Equal(got, []int{2}) || init || !wrap {
+		t.Errorf("the wrapper is PID 1: want it skipped as the wrapper, got %v (%v %v)", got, init, wrap)
 	}
 }
 

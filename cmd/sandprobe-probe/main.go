@@ -4,7 +4,8 @@
 // stdin and writes one observation document to stdout. It never grades. With -survey it reads nothing and writes only
 // what the host needs to plan (SBX-3, SBX-5); -mark and -recheck are PER-5's steps around the reset (TWN-3). -whoami
 // [name] is PRV-15's identity-only preflight, and -expect-uid N, before any mode, refuses at startup unless all four of
-// the probe's uids are N. -idle is run docker's own entrypoint, which only waits (DKR-1).
+// the probe's uids are N. -idle is run docker's own entrypoint, which only waits (DKR-1). -wrap is run exec's wrapper
+// mode, which its shell becomes for the main run (LNC-1, LNC-2).
 package main
 
 import (
@@ -13,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"regexp"
 	"sandprobe/internal/quick"
 	"strconv"
 	"strings"
@@ -27,6 +30,13 @@ var BuildVersion = "dev"
 
 func main() {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "-wrap" {
+		w, err := parseWrap(args)
+		if err != nil {
+			fail(err)
+		}
+		os.Exit(probe.Wrap(w[0], w[1:]))
+	}
 	want, args, bound, err := parseExpect(args)
 	if err != nil {
 		fail(err)
@@ -134,6 +144,22 @@ func parseExpect(args []string) (int, []string, bool, error) {
 		return 0, nil, false, errors.New("-expect-uid binds a probe run, not " + rest[0])
 	}
 	return int(n), rest, true, nil
+}
+
+var wrapScratch = regexp.MustCompile(`^/[A-Za-z0-9._/-]{0,200}/sandprobe-[0-9a-f]{24}$|^/sandprobe-[0-9a-f]{24}$`)
+
+// parseWrap takes LNC-2's three arguments after -wrap, in order and in their forms: the scratch path in PRV-15's
+// form, then -expect-uid N. It returns the scratch, then the run's arguments. Anything else is refused. The tokens
+// come on stdin, never here (LNC-1).
+func parseWrap(args []string) ([]string, error) {
+	bad := errors.New("-wrap takes the scratch path and -expect-uid N")
+	if len(args) != 4 || !wrapScratch.MatchString(args[1]) || path.Clean(args[1]) != args[1] || strings.Contains(args[1], "..") {
+		return nil, bad
+	}
+	if _, rest, bound, err := parseExpect(args[2:]); err != nil || !bound || len(rest) != 0 {
+		return nil, bad
+	}
+	return args[1:], nil
 }
 
 func parseMode(args []string) (string, error) {

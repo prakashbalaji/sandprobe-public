@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"sandprobe/internal/canary"
 	"sandprobe/internal/catalog"
@@ -246,5 +247,103 @@ sp_gone() { docker inspect "$SANDPROBE_BOX" >/dev/null 2>&1 && return 1; docker 
 	}
 	if exec.Command("docker", "inspect", b.BoxID).Run() == nil {
 		t.Fatal("the container is still there")
+	}
+}
+
+// LNC-1 to LNC-4 end to end, the reproduction that turned every run exec red: a debian:bookworm-slim box (dash is its
+// sh) with an agent user, reached as the agent through docker exec. The shell execs the wrapper, so SEC-2 and SEC-5
+// pass with twin proof and name the wrapper they skipped; a same-uid decoy is still a finding; and a name dash drops
+// from the person's docker exec never reaches the wrapper, so the run still passes. No scratch is left behind.
+func TestExecWrapper(t *testing.T) {
+	if os.Getenv("SANDPROBE_FIXTURES") == "" {
+		t.Skip("set SANDPROBE_FIXTURES=1 to run against Docker")
+	}
+	ctx := context.Background()
+	archOut, _ := exec.Command("docker", "info", "--format", "{{.Architecture}}").Output()
+	arch := map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[strings.TrimSpace(string(archOut))]
+	bin, sum, err := probes.Probe(arch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const image = "debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e"
+	id, err := exec.Command("docker", "run", "-d", "--rm", "--network", "none", image, "sleep", "600").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctr := strings.TrimSpace(string(id))
+	defer exec.Command("docker", "rm", "-f", ctr).Run()
+	if out, err := exec.Command("docker", "exec", ctr, "useradd", "-m", "-u", "1000", "agent").CombinedOutput(); err != nil {
+		t.Fatalf("useradd: %v %s", err, out)
+	}
+	yama, _ := exec.Command("docker", "exec", ctr, "sh", "-c", "cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null").Output()
+	scope := strings.TrimSpace(string(yama))
+
+	run := func(command ...string) map[string]obs.Observation {
+		t.Helper()
+		b, err := NewExecBox(command, bin, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Preflight(ctx, "agent"); err != nil {
+			t.Fatal(err)
+		}
+		c := &fakeCanary{answer: func(q canary.Request) canary.Answer { t.Errorf("asked the canary %s", q.Op); return canary.Answer{} }}
+		r, err := Execute(ctx, b, c, Options{Mode: "exec", ProbeSHA256: sum, Excluded: ExecExclusions(), NoCanary: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Report.Valid {
+			t.Fatalf("invalid run: %s", r.Report.Invalid)
+		}
+		if err := b.Cleanup(ctx); err != nil {
+			t.Fatal(err)
+		}
+		d, err := obs.ParseDoc(r.Doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]obs.Observation{}
+		for _, o := range d.Observations {
+			got[o.ID] = o
+		}
+		for _, o := range r.Report.Outcomes { // the grader's word decides the result; the raw observation shows the proof
+			if o.ID == "SEC-2" || o.ID == "SEC-5" {
+				ob := got[o.ID]
+				ob.Result = o.Result
+				got[o.ID] = ob
+			}
+		}
+		return got
+	}
+	shell := []string{"docker", "exec", "-i", "-u", "agent", ctr, "sh"}
+
+	// The box alone: a pass, with twin proof, naming the wrapper it skipped.
+	for id, o := range run(shell...) {
+		if (id == "SEC-2" || id == "SEC-5") && (o.Result != obs.Pass || o.Proof == nil || !o.Proof.Twin || !strings.Contains(o.Reason, "Sandprobe's own wrapper, PID ")) {
+			t.Errorf("box alone, %s: %+v %+v", id, o, o.Proof)
+		}
+	}
+	// A name dash drops from the person's own docker exec never reaches the wrapper: still a pass.
+	for id, o := range run("docker", "exec", "-i", "-u", "agent", "-e", "MY-KEY=sandprobe-fake", ctr, "sh") {
+		if (id == "SEC-2" || id == "SEC-5") && o.Result != obs.Pass {
+			t.Errorf("MY-KEY given, %s: %+v", id, o)
+		}
+	}
+	// A same-uid decoy is still a finding, on its own PID, never the wrapper's.
+	if err := exec.Command("docker", "exec", "-d", "-u", "agent", ctr, "sh", "-c", "echo $$ > /tmp/decoy.pid; exec sleep 300").Run(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	pid, _ := exec.Command("docker", "exec", ctr, "cat", "/tmp/decoy.pid").Output()
+	decoy := "/proc/" + strings.TrimSpace(string(pid)) + "/"
+	for id, o := range run(shell...) {
+		want := id == "SEC-2" || id == "SEC-5" && (scope == "" || scope == "0") // Yama 1 refuses a non-descendant's memory
+		if want && (o.Result != obs.Finding || !strings.Contains(o.Evidence, decoy)) {
+			t.Errorf("decoy %s, %s: %+v", decoy, id, o)
+		}
+	}
+	left, _ := exec.Command("docker", "exec", ctr, "sh", "-c", "ls -d /tmp/sandprobe-* 2>/dev/null | wc -l").Output()
+	if strings.TrimSpace(string(left)) != "0" {
+		t.Fatalf("scratch left in the box: %s", left)
 	}
 }

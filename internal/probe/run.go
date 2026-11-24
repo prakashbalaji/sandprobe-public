@@ -25,7 +25,18 @@ type env struct {
 	root        bool
 	home        string
 	tw          *twins
-	ownPort     int // the probe's own loopback listener, AMP-5's twin
+	ownPort     int        // the probe's own loopback listener, AMP-5's twin
+	wrapper     *parentPin // LNC-3: Sandprobe's own wrapper, pinned once per run; nil when the parent isn't it
+	pinned      bool
+}
+
+// wrapperPin is LNC-3's pin, taken once per run, before the first of SEC-2 and SEC-5 lists /proc: both checks are held
+// to it, so a process that only later becomes the probe's parent is never skipped.
+func (e *env) wrapperPin() *parentPin {
+	if !e.pinned {
+		e.pinned, e.wrapper = true, pinWrapper()
+	}
+	return e.wrapper
 }
 
 func (e *env) ms() int64 { return time.Since(e.start).Milliseconds() }

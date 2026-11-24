@@ -15,6 +15,15 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   `sandprobe.compare/1`. Exit codes don't change: a complete, matched pair with anything worse still exits 6, and an
   incomplete or unmatched pair still exits 5 (CMP-2).
 
+- `run exec` no longer turns Secrets red because of its own transport. SEC-2 and SEC-5 used to find the shell that
+  `run exec`'s script ran in, on every box, and no agent could fix that. Now that shell replaces itself (`exec`) with
+  Sandprobe's own wrapper before any check runs, so the shell, with its memory and the environment it started with,
+  is gone. The wrapper starts the probe with its environment passed through unchanged, frames the run and removes
+  the scratch. SEC-2 and SEC-5 skip only the probe's direct parent, and only while the kernel shows that it runs the
+  probe's own file. Any doubt counts that process, or leaves the check unknown. Every other process is still counted,
+  ancestors such as ssh's session process included. `run kubernetes` and recipes get the same fix; `run docker` never
+  had the shell (LNC-1 to LNC-5).
+
 ## 0.3.0 (2026-11-24)
 
 - `run docker` starts the container with Sandprobe's own idle process as its entrypoint and the image's health check
