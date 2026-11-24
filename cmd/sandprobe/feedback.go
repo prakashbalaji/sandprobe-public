@@ -474,21 +474,27 @@ var credentialPatterns = []credentialPattern{
 	}},
 }
 
-// shellWords reads the value at line[start:] the way a shell joins one: quoted parts ("..." with backslash escapes,
-// '...', and `...`) and unquoted parts next to each other make one word, so a
-// placeholder part never excuses the rest; whitespace separates words, and in allWords so do an unquoted , and ;,
-// which never end a value (fail closed: TOKEN=<x>,y is refused). A # after whitespace ends the value, and so does a
-// backtick that closes a Markdown code span (an odd number before it on the line); any other backtick is data, and
-// one with no closing backtick runs to the line's end, as an unclosed " or ' does. It returns the words and where the
-// value ends. Each word is checked exactly as read, nothing stripped, so `true)` is not `true`: when in doubt, refuse.
+// shellWords reads the value at line[start:] the way a shell joins one: quoted parts ("..." and '...') and unquoted
+// parts next to each other make one word, so a placeholder part never excuses the rest. Whitespace separates words,
+// and in allWords so do an unquoted , and ;, which never end a value (fail closed: TOKEN=<x>,y is refused). Only a #
+// after whitespace, or the line's end, ends the value. A backtick is always data: it neither quotes nor ends
+// anything, so no Markdown code span, escaped or not, can cut a value short. An unclosed " or ' runs to the line's
+// end. Inside "...", a backslash goes only before $ ` " or \, as a shell's does, and stays before anything else; a
+// word that an escape changed is also returned raw, every backslash kept, so both forms must pass and no escape can
+// turn a value into a placeholder. Each word is checked exactly as read, nothing stripped, so `true)` is not `true`:
+// when in doubt, refuse. It returns the words and where the value ends.
 func shellWords(line string, start, mode int) ([]string, int) {
 	var words []string
-	var w strings.Builder
+	var w, raw strings.Builder
 	in := false
 	end := func() {
 		if in {
 			words = append(words, w.String())
+			if raw.String() != w.String() {
+				words = append(words, raw.String())
+			}
 			w.Reset()
+			raw.Reset()
 			in = false
 		}
 	}
@@ -511,21 +517,21 @@ func shellWords(line string, start, mode int) ([]string, int) {
 		case (c == ',' || c == ';') && mode == allWords: // a separator, never an end: each part must pass
 			end()
 			i++
-		case c == '`' && strings.Count(line[:i], "`")%2 == 1: // it closes a code span; an unmatched one is data
-			end()
-			return words, i
-		case c == '"' || c == '\'' || c == '`':
+		case c == '"' || c == '\'':
 			j := i + 1
 			for j < len(line) && line[j] != c {
-				if c == '"' && line[j] == '\\' && j+1 < len(line) {
+				if c == '"' && line[j] == '\\' && j+1 < len(line) && strings.IndexByte("$`\"\\", line[j+1]) >= 0 {
+					raw.WriteByte('\\')
 					j++
 				}
 				w.WriteByte(line[j])
+				raw.WriteByte(line[j])
 				j++
 			}
 			in, i = true, j+1
 		default:
 			w.WriteByte(c)
+			raw.WriteByte(c)
 			in, i = true, i+1
 		}
 	}

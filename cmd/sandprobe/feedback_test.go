@@ -268,6 +268,7 @@ func TestFeedbackRefusesCredentials(t *testing.T) {
 		"Bearer authentication failed; token: none; the Authorization header was missing",
 		"password: <redacted>, api_key=$OPENAI_API_KEY",
 		"{\"token\": \"<redacted>\"}",
+		"`token: <redacted>` in the config",
 		"```json\n{\"refresh_token\": \"$REFRESH_TOKEN\", \"cookie\": \"\"}\n```",
 	} {
 		if r := fb(t, overRefused+"\n", "bug", "-title", "a list after a key"); r.code != exitUsage {
@@ -399,6 +400,18 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 		"flag closing punctuation":   {"mycli --token 'true)'", "a credential flag", 2},
 		"header closing punctuation": {"Authorization: Token 'true)'", "an Authorization header", 2},
 		"field closing punctuation":  {"token: 'true)'", "a credential field", 2},
+		// round 5: a backtick never ends a value, escaped or not
+		"escaped backtick, field":  {"note \\` token: <redacted>`" + v, "a credential field", 2},
+		"escaped backtick, Bearer": {"note \\` Bearer <redacted>`" + v, "a bearer token", 2},
+		"double-escaped backtick":  {"note \\\\` token: <redacted>`" + v, "a credential field", 2},
+		"quoted, then backtick":    {"`code` and \\` token: '<redacted>'`" + v, "a credential field", 2},
+		"backtick inside quotes":   {"token: \"<redacted>`\"" + v, "a credential field", 2},
+		// round 5, Codex: inside "...", a backslash stays before an ordinary letter, and both forms must pass
+		"Bearer backslash":    {"sent Bearer \"tr\\ue\"", "a bearer token", 2},
+		"header backslash":    {"Authorization: Token \"tr\\ue\"", "an Authorization header", 2},
+		"field backslash":     {"TOKEN=\"tr\\ue\"", "a credential field", 2},
+		"flag backslash":      {"mycli --token \"tr\\ue\"", "a credential flag", 2},
+		"escaped placeholder": {"TOKEN=\"\\$TOKEN\"", "a credential field", 2},
 	}
 	for _, prefix := range []string{"xoxb", "xoxp", "xoxa", "xoxr", "xoxs", "xoxe", "xoxc", "xoxd", "xoxo", "xapp", "xwfp", "xoxe.xoxp", "xoxe.xapp"} {
 		cases["Slack "+prefix] = struct {
