@@ -256,9 +256,10 @@ ID with its result. It never sends the report's paths, names, evidence or receip
 looks like a credential, at any length and on any line: cloud, GitHub, Anthropic, OpenAI and Slack keys and tokens,
 private keys, JWTs, Authorization headers and Bearer or Basic values, URLs with a password, and any field or flag
 named like a credential (`token:`, `password=`, `"refresh_token":`, `--token`), on its line or the next, or anywhere
-in a YAML or JSON body or code block, unless its value is a placeholder such as `<token>` or `$TOKEN`. It also refuses
-long hex or base64 strings and home-directory paths, and names the line to fix (FBK-1 to FBK-7 in SPEC.md). When in
-doubt it refuses: rewrite the line, preview again, and ask again.
+in a YAML or JSON body or code block, unless its whole value is a placeholder such as `<token>` or `$TOKEN`. A value
+runs to the end of its line, commas and all, so write one key a line. It also refuses long hex or base64 strings and
+home-directory paths, and names the line to fix (FBK-1 to FBK-7 in SPEC.md). When in doubt it refuses: rewrite the
+line, preview again, and ask again.
 
 A check that passed when it shouldn't have is a
 [false pass](https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml), with its own form. A

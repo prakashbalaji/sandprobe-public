@@ -398,9 +398,9 @@ type credentialPattern struct {
 
 // The ways shellWords reads a value.
 const (
-	oneWord   = 1 // a flag's or a Bearer's value: one shell word
-	allWords  = 2 // a field's or a header's value: every word to an unquoted , or ;, a comment, or the line's end
-	wholeLine = 3 // a continuation line: every word to a comment or the line's end
+	oneWord  = 1 // a flag's or a Bearer's value: one shell word, commas and all
+	allWords = 2 // a field's, a header's or a continuation line's value: every word, split at , and ;, to a comment
+	//              or the line's end
 )
 
 // credKey is a key whose name says it holds a credential (FBK-4): YAML, INI, JSON, environment and header names.
@@ -476,9 +476,9 @@ var credentialPatterns = []credentialPattern{
 
 // shellWords reads the value at line[start:] the way a shell joins one: quoted parts ("..." with backslash escapes,
 // '...', and `...` when a closing backtick follows) and unquoted parts next to each other make one word, so a
-// placeholder part never excuses the rest; whitespace separates words. A # after whitespace ends the value, and so,
-// in allWords, does an unquoted , or ;. A backtick that closes a Markdown code span (an odd number before it on the
-// line), or one with no closing backtick, ends it too. An unclosed " or ' runs to the line's end. It returns the
+// placeholder part never excuses the rest; whitespace separates words, and in allWords so do an unquoted , and ;,
+// which never end a value (fail closed: TOKEN=<x>,y is refused). A # after whitespace ends the value, and so does a
+// backtick that closes a Markdown code span (an odd number before it on the line), or one with no closing backtick. An unclosed " or ' runs to the line's end. It returns the
 // words and where the value ends; wordOK reads each.
 func shellWords(line string, start, mode int) ([]string, int) {
 	var words []string
@@ -507,9 +507,9 @@ func shellWords(line string, start, mode int) ([]string, int) {
 				return words, i
 			}
 			i = j
-		case (c == ',' || c == ';') && mode == allWords:
+		case (c == ',' || c == ';') && mode == allWords: // a separator, never an end: each part must pass
 			end()
-			return words, i
+			i++
 		case c == '`' && (strings.Count(line[:i], "`")%2 == 1 || !strings.Contains(line[i+1:], "`")):
 			end()
 			return words, i
@@ -677,7 +677,7 @@ func indent(line string) int { return len(line) - len(strings.TrimLeft(line, " \
 // empty or a placeholder; for a Bearer, only its first word counts, and it may also be an ordinary one.
 func valueOK(line string, bearer bool) bool {
 	v := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(line), "- "), ":"))
-	mode := wholeLine
+	mode := allWords
 	if bearer {
 		mode = oneWord
 	}

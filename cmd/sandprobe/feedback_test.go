@@ -249,17 +249,28 @@ func TestFeedbackRefusesCredentials(t *testing.T) {
 	for _, ordinary := range []string{
 		"SEC-3 found ~/.aws/credentials readable, and /root/.ssh too",
 		"commit a7868b9, issue https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml",
-		"Bearer authentication failed; token: none; the Authorization header was missing",
+		"Bearer authentication failed.\ntoken: none\nthe Authorization header was missing",
 		"TestPrintableEscapesUnicodeFormatControls and internal/report/scorecard_test.go",
 		"sandprobe run exec -provider-endpoints SEC-4,AMP-7 -- docker exec -i box sh",
 		"the bearer of bad news; basic HTTP auth; Basic usage; Author: Prakash",
-		"password: <redacted>, api_key=$OPENAI_API_KEY, token: ***, client-secret: [REDACTED], \"refresh_token\": null",
+		"password: <redacted>\napi_key=$OPENAI_API_KEY\ntoken: ***\nclient-secret: [REDACTED]\n\"refresh_token\": null",
 		"ssh://git@github.com/summationai/sandprobe.git and https://user@example.com/path",
 		"```yaml\ntoken: <redacted>\npassword: null\nauth: ~\n```",
-		"```json\n{\"refresh_token\": \"$REFRESH_TOKEN\", \"cookie\": \"\"}\n```",
+		"```json\n{\n  \"refresh_token\": \"$REFRESH_TOKEN\",\n  \"cookie\": \"\"\n}\n```",
 	} {
 		if r := fb(t, ordinary+"\n", "bug", "-title", "ordinary text"); r.code != exitApproval {
 			t.Errorf("ordinary text refused: %q\n%s", ordinary, r.stderr)
+		}
+	}
+	// Refused by design (fail closed): after a credential key, a comma or semicolon never ends the value, so a list
+	// that follows on the same line must be all placeholders.
+	for _, overRefused := range []string{
+		"Bearer authentication failed; token: none; the Authorization header was missing",
+		"password: <redacted>, api_key=$OPENAI_API_KEY",
+		"```json\n{\"refresh_token\": \"$REFRESH_TOKEN\", \"cookie\": \"\"}\n```",
+	} {
+		if r := fb(t, overRefused+"\n", "bug", "-title", "a list after a key"); r.code != exitUsage {
+			t.Errorf("a list after a credential key passed: %q", overRefused)
 		}
 	}
 }
@@ -371,6 +382,15 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 		"Codex duplicate key":  {"```json\n{\n  \"pass\\u0077ord\"\n  :\n  \"" + v + "\",\n  \"password\": null\n}\n```", doc, 4},
 		"escaped key in prose": {"the config had \"pass\\u0077ord\": \"" + v + "\" in it", "a credential field", 2},
 		"HTML entity key":      {"&#112;assword: " + v, "a credential field", 2},
+		// round 4: a comma or semicolon never ends a value
+		"comma assignment":        {"TOKEN=<redacted>," + v, "a credential field", 2},
+		"export comma assignment": {"export TOKEN=<redacted>," + v, "a credential field", 2},
+		"semicolon assignment":    {"TOKEN=<redacted>;" + v, "a credential field", 2},
+		"header comma":            {"Authorization: Token <redacted>," + v, "an Authorization header", 2},
+		"flag with = and comma":   {"mycli --token=<redacted>," + v, "a credential field", 2},
+		"YAML scalar with comma":  {"tokens: <redacted>, " + v, "a credential field", 2},
+		"YAML flow sequence":      {"tokens: [<redacted>, " + v + "]", "a credential field", 2},
+		"continuation comma":      {"token:\n  <redacted>, " + v, own, 3},
 	}
 	for _, prefix := range []string{"xoxb", "xoxp", "xoxa", "xoxr", "xoxs", "xoxe", "xoxc", "xoxd", "xoxo", "xapp", "xwfp", "xoxe.xoxp", "xoxe.xapp"} {
 		cases["Slack "+prefix] = struct {
