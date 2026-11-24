@@ -200,6 +200,9 @@ func validate(m obs.Manifest, d *obs.Doc) error {
 func ManifestSound(m obs.Manifest) error { return manifestSound(m) }
 
 func manifestSound(m obs.Manifest) error {
+	if err := obs.ValidateCanaryTCP80Protocol(m); err != nil {
+		return err
+	}
 	if err := obs.ValidateBoundaryContract(m.BoundaryContract); err != nil {
 		return err
 	}

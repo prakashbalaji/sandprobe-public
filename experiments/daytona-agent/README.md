@@ -196,3 +196,13 @@ volume. It records refusal separately from deletion and never adopts or deletes
 a discovered sandbox. The original failed intent stays private and PER-5 remains
 unknown when recreation failed. Missing or ambiguous audit access still blocks
 storage/receiver release.
+
+### Optional HTTP TCP/80 measurement
+
+EVD-10 keeps the legacy payload by default. Before selecting `--canary-tcp80-protocol http-v1`,
+run `bin/sandprobe canary check -require-http-marker-v1` from this checkout. It verifies the
+shared canary's signed capability without reserving slots or creating provider resources.
+The shared deployment must contain the EVD-10 server support; a successful preflight does
+not prove guest delivery. Opted-in reports use `sandprobe/4`, declare the protocol, and
+require an updated report reader. The same bounded TCP/80 destination and independent
+receipt rules apply; HTTP errors remain inconclusive. There is no automatic fallback.

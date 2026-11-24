@@ -60,14 +60,15 @@ type Canary interface {
 }
 
 type Options struct {
-	UploadAddresses  map[string]string     // MEAS-7: host-frozen addresses for selected names only
-	UploadHosts      []string              // MEAS-6: explicit TLS-only workload destinations; default off
-	WorkloadContract *obs.WorkloadContract // WGR-1: frozen before workload release
-	BoundaryContract *obs.BoundaryContract // BND-1: optional reference-run declaration
-	Mode             string                // exec, workload, self or other (SBX-4)
-	NoCanary         bool                  // HCN-5: no canary; its checks are unknown and never sent to the probe
-	ProbeSHA256      string                // the digest of the probe binary the host shipped (SBX-5)
-	AllowLocalProxy  bool                  // the person approved contacting a local proxy (SBX-1 (e), AGT-3)
+	CanaryTCP80Protocol string                // EVD-10: explicit opt-in; empty preserves legacy traffic.
+	UploadAddresses     map[string]string     // MEAS-7: host-frozen addresses for selected names only
+	UploadHosts         []string              // MEAS-6: explicit TLS-only workload destinations; default off
+	WorkloadContract    *obs.WorkloadContract // WGR-1: frozen before workload release
+	BoundaryContract    *obs.BoundaryContract // BND-1: optional reference-run declaration
+	Mode                string                // exec, workload, self or other (SBX-4)
+	NoCanary            bool                  // HCN-5: no canary; its checks are unknown and never sent to the probe
+	ProbeSHA256         string                // the digest of the probe binary the host shipped (SBX-5)
+	AllowLocalProxy     bool                  // the person approved contacting a local proxy (SBX-1 (e), AGT-3)
 	// Excluded is what the provider's rules of engagement rule out (PRV-5): check ID to the reason. Only the checks
 	// GRD-3 names for it may be excluded; Execute refuses any other.
 	Excluded map[string]string
@@ -120,6 +121,10 @@ func armWants(m obs.Manifest) []canary.Want {
 // Execute runs the probe in a box and grades it. An error means no run happened; a run that happened but can't be
 // graded comes back with an invalid report.
 func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
+	if !obs.ValidCanaryTCP80Protocol(o.CanaryTCP80Protocol) || (o.NoCanary && o.CanaryTCP80Protocol != "") {
+		return nil, fmt.Errorf("invalid canary TCP/80 protocol option")
+	}
+
 	if _, err := catalog.BindUploadHosts(o.UploadHosts, o.UploadAddresses); err != nil {
 		return nil, err
 	}
@@ -170,6 +175,15 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 	pin := status.Pin
 	key, kerr := canary.KeyOf(status) // health counts only when it proves this key answered (SBX-11)
 	live := err == nil && status.OK && pin != "" && kerr == nil
+	if o.CanaryTCP80Protocol != "" {
+		if !live {
+			return nil, fmt.Errorf("HTTP marker canary status unavailable")
+		}
+		if err := requireHTTPMarkerForPin(ctx, c, pin); err != nil {
+			return nil, err
+		}
+	}
+
 	r.Manifest, r.Input = Plan(o, r.Survey, b.ID(), st, c.IP(), c.Domain(), pin)
 	if wants := armWants(r.Manifest); live && len(wants) > 0 { // SBX-11: the canary counts only what the run armed
 		a, err := c.Ask(ctx, canary.Request{Op: "arm", Run: r.Manifest.RunID, TTL: armTTL, Wants: wants})
@@ -419,7 +433,7 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 	if o.WorkloadContract != nil {
 		targets["SEC-3"] = append(targets["SEC-3"], obs.ProtectedMarker)
 	}
-	m := obs.Manifest{RunID: runID, Nonce: token("n"), BoxID: boxID, ProbeSHA256: o.ProbeSHA256, Mode: o.Mode,
+	m := obs.Manifest{CanaryTCP80Protocol: o.CanaryTCP80Protocol, RunID: runID, Nonce: token("n"), BoxID: boxID, ProbeSHA256: o.ProbeSHA256, Mode: o.Mode,
 		Selected: selected, Skipped: skipped, Targets: targets, Discover: discover,
 		CheckNonces: map[string]string{}, Endpoints: map[string]string{}, Proxy: proxy, AllowLocalProxy: o.AllowLocalProxy,
 		ProxyMalformed: s.Proxy != nil && s.Proxy.Malformed && skip["EGR-3"] == "", KubeAPI: s.KubeAPI, NoCanary: o.NoCanary,
@@ -445,7 +459,7 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 			m.Endpoints[id] = net.JoinHostPort(canaryIP, fmt.Sprint(ck.Canary.Port))
 		}
 	}
-	in := obs.Input{RunID: m.RunID, Nonce: m.Nonce, BoxID: m.BoxID, Mode: m.Mode, Selected: probeSelected, Targets: m.Targets,
+	in := obs.Input{CanaryTCP80Protocol: m.CanaryTCP80Protocol, RunID: m.RunID, Nonce: m.Nonce, BoxID: m.BoxID, Mode: m.Mode, Selected: probeSelected, Targets: m.Targets,
 		Discover: m.Discover, CheckNonces: m.CheckNonces, Endpoints: m.Endpoints, CanaryDomain: domain, CanaryPin: pin,
 		Proxy: m.Proxy, AllowLocal: m.AllowLocalProxy, KubeAPI: m.KubeAPI}
 	return m, in

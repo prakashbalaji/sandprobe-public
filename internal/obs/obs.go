@@ -30,8 +30,9 @@ const (
 
 // Manifest is fixed by the host before the run (GRD-5).
 type Manifest struct {
-	WorkloadContract                       *WorkloadContract `json:"workload_contract,omitempty"` // WGR-1: frozen host context
-	BoundaryContract                       *BoundaryContract `json:"boundary_contract,omitempty"` // BND-1: host declaration, not a verdict
+	CanaryTCP80Protocol                    string            `json:"canary_tcp80_protocol,omitempty"` // EVD-10; saved reports require schema4.
+	WorkloadContract                       *WorkloadContract `json:"workload_contract,omitempty"`     // WGR-1: frozen host context
+	BoundaryContract                       *BoundaryContract `json:"boundary_contract,omitempty"`     // BND-1: host declaration, not a verdict
 	RunID, Nonce, BoxID, ProbeSHA256, Mode string
 	Selected                               []string            // checks the probe must answer
 	Skipped                                map[string]string   // checks not selected, with the reason
@@ -64,20 +65,21 @@ const (
 
 // Input is what the host hands the probe on stdin: the manifest, as far as the box needs it.
 type Input struct {
-	RunID        string              `json:"run_id"`
-	Nonce        string              `json:"nonce"`
-	BoxID        string              `json:"box_id"`
-	Mode         string              `json:"mode"`
-	Selected     []string            `json:"selected"`
-	Targets      map[string][]string `json:"targets"`
-	Discover     map[string][]string `json:"discover"`
-	CheckNonces  map[string]string   `json:"check_nonces"`
-	Endpoints    map[string]string   `json:"endpoints"`
-	CanaryDomain string              `json:"canary_domain"`
-	CanaryPin    string              `json:"canary_pin"` // hex SHA-256 of the canary's SubjectPublicKeyInfo
-	Proxy        string              `json:"proxy"`      // the proxy the plan named for EGR-3, "host:port"; the only one contacted
-	AllowLocal   bool                `json:"allow_local_proxy"`
-	KubeAPI      string              `json:"kube_api"` // the Kubernetes API the plan named for AMP-7; the only one contacted
+	CanaryTCP80Protocol string              `json:"canary_tcp80_protocol,omitempty"`
+	RunID               string              `json:"run_id"`
+	Nonce               string              `json:"nonce"`
+	BoxID               string              `json:"box_id"`
+	Mode                string              `json:"mode"`
+	Selected            []string            `json:"selected"`
+	Targets             map[string][]string `json:"targets"`
+	Discover            map[string][]string `json:"discover"`
+	CheckNonces         map[string]string   `json:"check_nonces"`
+	Endpoints           map[string]string   `json:"endpoints"`
+	CanaryDomain        string              `json:"canary_domain"`
+	CanaryPin           string              `json:"canary_pin"` // hex SHA-256 of the canary's SubjectPublicKeyInfo
+	Proxy               string              `json:"proxy"`      // the proxy the plan named for EGR-3, "host:port"; the only one contacted
+	AllowLocal          bool                `json:"allow_local_proxy"`
+	KubeAPI             string              `json:"kube_api"` // the Kubernetes API the plan named for AMP-7; the only one contacted
 }
 
 // SurveySchema names the probe's survey: what the host needs from the box before it can plan (SBX-3).

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const HTTPMarkerV1 = "tcp80-http-marker-v1"
+
 const httpMarkerPath = "/sandprobe/v1/echo/"
 const httpMarkerLimit = 2048
 

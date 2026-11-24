@@ -12,6 +12,31 @@ from runner import Runner, HOSTNAME
 
 
 class StandardGradeTests(unittest.TestCase):
+    def test_http_measurement_requires_new_schema_and_reaches_bridge(self):
+        for schema in ("sandprobe/1", "sandprobe/4"):
+            with self.subTest(schema=schema), tempfile.TemporaryDirectory() as root:
+                j = Journal(root, 'a'*16, create=True)
+                r = Runner(j, canary_tcp80_protocol="http-v1")
+                r.kubeconfig = j.folder/'eks.kubeconfig'
+                r.cluster, r.image = 'recorded-cluster', 'recorded-image'
+                j.data.update(context={'pod_uid':'original-uid'}, task_container_id='original-container',
+                              workload_contract={'frozen':'before-release'})
+                r.delegated_state = lambda: {'endpoint':'https://recorded-endpoint'}
+                report = {'schema':schema, 'run':{'box':{'provider_id':'original-uid'},
+                          'provider':'aws-nitro', 'id':'standard-run'},
+                          'grade':{'letter':'F','valid':True,'complete':False,'unknown':[]}}
+                r.ops.call = Mock(return_value=json.dumps({'report':report,'html':'<html></html>',
+                                  'input':{},'evidence':{},'observations':'{}'}).encode())
+                if schema == "sandprobe/4":
+                    r.standard_grade('original-pod', 'original-job', 'b'*64)
+                else:
+                    with self.assertRaisesRegex(Failure, "standard_report_binding_mismatch"):
+                        r.standard_grade('original-pod', 'original-job', 'b'*64)
+                payload = json.loads(r.ops.call.call_args.kwargs['payload'])
+                self.assertEqual(payload['canary_tcp80_protocol'], 'tcp80-http-marker-v1')
+                r.ops.call.assert_called_once()
+                j.close()
+
     def test_same_pod_task_failure_is_saved_and_graded_before_stop(self):
         with tempfile.TemporaryDirectory() as root:
             j = Journal(root, 'a'*16, create=True)

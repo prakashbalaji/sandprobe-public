@@ -22,12 +22,13 @@ import (
 )
 
 type request struct {
-	UploadAddresses map[string]string         `json:"upload_addresses,omitempty"`
-	UploadHosts     []string                  `json:"upload_hosts,omitempty"`
-	Contract        *obs.WorkloadContract     `json:"contract"`
-	Pod             host.AgentPodBinding      `json:"pod"`
-	CanaryState     string                    `json:"canary_state"`
-	Persistent      *host.AgentPersistentSpec `json:"persistent,omitempty"`
+	CanaryTCP80Protocol string                    `json:"canary_tcp80_protocol,omitempty"`
+	UploadAddresses     map[string]string         `json:"upload_addresses,omitempty"`
+	UploadHosts         []string                  `json:"upload_hosts,omitempty"`
+	Contract            *obs.WorkloadContract     `json:"contract"`
+	Pod                 host.AgentPodBinding      `json:"pod"`
+	CanaryState         string                    `json:"canary_state"`
+	Persistent          *host.AgentPersistentSpec `json:"persistent,omitempty"`
 }
 
 func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
@@ -62,6 +63,14 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 			err = errors.New("hosted canary release unconfirmed")
 		}
 	}()
+	if !obs.ValidCanaryTCP80Protocol(q.CanaryTCP80Protocol) {
+		return errors.New("invalid canary TCP/80 protocol")
+	}
+	if q.CanaryTCP80Protocol != "" {
+		if err = host.RequireHTTPMarkerV1(ctx, public); err != nil {
+			return err
+		}
+	}
 	p, err := host.AttachAgentPod(ctx, q.Pod)
 	if err != nil {
 		return errors.New("workload binding rejected")
@@ -87,7 +96,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, box, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses})
+	r, err := host.Execute(ctx, box, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses, CanaryTCP80Protocol: q.CanaryTCP80Protocol})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}

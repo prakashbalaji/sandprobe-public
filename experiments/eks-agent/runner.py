@@ -114,13 +114,20 @@ def trust_policy(cluster_arn, namespace):
 
 
 class Runner:
-    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None):
+    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None, canary_tcp80_protocol=None):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
             raise Failure("invalid_profile")
         if controller not in {"guest", "host"}:
             raise Failure("invalid_controller_pattern")
         parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
         self.upload_hosts = parse_hosts(",".join(upload_hosts or []))
+        # EVD-10: preserve the explicit measurement selection for cleanup/review.
+        canary_tcp80_protocol = canary_tcp80_protocol or journal.data.get("canary_tcp80_protocol", "legacy")
+        if canary_tcp80_protocol not in {"legacy", "http-v1"}:
+            raise Failure("invalid_canary_tcp80_protocol")
+        if journal.data.get("canary_tcp80_protocol", canary_tcp80_protocol) != canary_tcp80_protocol:
+            raise Failure("canary_tcp80_protocol_changed")
+        self.canary_tcp80_protocol = canary_tcp80_protocol
         storage_profile = storage_profile or journal.data.get("storage_profile", "ephemeral")
         if storage_profile not in {"ephemeral", "persistent-artifacts"} or (storage_profile != "ephemeral" and controller != "host"):
             raise Failure("invalid_managed_storage_profile")
@@ -236,7 +243,7 @@ class Runner:
         self.journal.data.update(model=model, profile=self.profile, account=ACCOUNT,
             approval_reference_sha256=hashlib.sha256(approval.encode()).hexdigest(),
             endpoint_resolution={"hostname": HOSTNAME, "ipv4": ips, "resolved_at": int(time.time())},
-            source_commit=source_commit, controller=self.controller,
+            source_commit=source_commit, controller=self.controller, canary_tcp80_protocol=self.canary_tcp80_protocol,
             deployment_pattern="host_controller_no_guest_credentials" if self.controller == "host" else "guest_assigned_identity", phase="preflight_passed")
         self.journal.save()
 
@@ -860,6 +867,8 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                    "job_uid": job_uid, "image": self.image, "container_id": self.journal.data["task_container_id"], "config_sha256": config_sha},
                    "canary_state": str(self.journal.folder / "canary.state"),
                    "contract": self.journal.data["workload_contract"], "upload_hosts": self.upload_hosts}
+        if self.canary_tcp80_protocol == "http-v1":
+            request["canary_tcp80_protocol"] = "tcp80-http-marker-v1"
         # MEAS-7: the same literal address the workload used, from its frozen policy.
         if HOSTNAME in self.upload_hosts:
             request["upload_addresses"] = {HOSTNAME: self.journal.data["endpoint_resolution"]["ipv4"][0]}
@@ -877,6 +886,8 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                 persistent_assessment.import_reset(self)
         report = bundle["report"]
         expected_schema = "sandprobe/3" if self.controller == "host" else "sandprobe/1"
+        if self.canary_tcp80_protocol == "http-v1":
+            expected_schema = "sandprobe/4"
         if (report["schema"] != expected_schema or report["run"]["box"]["provider_id"] != request["pod"]["uid"]
                 or report["run"]["provider"] != "aws-nitro"):
             raise Failure("standard_report_binding_mismatch")
@@ -1310,6 +1321,7 @@ def main():
     parser.add_argument("--model-python", default="")
     parser.add_argument("--storage-profile", choices=["ephemeral", "persistent-artifacts"], default=None)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
+    parser.add_argument("--canary-tcp80-protocol", choices=["legacy", "http-v1"], default=None)
     journal = None
     try:
         args = parser.parse_args()
@@ -1328,7 +1340,7 @@ def main():
                 raise Failure("aws_eks_testing_approval_reference_required")
             journal = Journal(STATE_ROOT, secrets.token_hex(8), create=True)
         selected_controller = journal.data.get("controller", args.controller) if args.command == "cleanup" else args.controller
-        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=selected_controller, model_python=args.model_python, storage_profile=args.storage_profile)
+        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=selected_controller, model_python=args.model_python, storage_profile=args.storage_profile, canary_tcp80_protocol=args.canary_tcp80_protocol)
         if args.command == "cleanup":
             clean = runner.cleanup()
             print(json.dumps({"run_id": runner.run_id, "cleanup_confirmed": clean}))

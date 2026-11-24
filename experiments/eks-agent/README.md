@@ -302,3 +302,13 @@ cases, token/request limits or sandbox security/network controls, and is recorde
 in the workload and identity policy. It never accepts an agreement, subscribes
 to a model, changes region or falls back. Use a model already available to the
 operator's account. [AWS model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-ministral-3-8b.html).
+
+### Optional HTTP TCP/80 measurement
+
+EVD-10 keeps the legacy payload by default. Before selecting `--canary-tcp80-protocol http-v1`,
+run `bin/sandprobe canary check -require-http-marker-v1` from this checkout. It verifies the
+shared canary's signed capability without reserving slots or creating provider resources.
+The shared deployment must contain the EVD-10 server support; a successful preflight does
+not prove guest delivery. Opted-in reports use `sandprobe/4`, declare the protocol, and
+require an updated report reader. The same bounded TCP/80 destination and independent
+receipt rules apply; HTTP errors remain inconclusive. There is no automatic fallback.

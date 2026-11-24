@@ -43,8 +43,9 @@ func Parse(b []byte) (*report.Doc, error) {
 func canonicalNewFields(b []byte, d *report.Doc) bool {
 	var p struct {
 		Manifest struct {
-			SkipKinds json.RawMessage `json:"SkipKinds"`
-			Attested  json.RawMessage `json:"Attested"`
+			SkipKinds           json.RawMessage `json:"SkipKinds"`
+			Attested            json.RawMessage `json:"Attested"`
+			CanaryTCP80Protocol json.RawMessage `json:"canary_tcp80_protocol"`
 		} `json:"manifest"`
 		Checks []struct {
 			Attestation json.RawMessage `json:"attestation"`
@@ -54,6 +55,9 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 		return false
 	}
 	if p.Manifest.SkipKinds != nil && len(d.Manifest.SkipKinds) == 0 || p.Manifest.Attested != nil && len(d.Manifest.Attested) == 0 {
+		return false
+	}
+	if p.Manifest.CanaryTCP80Protocol != nil && d.Manifest.CanaryTCP80Protocol == "" {
 		return false
 	}
 	for i, c := range p.Checks {
@@ -94,6 +98,9 @@ func Validate(d *report.Doc) error {
 		return ErrInput
 	}
 	if obs.ValidateWorkloadContract(d.Manifest.WorkloadContract) != nil || (d.Manifest.WorkloadContract != nil && d.Manifest.WorkloadContract.BoxID != d.Manifest.BoxID) {
+		return ErrInput
+	}
+	if obs.ValidateCanaryTCP80Protocol(d.Manifest) != nil {
 		return ErrInput
 	}
 	if obs.ValidateBoundaryContract(d.Manifest.BoundaryContract) != nil {
@@ -438,7 +445,7 @@ func Compare(a, b *report.Doc) Comparison {
 		out.ContextChanges = append(out.ContextChanges, "reported_reference_context")
 	}
 	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup.
-	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) {
+	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) {
 		out.ContextChanges = append(out.ContextChanges, "declared_configuration")
 	}
 	rowsA, rowsB := map[string]report.Check{}, map[string]report.Check{}
