@@ -32,21 +32,23 @@ returned. If any of it can't be confirmed gone, the run says so, names its ID an
 
 ### What runs in the container
 
-Your image's own entrypoint and command don't run. Sandprobe starts the container with its own idle process as the
-entrypoint: the probe it bind-mounts, in a mode that only waits (DKR-1). So an image whose entrypoint exits without a
-task or a terminal, as most agent images' does, needs no wrapper and no keep-alive. SEC-2 and SEC-5 don't count the idle
+Your image's own entrypoint, command and health check don't run. Sandprobe starts the container with its own idle
+process as the entrypoint: the probe it bind-mounts, in a mode that only waits. It also passes `--no-healthcheck`,
+unless you name a health option yourself (DKR-1). So an image whose entrypoint exits without a task or a terminal, as
+most agent images' does, needs no wrapper and no keep-alive. SEC-2 and SEC-5 don't count the idle
 process, once Docker's own record confirms it is PID 1 of the container's PID namespace (DKR-2). With `--init` or
 `--pid` that can't be confirmed, so they count it.
 
 To run a process of your own, such as the agent's dev server, pass `--entrypoint` after `--`. It starts with no
-arguments, the plan and the report say it runs, and SEC-2 and SEC-5 count it like any other process:
+arguments, the image's health check stays on, the plan and the report say so, and SEC-2 and SEC-5 count them like
+any other process:
 
 ```sh
 sandprobe run docker sandprobe-demo/vibe -as agent -y -- --entrypoint /opt/app/entry.sh
 ```
 
-If the container stops before or while the probe runs, the run says what stopped, with its exit code, and gives a
-command to run instead (DKR-3).
+If the container stops before or while the probe runs, the run says what stopped, with its exit code as Docker
+recorded it, and gives a command to run instead (DKR-3).
 
 With `--read-only`, Sandprobe adds a 16 MB tmpfs at `/opt/sandprobe/scratch` for the probe's own scratch, so a
 read-only root with no writable `/tmp` still runs. The plan and the report name it as Sandprobe's addition, and no

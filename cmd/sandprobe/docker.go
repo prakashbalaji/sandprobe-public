@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,6 +65,16 @@ func option(opts []string, name string, takesValue bool) (string, bool) {
 // userEntrypoint is the person's own --entrypoint, if they gave one: then it runs, not Sandprobe's idle process (DKR-1).
 func userEntrypoint(opts []string) (string, bool) { return option(opts, "--entrypoint", true) }
 
+// namesHealth: the person's options set the container's health check, which is then theirs to keep (DKR-1).
+func namesHealth(opts []string) bool {
+	for _, o := range opts {
+		if o == "--no-healthcheck" || strings.HasPrefix(o, "--no-healthcheck=") || strings.HasPrefix(o, "--health-") {
+			return true
+		}
+	}
+	return false
+}
+
 // readOnlyRoot: the person's options make the root read-only, so the probe gets Sandprobe's own scratch (DKR-4).
 func readOnlyRoot(opts []string) bool {
 	v, ok := option(opts, "--read-only", false)
@@ -73,8 +84,8 @@ func readOnlyRoot(opts []string) bool {
 
 // boxArgs is the docker run command for the box: Sandprobe's network and resolver only when the person named no
 // network, then their options unchanged, then Sandprobe's own idle entrypoint unless they named one (DKR-1), with no
-// init of Docker's ahead of it unless they named --init, its scratch on a read-only root (DKR-4), the probe,
-// read-only, and the image, with the idle process's one argument.
+// init of Docker's ahead of it unless they named --init and no image health check unless they named a health option,
+// its scratch on a read-only root (DKR-4), the probe, read-only, and the image, with the idle process's one argument.
 func boxArgs(network, canaryIP, probe, image string, opts []string) []string {
 	args := []string{"run", "-d"}
 	if !namesNetwork(opts) {
@@ -86,6 +97,9 @@ func boxArgs(network, canaryIP, probe, image string, opts []string) []string {
 		args = append(args, "--entrypoint", dockerProbePath)
 		if _, init := option(opts, "--init", false); !init {
 			args = append(args, "--init=false")
+		}
+		if !namesHealth(opts) {
+			args = append(args, "--no-healthcheck")
 		}
 	}
 	if readOnlyRoot(opts) {
@@ -113,11 +127,23 @@ func dockerPlan(image, user string, opts []string) planDoc {
 	if readOnlyRoot(opts) { // DKR-4
 		creates = append(creates, "Sandprobe's own addition: a 16 MB tmpfs at "+dockerScratch+" for the probe's scratch, since the root is read-only; no check counts it")
 	}
-	runs := []string{"nothing but the probe, and Sandprobe's own idle process (the probe in its idle mode) as the container's entrypoint: " +
-		"your image's entrypoint and command don't run, and SEC-2 and SEC-5 don't count the idle process once Docker's record confirms it is PID 1 (DKR-1, DKR-2)"}
-	if ep, theirs := userEntrypoint(opts); theirs {
+	idle := "nothing but the probe, and Sandprobe's own idle process (the probe in its idle mode) as the container's entrypoint: "
+	counted := ", and SEC-2 and SEC-5 don't count the idle process once Docker's record confirms it is PID 1 (DKR-1, DKR-2)"
+	ep, theirs := userEntrypoint(opts)
+	health := theirs || namesHealth(opts) // the image's health check is left on
+	var runs []string
+	switch {
+	case theirs:
 		runs = []string{"the probe, and your --entrypoint " + ep + " as the container's main process, with no arguments: " +
 			"it runs, and SEC-2 and SEC-5 count it like any other process (DKR-1)"}
+	case health:
+		runs = []string{idle + "your image's entrypoint and command don't run" + counted}
+	default:
+		runs = []string{idle + "your image's entrypoint, command and health check don't run (--no-healthcheck)" + counted}
+	}
+	if health {
+		runs = append(runs, "the image's health check, if it has one, as Docker schedules it with your options: "+
+			"SEC-2 and SEC-5 count it if it runs during the probe (DKR-1)")
 	}
 	return planDoc{Provider: "docker",
 		Creates:    creates,
@@ -389,6 +415,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 				scratch = dockerScratch
 			}
 			step("running the probe as %s", user)
+			healthOff := dockerHealthOff(ctx, boxID)
 			run, err = host.Execute(ctx, &host.DockerBox{Container: boxID, User: user, ProbePath: dockerProbePath, Args: args, VolumeTracker: volumes}, c,
 				host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy, OwnInit: dockerOwnInit(ctx, boxID, r.dockerOpts), Scratch: scratch})
 			if err != nil || run.Report.Invalid != "" { // DKR-3: a container that stopped says why, never a bare invalid run
@@ -397,7 +424,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 				}
 			}
 			if err == nil {
-				residual = dockerRunResidual(r.dockerOpts, run.Input.OwnInit)
+				residual = dockerRunResidual(r.dockerOpts, run.Input.OwnInit, healthOff)
 			}
 		}
 	}
@@ -450,11 +477,8 @@ func dockerState(ctx context.Context, id string, opts []string) (running bool, c
 	if ep, theirs := userEntrypoint(opts); theirs {
 		who = "your --entrypoint " + ep
 	}
-	switch {
-	case f[2] == "true":
+	if f[2] == "true" { // Docker's own record; an exit code alone never names a signal, since a process can exit 137 itself
 		return false, fmt.Sprintf("%s was killed by Docker for running out of memory (exit code %d)", who, code), true
-	case code > 128 && code < 160:
-		return false, fmt.Sprintf("%s was killed by signal %d (exit code %d)", who, code-128, code), true
 	}
 	return false, fmt.Sprintf("%s exited with code %d", who, code), true
 }
@@ -509,20 +533,44 @@ func dockerOwnInit(ctx context.Context, id string, opts []string) bool {
 	return err == nil && out == `"`+dockerProbePath+`" ["`+dockerIdle+`"] "" false`
 }
 
+// dockerHealthOff is DKR-1: Docker's own record of the container says no health check runs in it, either because the
+// image has none or because it is NONE (--no-healthcheck). Anything else, or no answer, is a health check that may run.
+func dockerHealthOff(ctx context.Context, id string) bool {
+	out, err := dockerOut(ctx, "inspect", "--type", "container", "--format", "{{json .Config.Healthcheck}}", id)
+	return err == nil && healthRecordOff(out)
+}
+
+// healthRecordOff reads Docker's JSON record of a container's health check: off only as null or a test of NONE.
+func healthRecordOff(record string) bool {
+	var hc *struct{ Test []string }
+	if json.Unmarshal([]byte(record), &hc) != nil {
+		return false
+	}
+	return hc == nil || len(hc.Test) == 1 && hc.Test[0] == "NONE"
+}
+
 // dockerRunResidual is the report's residual (PRV-14), with what Sandprobe ran or added in the box (DKR-1, DKR-2,
-// DKR-4), from the host's own facts.
-func dockerRunResidual(opts []string, ownInit bool) string {
+// DKR-4), from the host's own facts and Docker's record.
+func dockerRunResidual(opts []string, ownInit, healthOff bool) string {
 	r := dockerResidual
 	switch ep, theirs := userEntrypoint(opts); {
 	case theirs:
 		r += " Your --entrypoint " + ep + " ran as the container's main process, and SEC-2 and SEC-5 counted it like any other process (DKR-1)."
+	case ownInit && healthOff:
+		r += " Sandprobe's own idle process was the container's entrypoint and no health check ran, so the image's own entrypoint, " +
+			"command and health check never ran and SEC-2 and SEC-5 saw none of their processes; the idle process, PID 1 by Docker's record, " +
+			"wasn't counted (DKR-1, DKR-2)."
 	case ownInit:
-		r += " Sandprobe's own idle process was the container's entrypoint, so the image's own entrypoint and command never ran " +
-			"and SEC-2 and SEC-5 saw none of their processes; the idle process, PID 1 by Docker's record, wasn't counted (DKR-1, DKR-2)."
+		r += " Sandprobe's own idle process was the container's entrypoint, so the image's own entrypoint and command never ran; " +
+			"the idle process, PID 1 by Docker's record, wasn't counted (DKR-1, DKR-2)."
 	default:
 		r += " Sandprobe's own idle process was the container's entrypoint, so the image's own entrypoint and command never ran; " +
 			"Docker's record didn't confirm it is PID 1 of the container's own PID namespace (your --init or --pid, say), " +
 			"so SEC-2 and SEC-5 counted it (DKR-1, DKR-2)."
+	}
+	if !healthOff {
+		r += " Docker's record shows a health check in the container, so it may have run during the probe, and SEC-2 and SEC-5 " +
+			"counted it if it did (DKR-1)."
 	}
 	if readOnlyRoot(opts) {
 		r += " The root was read-only, so Sandprobe added a 16 MB tmpfs at " + dockerScratch + " for the probe's own scratch; " +

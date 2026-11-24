@@ -65,7 +65,7 @@ func main() {
 			fail(errors.New("cannot write quick output"))
 		}
 		return
-	case "-idle": // DKR-1: the container's entrypoint, which reads, writes and starts nothing, and never returns
+	case "-idle": // DKR-1: the container's entrypoint, which writes nothing, starts no process and never returns
 		probe.Idle()
 	case "-survey":
 		out = probe.Survey()

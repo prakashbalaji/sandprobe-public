@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 func TestDockerBoxArgs(t *testing.T) {
 	own := boxArgs("net1", "172.30.100.10", "/tmp/p", "img", []string{"--read-only"})
 	if !slices.Equal(own, []string{"run", "-d", "--network", "net1", "--dns", "172.30.100.10", "--read-only",
-		"--entrypoint", dockerProbePath, "--init=false", "--tmpfs", dockerScratchSpec,
+		"--entrypoint", dockerProbePath, "--init=false", "--no-healthcheck", "--tmpfs", dockerScratchSpec,
 		"-v", "/tmp/p:" + dockerProbePath + ":ro", "img", "-idle"}) {
 		t.Errorf("no network named: %q", own)
 	}
@@ -231,26 +232,31 @@ func TestDockerRun(t *testing.T) {
 	}
 }
 
-// DKR-1 and DKR-4: Sandprobe's idle process is the entrypoint, with no init of Docker's ahead of it, unless the person
-// names their own entrypoint (either spelling) or --init; its scratch only on a read-only root.
+// DKR-1 and DKR-4: Sandprobe's idle process is the entrypoint, with no init of Docker's ahead of it and no image
+// health check, unless the person names their own entrypoint (either spelling), --init or a health option; its scratch
+// only on a read-only root.
 func TestDockerEntrypointArgs(t *testing.T) {
 	for name, tc := range map[string]struct {
-		opts              []string
-		idle, noInit, tmp bool
+		opts                        []string
+		idle, noInit, noHealth, tmp bool
 	}{
-		"nothing named":     {nil, true, true, false},
-		"--entrypoint X":    {[]string{"--entrypoint", "/bin/cat", "-i"}, false, false, false},
-		"--entrypoint=X":    {[]string{"--entrypoint=/bin/cat"}, false, false, false},
-		"--init":            {[]string{"--init"}, true, false, false},
-		"--init=false":      {[]string{"--init=false"}, true, false, false},
-		"--read-only=true":  {[]string{"--read-only=true"}, true, true, true},
-		"--read-only=false": {[]string{"--read-only=false"}, true, true, false},
+		"nothing named":          {nil, true, true, true, false},
+		"--entrypoint X":         {[]string{"--entrypoint", "/bin/cat", "-i"}, false, false, false, false},
+		"--entrypoint=X":         {[]string{"--entrypoint=/bin/cat"}, false, false, false, false},
+		"--init":                 {[]string{"--init"}, true, false, true, false},
+		"--init=false":           {[]string{"--init=false"}, true, false, true, false},
+		"--health-interval=2s":   {[]string{"--health-interval=2s"}, true, true, false, false},
+		"--health-cmd X":         {[]string{"--health-cmd", "true"}, true, true, false, false},
+		"their --no-healthcheck": {[]string{"--no-healthcheck"}, true, true, false, false},
+		"--read-only=true":       {[]string{"--read-only=true"}, true, true, true, true},
+		"--read-only=false":      {[]string{"--read-only=false"}, true, true, true, false},
 	} {
 		args := boxArgs("net1", "172.30.100.10", "/tmp/p", "img", tc.opts)
 		ours := slices.Contains(args, dockerProbePath) && args[len(args)-1] == dockerIdle
-		added := slices.Contains(args[6+len(tc.opts):], "--init=false") // after run -d, the network, the resolver and their options
-		if ours != tc.idle || added != tc.noInit || slices.Contains(args, dockerScratchSpec) != tc.tmp {
-			t.Errorf("%s: want idle %v, --init=false %v, scratch %v; got %q", name, tc.idle, tc.noInit, tc.tmp, args)
+		added := args[6+len(tc.opts):] // after run -d, the network, the resolver and their options: Sandprobe's own
+		if ours != tc.idle || slices.Contains(added, "--init=false") != tc.noInit || slices.Contains(added, "--no-healthcheck") != tc.noHealth ||
+			slices.Contains(args, dockerScratchSpec) != tc.tmp {
+			t.Errorf("%s: want idle %v, --init=false %v, --no-healthcheck %v, scratch %v; got %q", name, tc.idle, tc.noInit, tc.noHealth, tc.tmp, args)
 		}
 		if n := strings.Count(strings.Join(args, " "), "--entrypoint"); !tc.idle && (args[len(args)-1] != "img" || n != 1) {
 			t.Errorf("%s: the person's entrypoint runs alone, with nothing after the image: %q", name, args)
@@ -261,8 +267,12 @@ func TestDockerEntrypointArgs(t *testing.T) {
 // DKR-1, DKR-4 and DKR-5: the plan says what runs, what Sandprobe adds, and that nothing is marked or reset.
 func TestDockerPlanSaysWhatRuns(t *testing.T) {
 	p := dockerPlan("img", "agent", nil)
-	if runs := strings.Join(p.Runs, " "); !strings.Contains(runs, "idle process") || !strings.Contains(runs, "don't run") {
-		t.Errorf("default: the plan must say Sandprobe's idle process runs and the image's doesn't: %q", runs)
+	if runs := strings.Join(p.Runs, " "); !strings.Contains(runs, "idle process") || !strings.Contains(runs, "entrypoint, command and health check don't run") {
+		t.Errorf("default: the plan must say Sandprobe's idle process runs and the image's processes don't: %q", runs)
+	}
+	if runs := dockerPlan("img", "agent", []string{"--health-interval", "1s"}).Runs; len(runs) != 2 || strings.Contains(runs[0], "health check don't") ||
+		!strings.Contains(runs[1], "the image's health check") {
+		t.Errorf("the person's health option: the plan must say the image's health check may run: %q", runs)
 	}
 	if !strings.HasPrefix(p.Markers, "none") || !strings.HasPrefix(p.Reset, "none") {
 		t.Errorf("PER-5 never runs on docker: want no markers and no reset, got %q / %q", p.Markers, p.Reset)
@@ -271,7 +281,8 @@ func TestDockerPlanSaysWhatRuns(t *testing.T) {
 		t.Errorf("no read-only root: want no scratch tmpfs, got %q", p.Creates)
 	}
 	p = dockerPlan("img", "agent", []string{"--read-only", "--entrypoint=/bin/cat"})
-	if runs := strings.Join(p.Runs, " "); !strings.Contains(runs, "your --entrypoint /bin/cat") || !strings.Contains(runs, "count it") {
+	if runs := strings.Join(p.Runs, " "); !strings.Contains(runs, "your --entrypoint /bin/cat") || !strings.Contains(runs, "count it") ||
+		!strings.Contains(runs, "the image's health check") {
 		t.Errorf("the person's entrypoint: the plan must say it runs and is counted: %q", runs)
 	}
 	if !strings.Contains(strings.Join(p.Creates, " "), "Sandprobe's own addition: a 16 MB tmpfs at "+dockerScratch) {
@@ -315,8 +326,21 @@ func TestDockerStopFixRunsAsPasted(t *testing.T) {
 	}
 }
 
+// DKR-1: Docker's record of a container's health check reads as off only when there is none or it is NONE.
+func TestDockerHealthOff(t *testing.T) {
+	for record, off := range map[string]bool{
+		"null": true, `{"Test":["NONE"],"Interval":1000000000}`: true,
+		`{"Test":["CMD-SHELL","true"],"Interval":1000000000}`: false, `{"Test":[]}`: false, `{"Test":["NONE","x"]}`: false, "": false, "<no value>": false,
+	} {
+		if healthRecordOff(record) != off {
+			t.Errorf("%q: want off %v", record, off)
+		}
+	}
+}
+
 // fakeDocker puts a fake docker first on PATH. It answers as a container whose entrypoint (stop) exits at once
-// ("before"), or that is killed while the probe runs ("during"), and logs every call; it returns the log's path.
+// ("before"), exits 137 while the probe runs ("during"), or is killed by Docker for memory then ("oom"), and logs
+// every call; it returns the log's path.
 func fakeDocker(t *testing.T, stop string) string {
 	dir := t.TempDir()
 	log, died := filepath.Join(dir, "calls.log"), filepath.Join(dir, "died")
@@ -336,9 +360,11 @@ case "$*" in
     case "` + stop + `" in
       before) echo "false 0 false" ;;
       during) if [ -f "` + died + `" ]; then echo "false 137 false"; else echo "true 0 false"; fi ;;
+      oom) if [ -f "` + died + `" ]; then echo "false 137 true"; else echo "true 0 false"; fi ;;
     esac ;;
   "inspect --type container --format {{.Config.User}}"*) echo ;;
   "inspect --type container --format {{json .Path}}"*) echo '"/opt/sandprobe/sandprobe-probe" ["-idle"] "" false' ;;
+  "inspect --type container --format {{json .Config.Healthcheck}}"*) echo '{"Test":["NONE"]}' ;;
   "exec canary"*) echo '{"ok":true}' ;;
   "exec -i -u"*-survey) echo '{"schema":"sandprobe.survey/1","proxy":null,"kube_api":"","vsock":false,"roots":[]}' ;;
   "exec -i -u"*) touch "` + died + `"; exit 137 ;;
@@ -362,8 +388,10 @@ func TestDockerStopNamesTheCause(t *testing.T) {
 	}{
 		"their entrypoint exits at once": {"before", "the container stopped before the probe ran: your --entrypoint /bin/cat exited with code 0",
 			"sandprobe run docker img -as agent -y -- --read-only", []string{"--entrypoint", "/bin/cat", "--read-only"}},
-		"killed while the probe ran": {"during", "the container stopped while the probe ran: Sandprobe's idle process, the container's entrypoint, was killed by signal 9 (exit code 137)",
+		"exit 137 while the probe ran, never read as a signal": {"during", "the container stopped while the probe ran: Sandprobe's idle process, the container's entrypoint, exited with code 137",
 			"sandprobe run docker img -as agent -y", nil},
+		"Docker's own out-of-memory kill": {"oom", "the container stopped while the probe ran: Sandprobe's idle process, the container's entrypoint, was killed by Docker for running out of memory (exit code 137)",
+			"sandprobe run docker img -as agent -y", []string{"--memory", "64m"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			log := fakeDocker(t, tc.stop)
@@ -398,12 +426,10 @@ func TestDockerEntrypointRuns(t *testing.T) {
 	// run's start to its end, has appeared in /tmp. Shell builtins only, so no run is too short to be seen.
 	os.WriteFile(filepath.Join(ctx, "exit-mid-run.sh"), []byte("#!/bin/sh\nwhile :; do\n  for d in /tmp/sandprobe-*; do\n"+
 		"    [ -e \"$d\" ] && exit 3\n  done\n  sleep 0.01\ndone\n"), 0o755)
-	os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte("FROM sandprobe-fixture-clean\nCOPY exit-mid-run.sh /exit-mid-run.sh\n"+
+	os.WriteFile(filepath.Join(ctx, "exit-137.sh"), []byte("#!/bin/sh\nexit 137\n"), 0o755)
+	os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte("FROM sandprobe-fixture-clean\nCOPY exit-mid-run.sh exit-137.sh /\n"+
 		"USER agent\nENTRYPOINT [\"true\"]\n"), 0o644)
-	if b, err := exec.Command("docker", "build", "-q", "-t", "sandprobe-test-exits", ctx).CombinedOutput(); err != nil {
-		t.Fatalf("building the test image: %v %s", err, b)
-	}
-	defer exec.Command("docker", "rmi", "sandprobe-test-exits").Run()
+	image := testImage(t, ctx)
 	type outcome struct {
 		Message  string
 		Grade    struct{ Valid bool }
@@ -412,7 +438,7 @@ func TestDockerEntrypointRuns(t *testing.T) {
 		Manifest struct{ Skipped map[string]string }
 	}
 	runIt := func(opts ...string) (outcome, int) {
-		cmd := exec.Command(bin, append([]string{"run", "docker", "sandprobe-test-exits", "-as", "agent", "-y", "-o", "json", "-out", t.TempDir(), "--"}, opts...)...)
+		cmd := exec.Command(bin, append([]string{"run", "docker", image, "-as", "agent", "-y", "-o", "json", "-out", t.TempDir(), "--"}, opts...)...)
 		b, _ := cmd.Output()
 		var o outcome
 		if err := json.Unmarshal(b, &o); err != nil {
@@ -448,9 +474,11 @@ func TestDockerEntrypointRuns(t *testing.T) {
 			t.Errorf("%q: want PID 1 counted, got %s %q", opts, r, ev)
 		}
 	}
-	// The person's entrypoint exits at once, or once the probe's main run is up (DKR-3).
+	// The person's entrypoint exits at once, on purpose with 137 (an exit code, never a signal), or once the probe's
+	// main run is up (DKR-3). Exit 5, not 7: each run confirmed its own container and network gone by ID.
 	for ep, want := range map[string]string{
 		"/bin/true":        "the container stopped before the probe ran: your --entrypoint /bin/true exited with code 0",
+		"/exit-137.sh":     "the container stopped before the probe ran: your --entrypoint /exit-137.sh exited with code 137",
 		"/exit-mid-run.sh": "the container stopped while the probe ran: your --entrypoint /exit-mid-run.sh exited with code 3",
 	} {
 		o, code := runIt("--entrypoint", ep)
@@ -458,7 +486,56 @@ func TestDockerEntrypointRuns(t *testing.T) {
 			t.Errorf("%s: want exit 5 naming %q, got %d %q", ep, want, code, o.Message)
 		}
 	}
-	if left, _ := exec.Command("docker", "network", "ls", "-q", "--filter", "name=sandprobe-").Output(); len(bytes.TrimSpace(left)) != 0 {
-		t.Errorf("a Sandprobe network was left behind")
+}
+
+// testImage builds the Dockerfile in dir under a tag no other run on the same daemon shares, and removes it after.
+func testImage(t *testing.T, dir string) string {
+	tag := fmt.Sprintf("sandprobe-test-%d-%d", os.Getpid(), time.Now().UnixNano())
+	if b, err := exec.Command("docker", "build", "-q", "-t", tag, dir).CombinedOutput(); err != nil {
+		t.Fatalf("building the test image: %v %s", err, b)
+	}
+	t.Cleanup(func() { exec.Command("docker", "rmi", tag).Run() })
+	return tag
+}
+
+// With Docker (SANDPROBE_FIXTURES=1): DKR-1's --no-healthcheck. The image's one-second HEALTHCHECK writes a file
+// through a bind mount: a default run leaves no file, and its report says no health check ran. With the person's
+// own health option it is theirs to keep: the file is written, and the report says the health check may have run.
+func TestDockerHealthcheckNeverRuns(t *testing.T) {
+	if os.Getenv("SANDPROBE_FIXTURES") == "" {
+		t.Skip("needs Docker and the fixture images: run test/fixtures.sh first")
+	}
+	bin := filepath.Join(t.TempDir(), "sandprobe")
+	if b, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	ctx := filepath.Join(t.TempDir(), "img")
+	os.MkdirAll(ctx, 0o755)
+	os.WriteFile(filepath.Join(ctx, "Dockerfile"), []byte("FROM sandprobe-fixture-clean\nUSER agent\n"+
+		"HEALTHCHECK --interval=1s --timeout=1s CMD touch /hc/ran\n"), 0o644)
+	image := testImage(t, ctx)
+	for name, tc := range map[string]struct {
+		opts   []string
+		ran    bool
+		saying string
+	}{
+		"default":                 {nil, false, "no health check ran"},
+		"their --health-interval": {[]string{"--health-interval", "1s"}, true, "health check in the container, so it may have run"},
+	} {
+		hc := t.TempDir()
+		os.Chmod(hc, 0o777) // the agent's uid writes through the bind mount
+		args := append([]string{"run", "docker", image, "-as", "agent", "-y", "-o", "json", "-out", t.TempDir(), "--", "-v", hc + ":/hc"}, tc.opts...)
+		b, _ := exec.Command(bin, args...).Output()
+		var d struct {
+			Grade   struct{ Valid bool }
+			Cleanup struct{ Outcome, Residual string }
+		}
+		if json.Unmarshal(b, &d) != nil || !d.Grade.Valid || !strings.HasPrefix(d.Cleanup.Outcome, "deleted") {
+			t.Fatalf("%s: want a valid run with everything deleted: %s", name, b)
+		}
+		_, err := os.Stat(filepath.Join(hc, "ran"))
+		if ran := err == nil; ran != tc.ran || !strings.Contains(d.Cleanup.Residual, tc.saying) {
+			t.Errorf("%s: want the health check run %v and the report saying %q; ran %v, residual %q", name, tc.ran, tc.saying, ran, d.Cleanup.Residual)
+		}
 	}
 }

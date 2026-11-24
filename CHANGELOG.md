@@ -5,8 +5,9 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
-- `run docker` starts the container with Sandprobe's own idle process as its entrypoint, so an image whose entrypoint
-  exits without a task or a terminal runs as it is, and SEC-2 and SEC-5 don't count that process (DKR-1, DKR-2). A
+- `run docker` starts the container with Sandprobe's own idle process as its entrypoint and the image's health check
+  off, so an image whose entrypoint exits without a task or a terminal runs as it is, and SEC-2 and SEC-5 don't count
+  that process (DKR-1, DKR-2). A
   container that stops early says what stopped and how, with a fix that runs as pasted (DKR-3); a read-only root gets
   Sandprobe's own scratch tmpfs (DKR-4); and the plan says PER-5 marks nothing and resets nothing on `run docker`
   (DKR-5). Pass `--entrypoint` to run a process of your own; the vibe demo now does.
