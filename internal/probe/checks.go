@@ -205,6 +205,10 @@ func sec1(e *env, ck *catalog.Check) obs.Observation {
 
 // SEC-2 and SEC-5: every other process's environ or mem, opened and never read.
 func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
+	wrapper := 0 // LNC-3: pinned before /proc is listed
+	if pin := e.wrapperPin(); pin != nil {
+		wrapper = pin.pid
+	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return unknownObs("can't list /proc: " + err.Error())
@@ -213,7 +217,16 @@ func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
 	for _, d := range entries {
 		listed = append(listed, d.Name())
 	}
-	pids, skippedInit := otherPIDs(listed, os.Getpid(), e.tw.children, e.in.OwnInit)
+	pids, skippedInit, skippedWrapper := otherPIDs(listed, os.Getpid(), e.tw.children, e.in.OwnInit, wrapper)
+	// LNC-3: a skip stands only if the pinned parent is still the probe's parent, alive and running the same file.
+	held := func() bool {
+		if afterSweep != nil {
+			afterSweep()
+		}
+		return !skippedWrapper || e.wrapper.holds()
+	}
+	const changed = "Sandprobe's own wrapper, this probe's parent, changed while the check ran, so which process went " +
+		"uncounted can't be told (LNC-3)"
 	var paths []string
 	for _, pid := range pids {
 		paths = append(paths, "/proc/"+strconv.Itoa(pid)+"/"+file)
@@ -222,9 +235,19 @@ func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
 		if why := reachPast(); why != "" {
 			return unknownObs(why)
 		}
+		if !held() {
+			return unknownObs(changed)
+		}
 		why := "no other process is visible to the probe (a PID namespace, or hidepid)"
-		if skippedInit {
+		switch {
+		case skippedInit && skippedWrapper:
+			why = "no other process is visible to the probe but Sandprobe's own idle process, PID 1, which the host named " +
+				"(DKR-2), and its own wrapper, PID " + strconv.Itoa(wrapper) + ", the probe's parent (LNC-3)"
+		case skippedInit:
 			why = "no other process is visible to the probe but Sandprobe's own idle process, PID 1, which the host named (DKR-2)"
+		case skippedWrapper:
+			why = "no other process is visible to the probe but Sandprobe's own wrapper, PID " + strconv.Itoa(wrapper) +
+				", the probe's parent (LNC-3)"
 		}
 		return obs.Observation{Result: obs.ScopedOut, Reason: why,
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"proc_pids": 0}}}
@@ -233,26 +256,40 @@ func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
 	if err != nil {
 		return sweepErr(err)
 	}
-	return e.judge(ck, ts, counts, e.tw.procOK[file], e.tw.procRefused[file], func(found []obs.Target) (string, string) {
+	if !held() {
+		return unknownObs(changed)
+	}
+	o := e.judge(ck, ts, counts, e.tw.procOK[file], e.tw.procRefused[file], func(found []obs.Target) (string, string) {
 		return "readable", "the agent can open " + names(found) + " (nothing was read)"
 	})
+	if skippedWrapper && (o.Result == obs.Pass || o.Result == obs.Finding) { // LNC-4: recorded, as DKR-2 records PID 1
+		o.Reason = "Sandprobe's own wrapper, PID " + strconv.Itoa(wrapper) + ", the probe's parent running its own file, " +
+			"wasn't counted (LNC-3)"
+	}
+	return o
 }
 
+// afterSweep runs between a sweep and LNC-3's second check; only tests set it.
+var afterSweep func()
+
 // otherPIDs is every process SEC-2 and SEC-5 count, from /proc's entry names: never the probe itself or its twins,
-// and PID 1 only when the host named it Sandprobe's own idle process (DKR-2). Nothing about a process is read to
-// decide, so one that copies the idle process's binary, arguments or environment is still counted at its own PID.
-func otherPIDs(names []string, self int, twins map[int]bool, ownInit bool) (pids []int, skippedInit bool) {
+// PID 1 only when the host named it Sandprobe's own idle process (DKR-2), and the probe's wrapper only when LNC-3
+// pinned it (wrapper is 0 otherwise). Nothing about a process is read to decide, so one that copies the idle process's
+// binary, arguments or environment is still counted at its own PID.
+func otherPIDs(names []string, self int, twins map[int]bool, ownInit bool, wrapper int) (pids []int, skippedInit, skippedWrapper bool) {
 	for _, n := range names {
 		pid, err := strconv.Atoi(n)
 		switch {
 		case err != nil || pid <= 0 || strconv.Itoa(pid) != n || pid == self || twins[pid]:
+		case pid == wrapper:
+			skippedWrapper = true
 		case pid == 1 && ownInit:
 			skippedInit = true
 		default:
 			pids = append(pids, pid)
 		}
 	}
-	return pids, skippedInit
+	return pids, skippedInit, skippedWrapper
 }
 
 // SEC-3: credential files, each read-checked on a pinned inode.

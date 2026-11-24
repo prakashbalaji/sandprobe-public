@@ -36,6 +36,35 @@ func TestProbeArguments(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// LNC-2: -wrap takes exactly the scratch path and -expect-uid N, in their forms; the tokens never come as
+	// arguments (LNC-1), and -wrap is never a mode after -expect-uid.
+	const tok, scratch = "0123456789abcdef01234567", "/tmp/sandprobe-0123456789abcdef01234567"
+	if w, err := parseWrap([]string{"-wrap", scratch, "-expect-uid", "1000"}); err != nil || strings.Join(w, " ") != scratch+" -expect-uid 1000" {
+		t.Fatalf("a well-formed -wrap refused: %v %v", w, err)
+	}
+	for _, args := range [][]string{
+		{"-wrap"}, {"-wrap", scratch}, {"-wrap", scratch, "-expect-uid"}, {"-wrap", scratch, "-expect-uid", "x"},
+		{"-wrap", scratch, "-expect-uid", "1000", "-survey"}, {"-wrap", scratch, "-survey", "1000"},
+		{"-wrap", tok, scratch, "-expect-uid", "1000"}, {"-wrap", scratch, tok, "-expect-uid", "1000"},
+		{"-wrap", "/tmp/other", "-expect-uid", "1000"}, {"-wrap", "/tmp/../sandprobe-0123456789abcdef01234567", "-expect-uid", "1000"},
+		{"-wrap", "relative/sandprobe-0123456789abcdef01234567", "-expect-uid", "1000"},
+		{"-wrap", "/tmp/sandprobe-0123456789ABCDEF01234567", "-expect-uid", "1000"},
+		{"-wrap", scratch, "-expect-uid", "1000", "-expect-uid", "1000"},
+	} {
+		if _, err := parseWrap(args); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+	}
+	for _, args := range [][]string{{"-wrap", scratch, "-expect-uid", "1000"}, {"-expect-uid", "1000", "-wrap", scratch}} {
+		if _, err := parseMode(args); err == nil {
+			t.Errorf("%q accepted as a mode", args)
+		}
+	}
+	if _, rest, _, err := parseExpect([]string{"-expect-uid", "1000", "-wrap", scratch}); err == nil {
+		if _, err := parseMode(rest); err == nil {
+			t.Error("-wrap accepted after -expect-uid")
+		}
+	}
 }
 
 func TestQuickWatchdog(t *testing.T) {

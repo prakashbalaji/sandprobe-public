@@ -125,6 +125,7 @@ func TestPrivileged(t *testing.T) {
 // #! script while the descriptor stays close-on-exec, so the stand-in is this ELF binary, told by its environment what
 // shell script to play.
 func TestMain(m *testing.M) {
+	wrapTestHooks() // LNC: the test binary as a wrapper, its run, or a pinning child
 	if script := os.Getenv("SANDPROBE_TEST_SUDO"); script != "" {
 		syscall.Exec("/bin/sh", []string{"sh", "-c", script}, os.Environ())
 		os.Exit(127)

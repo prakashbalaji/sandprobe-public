@@ -155,6 +155,8 @@ func (b *ExecBox) invoke(ctx context.Context, args []string, stdin []byte) ([]by
 		return nil, fmt.Errorf("the scratch path %s already exists in the box: nothing ran", b.Scratch)
 	case framed && status == 98:
 		return nil, errors.New("the box couldn't decode the probe: it needs a working base64")
+	case framed && status == 96:
+		return nil, errors.New("the box's shell couldn't become Sandprobe's wrapper, or the wrapper couldn't start the probe: nothing was graded (LNC-1, LNC-2)")
 	case runErr != nil: // whatever the output framed, a command that failed doesn't count as a probe run
 		return nil, fmt.Errorf("the command failed: %w", runErr)
 	case !framed:
@@ -166,7 +168,9 @@ func (b *ExecBox) invoke(ctx context.Context, args []string, stdin []byte) ([]by
 }
 
 // script is one invocation: everything literal but the probe and its input, which travel base64 in heredocs whose
-// delimiters carry a fresh token.
+// delimiters carry a fresh token. For the main run (only -expect-uid N), the shell replaces itself with the probe in
+// wrapper mode, which frames the run, starts it and removes the scratch, so no shell is left for SEC-2 or SEC-5 to
+// count (LNC-1, LNC-2). The script sets, exports and unsets no variable the probe inherits.
 func (b *ExecBox) script(tok string, args []string, stdin []byte) []byte {
 	var s bytes.Buffer
 	q := "'" + b.Scratch + "'" // scratchPath allows no quote
@@ -184,6 +188,13 @@ func (b *ExecBox) script(tok string, args []string, stdin []byte) []byte {
 		s.WriteString(enc + "\nSP-" + tag + "-" + tok + "\n")
 	}
 	heredoc("p", "BIN", b.Binary)
+	if len(args) == 2 && args[0] == "-expect-uid" { // the main run (LNC-1): the tokens ride the input's first line
+		heredoc("in", "IN", append([]byte(tok+" "+b.owner+"\n"), stdin...))
+		// a shell that carries on past a failed exec says so
+		fmt.Fprintf(&s, "chmod 700 %s/p\nexec %s/p -wrap %s %s < %s/in\nprintf '%%s %%d\\n' 'SP-START-%s' 96\nexit 0\n",
+			q, q, q, strings.Join(args, " "), q, tok)
+		return s.Bytes()
+	}
 	heredoc("in", "IN", stdin)
 	fmt.Fprintf(&s, "chmod 700 %s/p\nprintf '%%s\\n' 'SP-START-%s'\nSANDPROBE_TWIN=1 %s/p %s < %s/in\nrc=$?\nprintf '\\n%%s %%d\\n' 'SP-END-%s' \"$rc\"\n",
 		q, tok, q, strings.Join(args, " "), q, tok)
