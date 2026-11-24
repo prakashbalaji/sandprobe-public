@@ -223,3 +223,43 @@ func TestFixLoopDocker(t *testing.T) {
 		}
 	}
 }
+
+// With Docker (SANDPROBE_FIXTURES=1): PRV-17 end to end. run exec -provider modal -no-canary into a local container
+// writes a sandprobe/5 report; fix reads it, lists no Cloud access, and takes its platform only from -platform. The
+// test starts the container and removes it by the ID docker returned.
+func TestFixDeclaredProviderDocker(t *testing.T) {
+	if os.Getenv("SANDPROBE_FIXTURES") == "" {
+		t.Skip("needs Docker: set SANDPROBE_FIXTURES=1")
+	}
+	bin := filepath.Join(t.TempDir(), "sandprobe")
+	if b, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM debian:trixie-slim\nRUN useradd -m -u 1000 -s /bin/bash agent\n"), 0o644)
+	image := testImage(t, dir)
+	idb, err := exec.Command("docker", "run", "-d", "--network", "none", image, "sleep", "infinity").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(string(idb))
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", id).Run() })
+	out := t.TempDir()
+	b, _ := exec.Command(bin, "run", "exec", "-provider", "modal", "-no-canary", "-y", "-o", "json", "-out", out, "--",
+		"docker", "exec", "-i", id, "sh").Output()
+	var d struct {
+		Schema   string
+		Manifest struct {
+			DeclaredProvider string `json:"declared_provider"`
+		}
+	}
+	if json.Unmarshal(b, &d) != nil || d.Schema != "sandprobe/5" || d.Manifest.DeclaredProvider != "modal" {
+		t.Fatalf("want a sandprobe/5 report declaring modal: %.300s", b)
+	}
+	m, _ := filepath.Glob(filepath.Join(out, "*.json"))
+	if len(m) != 1 {
+		t.Fatalf("want one report, got %v", m)
+	}
+	abs, _ := filepath.Abs(m[0])
+	checkDeclaredFix(t, abs)
+}

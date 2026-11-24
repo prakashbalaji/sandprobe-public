@@ -193,3 +193,49 @@ func TestFixIncomplete(t *testing.T) {
 		t.Errorf("a complete report: exit %d:\n%s", code, out.String())
 	}
 }
+
+// FIX-4, FIX-5, PRV-17: a run exec report that declares its provider (sandprobe/5) loads; its Cloud access is not
+// applicable, so fix lists it nowhere; and the platform comes only from -platform, never from declared_provider.
+func TestFixDeclaredProvider(t *testing.T) {
+	path, d := declaredSaved(t, "modal")
+	if d.Schema != report.SchemaDeclaredProvider || d.Manifest.DeclaredProvider != "modal" {
+		t.Fatalf("the helper's report isn't a sandprobe/5 declared one: %s %q", d.Schema, d.Manifest.DeclaredProvider)
+	}
+	checkDeclaredFix(t, path)
+}
+
+func checkDeclaredFix(t *testing.T, path string) {
+	t.Helper()
+	for platform, want := range map[string]string{"": "unknown", "docker": "docker", "modal": "modal"} {
+		args := []string{"fix", path, "-o", "json"}
+		if platform != "" {
+			args = append(args, "-platform", platform)
+		}
+		var out, errb bytes.Buffer
+		if code := run(args, &out, &errb); code != exitGraded && code != exitPartial {
+			t.Fatalf("%v: exit %d: %s", args, code, errb.String())
+		}
+		var p fix.Plan
+		if err := json.Unmarshal(out.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Platform != want || p.Of != 5 {
+			t.Errorf("-platform %q: platform %q, of %d; want %q of 5 (never the declared provider)", platform, p.Platform, p.Of, want)
+		}
+		for _, it := range append(append([]fix.Item{}, p.NotAnAction...), p.NotDecided...) {
+			if it.Category == "Cloud access" || it.Check == "SEC-4" || it.Check == "AMP-7" {
+				t.Errorf("-platform %q: Cloud access is listed, though it is not applicable: %+v", platform, it)
+			}
+		}
+		for _, a := range p.Actions {
+			if a.ID == "cloud-identity" || slices.Contains(a.CouldTurnGreen, "Cloud access") {
+				t.Errorf("-platform %q: an action for Cloud access: %+v", platform, a)
+			}
+		}
+		for _, banned := range []string{"-provider", "-platform", "declared"} {
+			if strings.Contains(out.String(), banned) {
+				t.Errorf("-platform %q: the plan says %q", platform, banned)
+			}
+		}
+	}
+}
