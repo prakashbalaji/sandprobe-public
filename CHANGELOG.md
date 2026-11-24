@@ -5,6 +5,10 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+## 0.3.0-rc.2 (2026-11-23)
+
+The second release candidate for 0.3.0: the web report's new layout. Checks and grading are unchanged from rc.1.
+
 ### Web report
 
 - The HTML report takes the site's look: a near-black page, hairline panels, and Geist, named but never loaded (UX-8,
