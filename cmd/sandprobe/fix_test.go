@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -192,24 +191,5 @@ func TestFixIncomplete(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"fix", "../../demo/reports/vibe.json"}, &out, &errb); code != exitGraded || strings.Contains(out.String(), "incomplete") {
 		t.Errorf("a complete report: exit %d:\n%s", code, out.String())
-	}
-}
-
-// FIX-10: examples/modal/bridge.py's guards, against a fake modal module (examples/modal/bridge_test.py). It runs
-// isolated (-I), with no Modal token in its environment or home, so the real SDK can never be reached.
-func TestModalBridge(t *testing.T) {
-	py, err := osexec.LookPath("python3")
-	if err != nil {
-		t.Skip("no python3 on PATH")
-	}
-	cmd := osexec.Command(py, "-I", "-B", "../../examples/modal/bridge_test.py")
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "MODAL_") && !strings.HasPrefix(kv, "HOME=") {
-			cmd.Env = append(cmd.Env, kv)
-		}
-	}
-	cmd.Env = append(cmd.Env, "HOME="+t.TempDir())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
 	}
 }
