@@ -976,6 +976,13 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   completed exchange does not independently prove delivery, and failed exchange
   or silence never proves blocking. Malformed diagnostic fields cannot change a
   verdict or become report-controlled prose. Older records need no new fields.
+- **EVD-7 Local SDK failures are not provider evidence.** If a Daytona SDK subprocess cannot start
+  because its interpreter is missing, unresolvable or not executable, return a fixed local-runtime failure
+  and label the host call `local_sdk_unavailable`. Never echo interpreter paths, keys or raw OS errors.
+  Preserve provider/transport failures as separate generic failures. Record one SDK call per invocation;
+  logging must not duplicate exec operations. No local runtime failure is a security result or cleanup proof.
+  Tests: `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable`,
+  `TestDaytonaCommandRecordsOneCall`.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
