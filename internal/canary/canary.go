@@ -5,7 +5,6 @@
 package canary
 
 import (
-	"bufio"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -684,10 +683,17 @@ func (c *Canary) ServeTLS(ln net.Listener, port int) error {
 
 // ServeTCP is a plain port (EGR-5): the first line, up to 64 bytes, is the nonce. "health <challenge>" gets the
 // canary's signature over this port and the challenge, which is what the host counts (SBX-11); a bare "health" gets
-// an unsigned line, for an operator's check only.
+// an unsigned line, for an operator's check only. TCP/80 additionally accepts EVD-9's bounded HTTP marker.
 func (c *Canary) ServeTCP(ln net.Listener, port int) error {
 	return c.serve(ln, func(conn net.Conn) {
-		line, _ := bufio.NewReader(io.LimitReader(conn, 64)).ReadString('\n')
+		line, httpNonce, isHTTP := readTCPMarker(conn, c.Domain, port)
+		if isHTTP {
+			if httpNonce != "" {
+				c.record(httpNonce, "tcp", port, conn.RemoteAddr())
+				writeHTTPMarkerAckV1(conn, httpNonce)
+			}
+			return
+		}
 		n := strings.TrimSpace(line)
 		ch, signed := strings.CutPrefix(n, "health ")
 		switch {

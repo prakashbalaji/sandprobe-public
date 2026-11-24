@@ -5,6 +5,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- Add bounded HTTP/1.1 nonce echo support on the canary’s existing TCP/80 listener, alongside the legacy protocol. Probe selection and grading remain unchanged until client capability/calibration support lands.
+
 - Escape Unicode format controls in saved-report terminal text so bidi and zero-width characters cannot reorder or hide displayed evidence.
 
 ## 0.3.0-rc.2 (2026-11-23)

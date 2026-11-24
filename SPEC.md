@@ -993,6 +993,18 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Do not emit file contents, guest responses, errors or credentials. Preparation failures consume no model
   request and cannot become successful workloads or security passes. Test the real workload controller
   boundary with credential-free upload/exec faults and malformed responses before invoking any model.
+- **EVD-9 HTTP marker foundation.** The existing canary TCP/80 listener may additionally accept a canonical
+  HTTP/1.1 GET for `/sandprobe/v1/echo/<nonce>` with the matching nonce.canary.<domain> Host and
+  Connection: close. Accept at most 2048 bytes, no body, query, authentication, upgrade, transfer coding or
+  unrecognized headers. Bounded conventional forwarding headers are ignored; receipts use the socket peer,
+  never a supplied forwarding address. Other ports retain the legacy protocol; legacy nonce/health traffic keeps its 64-byte bound.
+  A valid request records only the already-armed nonce at the existing tcp/80 scope and returns a fixed,
+  length-delimited text acknowledgement. Never forward a request, redirect, log request text or echo headers.
+  Shared request/ack helpers reject malformed hosts, framing, wrong nonces, extra bytes and HTTP errors without
+  emitting response text. Even HTTP200 with the right acknowledgement is exchange completion only: the host's
+  independent receipt is still required for delivery; no receipt or HTTP error proves no denial. This first
+  stage changes no probe requests, default canary selection, grading, plan or evidence schema. Explicit client
+  selection/capability and calibration must be reviewed before the new exchange is used for assessment.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -2694,6 +2706,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
+| EVD-9 | `internal/canary/http_marker_test.go`: canonical HTTP/80 + independently collected receipts, unarmed completion without proof, legacy compatibility, malformed/oversized/body/host/port rejection, bounded acknowledgement parsing and no raw response leakage |
 | EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
 | EVD-7 | `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable` (missing/non-executable interpreter, fixed private-safe error), `TestDaytonaCommandRecordsOneCall` (one event, success/local/provider failure classification) |
 | EVD-6 | bounded HTTP/error label fixtures, Linux guest protocol tests and diagnostic/grading invariance |
