@@ -23,10 +23,11 @@ by ID, and prints the score. The full report is the `.html` file it names.
 **1. The vibe-coded box: 1/6.**
 
 ```sh
-sandprobe run docker sandprobe-demo/vibe -as agent -y -out vibe
+sandprobe run docker sandprobe-demo/vibe -as agent -y -out vibe -- --entrypoint /opt/app/entry.sh
 ```
 
-This is the post's app as an agent left it:
+`--entrypoint` starts the box's own processes, as the agent's sandbox ran them: Sandprobe otherwise runs only its own
+idle process. This is the post's app as an agent left it:
 - `.env` holds the Stripe, OpenAI, Resend and Supabase keys;
 - the dev server runs as the agent, with every key in its environment;
 - a Docker socket is mounted, because Supabase's local stack wants one (here a stand-in that does nothing);

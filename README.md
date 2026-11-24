@@ -71,7 +71,7 @@ need Docker and `sandprobe`.
 git clone https://github.com/summationai/sandprobe && cd sandprobe/demo/boxes
 for box in vibe hardened regressed; do docker build -q -t sandprobe-demo/$box -f $box.Dockerfile .; done
 cd "$(mktemp -d)"
-sandprobe run docker sandprobe-demo/vibe -as agent -y -out vibe
+sandprobe run docker sandprobe-demo/vibe -as agent -y -out vibe -- --entrypoint /opt/app/entry.sh
 sandprobe run docker sandprobe-demo/hardened -as agent -y -out hardened -- \
   --read-only --cap-drop ALL --security-opt no-new-privileges --network none --tmpfs /tmp
 sandprobe run docker sandprobe-demo/regressed -as agent -y -out regressed -- \

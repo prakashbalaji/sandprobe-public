@@ -439,3 +439,27 @@ func TestPlanAttested(t *testing.T) {
 		}
 	}
 }
+
+// DKR-2 and DKR-4: the adapter's own facts reach the probe's input only, never the manifest (whose fields are OUT-1's
+// schema), and Sandprobe's scratch mount is never a root PER-5 may mark, whatever the survey says of it.
+func TestPlanOwnInitAndScratch(t *testing.T) {
+	s := &obs.Survey{Roots: []obs.Root{{Path: "/home/agent", Kinds: []string{"home"}}, {Path: "/opt/sandprobe/scratch", Kinds: []string{"wd", "mount"}}}}
+	m, in := Plan(Options{Mode: "exec", OwnInit: true, Scratch: "/opt/sandprobe/scratch"}, s, "box-1", Storage{Model: "restore"}, "203.0.113.10", "sandprobe.test", "pin")
+	if !in.OwnInit || in.Scratch != "/opt/sandprobe/scratch" {
+		t.Errorf("want both facts in the probe's input, got own_init %v, scratch %q", in.OwnInit, in.Scratch)
+	}
+	if len(m.Marks) != 1 || m.Marks[0].Root != "/home/agent" {
+		t.Errorf("want only the home marked, never Sandprobe's scratch: %+v", m.Marks)
+	}
+	if len(s.Roots) != 2 {
+		t.Errorf("the survey itself is left as the box reported it: %+v", s.Roots)
+	}
+	if _, in := Plan(Options{Mode: "exec"}, s, "box-1", Storage{}, "203.0.113.10", "sandprobe.test", "pin"); in.OwnInit || in.Scratch != "" {
+		t.Errorf("no adapter fact: want neither in the input, got %+v", in)
+	}
+	for _, bad := range []string{"/tmp", "/", "scratch", "/opt/sandprobe/../tmp"} {
+		if _, err := Execute(context.Background(), &fakeBox{id: "box-1"}, nil, Options{Mode: "exec", Scratch: bad}); err == nil || !strings.Contains(err.Error(), "DKR-4") {
+			t.Errorf("scratch %q: want a refusal before the survey, got %v", bad, err)
+		}
+	}
+}

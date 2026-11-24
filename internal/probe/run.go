@@ -58,7 +58,7 @@ func Run(in Input) (*obs.Doc, error) {
 	if err != nil {
 		return nil, err
 	}
-	tw, err := makeTwins()
+	tw, err := makeTwinsIn(in.Scratch)
 	if tw != nil {
 		defer tw.close()
 	}

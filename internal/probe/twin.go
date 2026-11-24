@@ -75,8 +75,12 @@ type twins struct {
 	readOnlyDir, ownNoPerms string
 }
 
-func makeTwins() (*twins, error) {
-	dir, err := os.MkdirTemp("", "sandprobe-") // 0700, removed by close
+func makeTwins() (*twins, error) { return makeTwinsIn("") }
+
+// makeTwinsIn makes the twins in a private directory under scratch: the tmpfs the host mounted for the probe on a
+// read-only root (DKR-4), or, when empty, the probe's temporary directory.
+func makeTwinsIn(scratch string) (*twins, error) {
+	dir, err := os.MkdirTemp(scratch, "sandprobe-") // 0700, removed by close
 	if err != nil {
 		return nil, err
 	}

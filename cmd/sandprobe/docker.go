@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/netip"
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,10 +23,14 @@ import (
 	"sandprobe/internal/report"
 )
 
-// PRV-14: the canary's image, pinned by digest as test/probe.sh pins it, and where the probe sits in the box.
+// PRV-14: the canary's image, pinned by digest as test/probe.sh pins it, and where the probe sits in the box. DKR-1:
+// the probe's idle mode, the container's entrypoint unless the person names one. DKR-4: Sandprobe's own scratch tmpfs.
 const (
 	dockerCanaryImage = "debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"
 	dockerProbePath   = "/opt/sandprobe/sandprobe-probe"
+	dockerIdle        = "-idle"
+	dockerScratch     = "/opt/sandprobe/scratch"
+	dockerScratchSpec = dockerScratch + ":rw,noexec,nosuid,nodev,size=16m,mode=1777"
 	dockerResidual    = "Egress is measured to a canary on a network Sandprobe created, with the box's resolver pointed at it: " +
 		"a receipt proves the box can send data out to an address it was given, not that it reaches the internet (PRV-14)."
 )
@@ -38,15 +45,71 @@ func namesNetwork(opts []string) bool {
 	return false
 }
 
+// option finds a docker run option the person gave, as "--name value" or "--name=value": its value, and whether it
+// was there. A bool option given bare has the value "true".
+func option(opts []string, name string, takesValue bool) (string, bool) {
+	value, found := "", false
+	for i, o := range opts {
+		switch {
+		case strings.HasPrefix(o, name+"="):
+			value, found = strings.TrimPrefix(o, name+"="), true
+		case o == name && takesValue && i+1 < len(opts):
+			value, found = opts[i+1], true
+		case o == name && !takesValue:
+			value, found = "true", true
+		}
+	}
+	return value, found
+}
+
+// userEntrypoint is the person's own --entrypoint, if they gave one: then it runs, not Sandprobe's idle process (DKR-1).
+func userEntrypoint(opts []string) (string, bool) { return option(opts, "--entrypoint", true) }
+
+// namesHealth: the person's options set the container's health check, which is then theirs to keep (DKR-1).
+func namesHealth(opts []string) bool {
+	for _, o := range opts {
+		if o == "--no-healthcheck" || strings.HasPrefix(o, "--no-healthcheck=") || strings.HasPrefix(o, "--health-") {
+			return true
+		}
+	}
+	return false
+}
+
+// readOnlyRoot: the person's options make the root read-only, so the probe gets Sandprobe's own scratch (DKR-4).
+func readOnlyRoot(opts []string) bool {
+	v, ok := option(opts, "--read-only", false)
+	on, err := strconv.ParseBool(v)
+	return ok && err == nil && on
+}
+
 // boxArgs is the docker run command for the box: Sandprobe's network and resolver only when the person named no
-// network, then their options unchanged, then the probe, read-only, and the image.
+// network, then their options unchanged, then Sandprobe's own idle entrypoint unless they named one (DKR-1), with no
+// init of Docker's ahead of it unless they named --init and no image health check unless they named a health option,
+// its scratch on a read-only root (DKR-4), the probe, read-only, and the image, with the idle process's one argument.
 func boxArgs(network, canaryIP, probe, image string, opts []string) []string {
 	args := []string{"run", "-d"}
 	if !namesNetwork(opts) {
 		args = append(args, "--network", network, "--dns", canaryIP)
 	}
 	args = append(args, opts...)
-	return append(args, "-v", probe+":"+dockerProbePath+":ro", image)
+	_, theirs := userEntrypoint(opts)
+	if !theirs {
+		args = append(args, "--entrypoint", dockerProbePath)
+		if _, init := option(opts, "--init", false); !init {
+			args = append(args, "--init=false")
+		}
+		if !namesHealth(opts) {
+			args = append(args, "--no-healthcheck")
+		}
+	}
+	if readOnlyRoot(opts) {
+		args = append(args, "--tmpfs", dockerScratchSpec)
+	}
+	args = append(args, "-v", probe+":"+dockerProbePath+":ro", image)
+	if !theirs {
+		args = append(args, dockerIdle)
+	}
+	return args
 }
 
 func dockerPlan(image, user string, opts []string) planDoc {
@@ -59,17 +122,39 @@ func dockerPlan(image, user string, opts []string) planDoc {
 	if len(opts) > 0 {
 		given = strings.Join(opts, " ")
 	}
+	creates := []string{"a bridge network on a free 172.30.N.0/24", "a canary container on it (" + dockerCanaryImage[:18] + ", pinned)",
+		"a throwaway container from " + image + " on " + net + "; your docker run options: " + given}
+	if readOnlyRoot(opts) { // DKR-4
+		creates = append(creates, "Sandprobe's own addition: a 16 MB tmpfs at "+dockerScratch+" for the probe's scratch, since the root is read-only; no check counts it")
+	}
+	idle := "nothing but the probe, and Sandprobe's own idle process (the probe in its idle mode) as the container's entrypoint: "
+	counted := ", and SEC-2 and SEC-5 don't count the idle process once Docker's record confirms it is PID 1 (DKR-1, DKR-2)"
+	ep, theirs := userEntrypoint(opts)
+	health := theirs || namesHealth(opts) // the image's health check is left on
+	var runs []string
+	switch {
+	case theirs:
+		runs = []string{"the probe, and your --entrypoint " + ep + " as the container's main process, with no arguments: " +
+			"it runs, and SEC-2 and SEC-5 count it like any other process (DKR-1)"}
+	case health:
+		runs = []string{idle + "your image's entrypoint and command don't run" + counted}
+	default:
+		runs = []string{idle + "your image's entrypoint, command and health check don't run (--no-healthcheck)" + counted}
+	}
+	if health {
+		runs = append(runs, "the image's health check, if it has one, as Docker schedules it with your options: "+
+			"SEC-2 and SEC-5 count it if it runs during the probe (DKR-1)")
+	}
 	return planDoc{Provider: "docker",
-		Creates: []string{"a bridge network on a free 172.30.N.0/24", "a canary container on it (" + dockerCanaryImage[:18] + ", pinned)",
-			"a throwaway container from " + image + " on " + net + "; your docker run options: " + given},
+		Creates:    creates,
 		LaunchPath: "docker exec, as " + user,
 		Probe:      "bind-mounted read-only at " + dockerProbePath,
-		Markers:    "the box's home and working directory, removed with the container",
+		Markers:    "none: PER-5 is skipped, since run docker creates no volume a marker could outlive the container in (DKR-5)",
 		Contacts: append(append([]string{"the local canary: DNS, HTTPS 443, TCP 22, 80 and 8080, UDP 53"}, metadataContacts()...),
 			"a Kubernetes API, only if the box's environment names one: a handshake, no request"),
 		OpensReadOnly: append([]string{}, sec3.Targets...),
-		Runs:          []string{"nothing but the probe"},
-		Reset:         "removes the container and creates it again from the same image and options, then rechecks its markers",
+		Runs:          runs,
+		Reset:         "none: with PER-5 skipped, the container is never reset (DKR-5)",
 		Deletes:       "the container, only its run-created anonymous volumes, the canary and the network, by their recorded IDs, then confirms each is gone; user volumes are preserved",
 		LocalProxy:    "no",
 		Time:          "about 10 seconds",
@@ -187,7 +272,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 	case o.yes:
 	case o.tty():
 		printPlan(o.stdout, p)
-		fmt.Fprint(o.stdout, "\nCreate the container, run, reset and delete it? [y/N] ")
+		fmt.Fprint(o.stdout, "\nCreate the container, run the probe and delete it? [y/N] ")
 		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
 			return exitApproval, fail("needs_approval", "nothing was created: the plan wasn't approved", "sandprobe run docker "+image+" -y", exitApproval)
@@ -252,7 +337,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 
 	var c *host.DockerCanary
 	var run *host.Run
-	var boxID string
+	var boxID, residual string
 	volumes := new(host.DockerVolumeTracker)
 	left := []string{}
 	teardown := func() {
@@ -306,12 +391,15 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 			err = volumes.Capture(ctx, boxID, baseline)
 		}
 		if err == nil {
-			select { // the image's own start-up
+			select { // a start-up that fails at once
 			case <-ctx.Done():
 			case <-time.After(time.Second):
 			}
-			if state, _ := dockerOut(ctx, "inspect", "--format", "{{.State.Running}}", boxID); state != "true" {
-				err = fmt.Errorf("the container exited before the probe ran: give the image a command that keeps running")
+			switch running, cause, ok := dockerState(ctx, boxID, r.dockerOpts); {
+			case !ok:
+				err = fmt.Errorf("Docker couldn't say whether the container from %s is running, so the probe didn't run", image)
+			case !running:
+				err = dockerStopErr("before the probe ran", cause, image, r.as, r.dockerOpts)
 			}
 		}
 		if err == nil {
@@ -322,9 +410,22 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 			user = probeUser(r.as, own)
 		}
 		if err == nil {
-			step("running the probe as %s, then the reset and recheck", user)
+			scratch := ""
+			if readOnlyRoot(r.dockerOpts) {
+				scratch = dockerScratch
+			}
+			step("running the probe as %s", user)
+			healthOff := dockerHealthOff(ctx, boxID)
 			run, err = host.Execute(ctx, &host.DockerBox{Container: boxID, User: user, ProbePath: dockerProbePath, Args: args, VolumeTracker: volumes}, c,
-				host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy})
+				host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy, OwnInit: dockerOwnInit(ctx, boxID, r.dockerOpts), Scratch: scratch})
+			if err != nil || run.Report.Invalid != "" { // DKR-3: a container that stopped says why, never a bare invalid run
+				if running, cause, ok := dockerState(ctx, boxID, r.dockerOpts); ok && !running {
+					err = dockerStopErr("while the probe ran", cause, image, r.as, r.dockerOpts)
+				}
+			}
+			if err == nil {
+				residual = dockerRunResidual(r.dockerOpts, run.Input.OwnInit, healthOff)
+			}
 		}
 	}
 	teardown()
@@ -334,10 +435,15 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 		fmt.Fprintf(stderr, "sandprobe: %s\n", cleanup)
 	}
 	if err != nil {
+		var stopped *cliError
+		if errors.As(err, &stopped) { // DKR-3: its own message and fix
+			stopped.exit = failExit(cleaned)
+			return 0, stopped
+		}
 		return 0, fail("provider_error", err.Error(), "see the message; the cleanup is above", failExit(cleaned))
 	}
 	d := report.Build(run, report.Meta{Version: Version, Provider: "docker", BoxName: image, CreatedBySandprobe: true,
-		StartedAt: start, Duration: time.Since(start), Cleanup: cleanup, Residual: dockerResidual})
+		StartedAt: start, Duration: time.Since(start), Cleanup: cleanup, Residual: residual})
 	return finish(o, r, d, cleaned)
 }
 
@@ -350,4 +456,125 @@ func dockerGone(ctx context.Context, kind, id string) bool {
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	s := strings.ToLower(string(out))
 	return err != nil && (strings.Contains(s, "no such") || strings.Contains(s, "not found"))
+}
+
+// dockerState is DKR-3: Docker's record of whether the container runs and, if it doesn't, what stopped and how, read
+// with a narrow format, never the whole inspect document or the logs. ok is false when Docker didn't answer.
+func dockerState(ctx context.Context, id string, opts []string) (running bool, cause string, ok bool) {
+	out, err := dockerOut(ctx, "inspect", "--type", "container", "--format", "{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}", id)
+	f := strings.Fields(out)
+	if err != nil || len(f) != 3 {
+		return false, "", false
+	}
+	if f[0] == "true" {
+		return true, "", true
+	}
+	code, err := strconv.Atoi(f[1])
+	if err != nil {
+		return false, "", false
+	}
+	who := "Sandprobe's idle process, the container's entrypoint,"
+	if ep, theirs := userEntrypoint(opts); theirs {
+		who = "your --entrypoint " + ep
+	}
+	if f[2] == "true" { // Docker's own record; an exit code alone never names a signal, since a process can exit 137 itself
+		return false, fmt.Sprintf("%s was killed by Docker for running out of memory (exit code %d)", who, code), true
+	}
+	return false, fmt.Sprintf("%s exited with code %d", who, code), true
+}
+
+// dockerStopErr is DKR-3's error: what stopped, when and how, and a fix that runs as pasted. The person's own
+// --entrypoint is dropped, so Sandprobe keeps the container running itself; if its own idle process stopped, the run
+// without the person's docker options shows whether one of them stops it.
+func dockerStopErr(when, cause, image, as string, opts []string) error {
+	var keep []string
+	_, theirs := userEntrypoint(opts)
+	for i := 0; theirs && i < len(opts); i++ {
+		switch o := opts[i]; {
+		case o == "--entrypoint":
+			i++ // and its value
+		case strings.HasPrefix(o, "--entrypoint="):
+		default:
+			keep = append(keep, o)
+		}
+	}
+	fix := "sandprobe run docker " + shellWord(image)
+	if as != "" {
+		fix += " -as " + shellWord(as)
+	}
+	fix += " -y"
+	if len(keep) > 0 {
+		fix += " --"
+		for _, o := range keep {
+			fix += " " + shellWord(o)
+		}
+	}
+	return fail("provider_error", "the container stopped "+when+": "+cause, fix, exitPartial)
+}
+
+// shellWord quotes one word for a POSIX shell, only when it needs it.
+func shellWord(w string) string {
+	if w != "" && strings.Trim(w, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:=@%+,") == "" {
+		return w
+	}
+	return "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
+}
+
+// dockerOwnInit is DKR-2: PID 1 of the box is Sandprobe's idle process, read from Docker's own record of the
+// container, never from the box. Docker started its entrypoint with exactly the idle argument, in the container's own
+// PID namespace, with no init of Docker's ahead of it, so PID 1 there is that process: no other can take PID 1, and
+// the idle process never execs. Anything else, or a record Docker doesn't give, names nothing.
+func dockerOwnInit(ctx context.Context, id string, opts []string) bool {
+	if _, theirs := userEntrypoint(opts); theirs {
+		return false
+	}
+	out, err := dockerOut(ctx, "inspect", "--type", "container", "--format",
+		"{{json .Path}} {{json .Args}} {{json .HostConfig.PidMode}} {{json .HostConfig.Init}}", id)
+	return err == nil && out == `"`+dockerProbePath+`" ["`+dockerIdle+`"] "" false`
+}
+
+// dockerHealthOff is DKR-1: Docker's own record of the container says no health check runs in it, either because the
+// image has none or because it is NONE (--no-healthcheck). Anything else, or no answer, is a health check that may run.
+func dockerHealthOff(ctx context.Context, id string) bool {
+	out, err := dockerOut(ctx, "inspect", "--type", "container", "--format", "{{json .Config.Healthcheck}}", id)
+	return err == nil && healthRecordOff(out)
+}
+
+// healthRecordOff reads Docker's JSON record of a container's health check: off only as null or a test of NONE.
+func healthRecordOff(record string) bool {
+	var hc *struct{ Test []string }
+	if json.Unmarshal([]byte(record), &hc) != nil {
+		return false
+	}
+	return hc == nil || len(hc.Test) == 1 && hc.Test[0] == "NONE"
+}
+
+// dockerRunResidual is the report's residual (PRV-14), with what Sandprobe ran or added in the box (DKR-1, DKR-2,
+// DKR-4), from the host's own facts and Docker's record.
+func dockerRunResidual(opts []string, ownInit, healthOff bool) string {
+	r := dockerResidual
+	switch ep, theirs := userEntrypoint(opts); {
+	case theirs:
+		r += " Your --entrypoint " + ep + " ran as the container's main process, and SEC-2 and SEC-5 counted it like any other process (DKR-1)."
+	case ownInit && healthOff:
+		r += " Sandprobe's own idle process was the container's entrypoint and no health check ran, so the image's own entrypoint, " +
+			"command and health check never ran and SEC-2 and SEC-5 saw none of their processes; the idle process, PID 1 by Docker's record, " +
+			"wasn't counted (DKR-1, DKR-2)."
+	case ownInit:
+		r += " Sandprobe's own idle process was the container's entrypoint, so the image's own entrypoint and command never ran; " +
+			"the idle process, PID 1 by Docker's record, wasn't counted (DKR-1, DKR-2)."
+	default:
+		r += " Sandprobe's own idle process was the container's entrypoint, so the image's own entrypoint and command never ran; " +
+			"Docker's record didn't confirm it is PID 1 of the container's own PID namespace (your --init or --pid, say), " +
+			"so SEC-2 and SEC-5 counted it (DKR-1, DKR-2)."
+	}
+	if !healthOff {
+		r += " Docker's record shows a health check in the container, so it may have run during the probe, and SEC-2 and SEC-5 " +
+			"counted it if it did (DKR-1)."
+	}
+	if readOnlyRoot(opts) {
+		r += " The root was read-only, so Sandprobe added a 16 MB tmpfs at " + dockerScratch + " for the probe's own scratch; " +
+			"no check counts it (DKR-4)."
+	}
+	return r
 }

@@ -80,6 +80,12 @@ type Input struct {
 	Proxy               string              `json:"proxy"`      // the proxy the plan named for EGR-3, "host:port"; the only one contacted
 	AllowLocal          bool                `json:"allow_local_proxy"`
 	KubeAPI             string              `json:"kube_api"` // the Kubernetes API the plan named for AMP-7; the only one contacted
+	// OwnInit says PID 1 is Sandprobe's own idle process, as the host read it from Docker's record of the container,
+	// never from the box: SEC-2 and SEC-5 skip exactly that PID (DKR-2).
+	OwnInit bool `json:"own_init,omitempty"`
+	// Scratch is where the probe makes its private scratch directory: a tmpfs the host mounted for it on a read-only
+	// root (DKR-4). Empty is the probe's temporary directory.
+	Scratch string `json:"scratch,omitempty"`
 }
 
 // SurveySchema names the probe's survey: what the host needs from the box before it can plan (SBX-3).
