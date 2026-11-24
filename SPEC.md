@@ -65,6 +65,11 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   This refines ANL-2's five areas without changing them: provider reach splits into Containment and Cloud access,
   and AMP-8 moves from privilege to Containment. An unmapped check fails the tests. Chains have no category; the
   checks they join already turn their own categories red.
+- **SCR-6 Executed check counts.** The HTML category's tests-run counter counts recorded checks except
+  skipped and scoped-out results. A missing row is not executed. An unknown is counted as executed/inconclusive,
+  never as a pass; not-found is executed without a negative proof. Scope discovery alone is not an executed
+  access test. These counters do not change SCR-2's score or SCR-5's proof coverage.
+  Tests: `internal/report/fix_test.go` `TestHTMLExecutedCountsExcludeScopeOnlyResults`.
 - **SCR-2 Green needs proof.** A category is green only when at least one of its checks was tested (any result but
   skipped), none is unknown, and none has a finding above Info: the bar GRD-1 sets for an A. Anything else is red, and
   its reason says which: found, couldn't prove, or not tested. When every unknown in a category comes from HCN-5's

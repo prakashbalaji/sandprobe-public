@@ -365,3 +365,34 @@ func TestInvalidHasNoCounts(t *testing.T) {
 		t.Error("an invalid run's header doesn't say so")
 	}
 }
+
+// SCR-6: scope discovery must not inflate executed-access coverage in either theme.
+func TestHTMLExecutedCountsExcludeScopeOnlyResults(t *testing.T) {
+	d := doc(obs.Pass, map[string]Check{
+		"AMP-4":     {Result: obs.Unknown},
+		"AMP-5":     {Result: obs.NotFound},
+		"AMP-6":     {Result: obs.Skipped},
+		"AMP-8.sys": {Result: obs.ScopedOut},
+	})
+	var kept []Check
+	for _, c := range d.Checks {
+		if c.ID != "AMP-8.blk" {
+			kept = append(kept, c)
+		}
+	}
+	d.Checks = kept
+	before := Score(d)
+	for _, theme := range []string{"graphite", "paper"} {
+		b, err := HTML(d, theme)
+		if err != nil {
+			t.Fatal(err)
+		}
+		card := between(string(b), `id="cat-3"`, "</li>")
+		if !strings.Contains(card, "2/5 tests run</span>") {
+			t.Errorf("%s: unknown and not-found should count; skipped, scoped-out and missing must not: %s", theme, card)
+		}
+	}
+	if after := Score(d); after.Score != before.Score || after.Of != before.Of {
+		t.Fatal("rendering changed the score")
+	}
+}
