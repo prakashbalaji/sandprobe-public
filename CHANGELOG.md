@@ -26,6 +26,24 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 - Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.
 
+- Add `-block-device-path <path>` to `run exec` and `plan exec`, repeatable up to 32 times, so AMP-8.blk can assess a
+  block device at a custom path as well as the ones sysfs names. The check stays metadata-only, with no device I/O. A
+  declared path that is missing or of the wrong type stays unknown, and the grader refuses a `scoped_out` result when
+  a path was declared (EVD-13).
+
+- The web report's per-category "tests run" counts no longer count skipped, missing or scoped-out checks as run;
+  unknown and not-found checks still count as run, never as passes. Scores are unchanged (SCR-6).
+
+- A persistence reset recheck (PER-5) that stops on a marker mismatch now says whether the inode, the length or both
+  differed. It is still unknown, and the marker is never opened (TWN-3).
+
+- An unexpected HTTP reply from the canary exchange is now labelled by its status class (1xx to 5xx), keeping the
+  specific 403 and 407 labels. Response text is still discarded, and no label counts as delivery or denial.
+
+- Managed Daytona runs: a missing or non-executable local SDK interpreter now reports `local_sdk_unavailable` instead of
+  a generic provider error, each SDK call is recorded once rather than twice, and a workload preparation failure names
+  its stage (source read, upload, worker run or readiness) with only fixed labels, never raw errors or paths.
+
 - Retain optional, own-sandbox-bound organization network-policy context for managed Daytona runs without treating configuration as observed denial.
 
 - Stop HTTP-opted managed Nitro and Daytona runs before paid resources when the shared canary capability is unavailable.
