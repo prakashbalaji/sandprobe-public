@@ -120,7 +120,7 @@ func TestBasetenLifecycleRetentionPolicy(t *testing.T) {
 				d.Cleanup.Outcome = outcome
 				d.Cleanup.Retention = retained
 				var out bytes.Buffer
-				code, e := finishBaseten(opts{out: "json", stdout: &out}, runFlags{outDir: t.TempDir(), theme: "modern", min: "4"}, d, true, nil)
+				code, e := finishBaseten(opts{out: "json", stdout: &out}, runFlags{outDir: t.TempDir(), theme: "modern", min: "C"}, d, true, nil)
 				if e != nil || code != exitBelowMin || !strings.Contains(out.String(), `"retention"`) || !strings.Contains(out.String(), `"cleanup_command"`) {
 					t.Fatal("retention masked grade gate or missing output", e, code)
 				}
@@ -153,7 +153,7 @@ func TestBasetenLifecycleFailureStillWritesReport(t *testing.T) {
 		cleaned bool
 		min     string
 		want    int
-	}{{true, "", exitPartial}, {true, "4", exitBelowMin}, {false, "", exitCleanup}} {
+	}{{true, "", exitPartial}, {true, "C", exitBelowMin}, {false, "", exitCleanup}} {
 		var out bytes.Buffer
 		d := doc("F", true, true)
 		d.Cleanup.Outcome = "retention unavailable; cleanup recorded"

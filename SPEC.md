@@ -109,15 +109,8 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   tested to skipped stays coverage loss. An `opt_in` skip and one with no kind both read "Not tested", so a report
   from before this rule and a new `opt_in` one of the same box compare as a matched pair.
   A green row that rests on a check with no finding but no negative proof says so in one line ("not proven: DNS"),
-  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. When
-  a green row has no conclusive check at all (`Conclusive == 0`: every tested check in it ended `not_found`,
-  `scoped_out` or `info`, with no `pass` or `absent`), the card sets `green_not_proven: true` on that row, and OUT-2's
-  page, the terminal and workload exposure tables label it "Green · not proven" (`GREEN · NOT PROVEN`, dashed, with
-  `◌` in the terminal) rather than plain "Green"; it still counts toward the score. An invalid run (GRD-5) has no score. A full score therefore means
+  since that is KND-2's not proven, never a refusal; a check whose findings are only ever Info is left out of it. An invalid run (GRD-5) has no score. A full score therefore means
   no finding above Info and nothing unknown in the categories it counts, and is still bounded by GRD-4 and SBX-10.
-  Old workload-exposure/1 rows may omit this display flag: validate their coverage first and derive the
-  rendered flag from that coverage. A supplied true flag that contradicts coverage is rejected; omitted/false
-  flags never suppress the rendered not-proven warning or become additional proof (SCR-5).
 - **SCR-5 Exposure and measurement coverage are separate.** Preserve SCR-2's RC
   score, but attach deterministic catalog-wide coverage to every valid scorecard.
   Partition each category's checks into proven pass/absence, findings (including
@@ -152,8 +145,8 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   line (how many of the categories that apply are green), the run's status in plain words when it is incomplete
   ("Incomplete: n checks unknown") or invalid ("Invalid run: no score", with the reason), and the grader's notes. Under
   it, a smaller strip gives the failures by severity, the passes and the unknowns; an invalid run has no strip. Each
-  row gives "x/y tests run" and links to each of its tests. Neither OUT-2's page (its title included, which carries
-  the score instead) nor the terminal prints a letter grade; OUT-1's JSON keeps `grade.letter` for schema compatibility.
+  row gives "x/y tests run" and links to each of its tests. The page shows no letter grade anywhere, its title
+  included, which carries the score instead; the JSON report (OUT-1), the terminal, `-min` and the exit codes keep it.
   Below the rows, "What to fix" lists every test exactly once. Fail (a finding above Info; an indicator says it is a
   sign, not a confirmation) groups by severity, critical, high, medium and low, each chain's sentence first in its own
   severity with its fix and links to the checks it joins. Unknown follows as its own group, dashed, never folded in
@@ -1921,9 +1914,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   provider's own API (through its CLI or SDK) and our canary (liveness and receipts, carrying the run's nonces only). The
   box, through the probe, contacts exactly SBX-3's list, which includes metadata addresses, EGR-6's public hosts once
   approved, and vsock; the plan and `contacted` list each one.
-- **OUT-4 Exit codes.** 0 graded; 2 usage error; 3 needs approval; 4 needs login; 5 incomplete or invalid; 6 a valid
-  run whose score is below `-min` (`-min <0..6>` requires at least that many green categories; `-min full` requires
-  every applicable category green, `Score == Of`); 7 a box or volume Sandprobe created is neither confirmed deleted nor explicitly retained under PRV-7. After a run, 7 takes precedence over 6, 6
+- **OUT-4 Exit codes.** 0 graded; 2 usage error; 3 needs approval; 4 needs login; 5 incomplete or invalid; 6 graded
+  below `-min`; 7 a box or volume Sandprobe created is neither confirmed deleted nor explicitly retained under PRV-7. After a run, 7 takes precedence over 6, 6
   over 5, and 5 over 0. A run that ends 5, 6 or 7 still writes its reports.
 
 ### UX: the human experience
@@ -1955,52 +1947,37 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   marked: its check is skipped, or that root listed and left alone. For an existing box, the plan says: the probe binary and scratch
   directory, both removed; no markers, no reset, no deletion; and it asks the user to confirm the box isn't a
   production host by typing its name (PRV-2).
-- **UX-5 The live run.** Because the probe returns all observations at the end of an invocation, live terminal output
-  shows only real host phases derived from the adapter's plan (such as `network`, `canary`, `box`, `probe`, `reset`
-  only when the run resets, and `delete` or `cleanup`), never simulated per-check progress. When stderr is a TTY (with
-  `TERM` other than `dumb`, `-o text`, and reduced motion off), the CLI updates a compact phase list in place with a
-  header (`sandprobe`, provider, box) and an elapsed timer, marking each finished phase with its recorded ID or detail.
-  When stderr is not a TTY, or under `TERM=dumb` or reduced motion, it prints append-only step lines with no cursor
-  movement or spinner.
-- **UX-6 The score.** At the end of a run, the terminal summary leads with the header (provider, sanitized box name,
-  observed uid when known, duration) and the score (`SCORE x/y`, `x of y categories green`), with no letter grade and
-  no ASCII box map (the spatial map lives in OUT-2's web report). Beside the score sit any `NotCounted` line (`x/5`),
-  any incomplete status (`Incomplete: n checks unknown`), measurement coverage (`conclusive/total checks`, how many
-  were graded, and `not a certification`, GRD-4), and the six category rows (`✗ RED`, `✓ GREEN`,
-  `◌ GREEN · NOT PROVEN`, `– N/A`), whose reasons use only fixed catalog labels, never box strings (SCR-3). Below the
-  categories, when a chain or finding fired, the summary shows the top finding's exact sentence, severity and evidence
-  class, any canary receipt count and route summary from `d.Receipts`, and `Fix first`; then `Cleanup` (`✓` when
-  confirmed, or a loud `✗` warning when cleanup is unconfirmed, exit 7) and the HTML report path. An invalid run shows
-  `SCORE none` and the escaped invalid reason, with no category rows or counts. Every string from the box, command line
-  or saved report has all control characters (ESC and Unicode line separators included) escaped before printing.
-- **UX-7 Post-run keys and finding walker.** When both stdin and stdout are terminals (`-o text`, `TERM` other than
-  `dumb`), the summary offers single-key actions in raw mode, always restoring terminal state before exit: `o` opens
-  OUT-2's HTML report, `Enter` walks findings and unknowns one by one by severity (showing ID, title, severity, proof
-  or indicator class, escaped evidence and fix, with `j`/`k` or arrows to move, `c` to copy the fix, `e` to explain the
-  check from `catalog.Guide`, `b` or `Esc` back to the summary), `e` explains a check, and `q` (or `Esc`/`Ctrl-C` on
-  the summary) quits with OUT-4's exit code.
+- **UX-5 The live run.** A header holds provider, box, identity and a timer. The containment map puts the agent in a
+  box whose walls are SECRETS (top), EGRESS (right), PERSIST (left) and AMPLIFIERS (bottom). Each check sends a pulse
+  to its wall. A verified refusal sparks and hardens the wall; a finding cracks it and the line leaves in red; an
+  unknown or not-proven check marks the wall in amber. Under the map, a bar per category and a ticker of the latest
+  checks. During the reset the box floods and drains, a rescan sweeps it, and surviving markers glow.
+- **UX-6 The grade.** A large letter stamps in with a spring, and the severity counts tick up beside it. Incomplete,
+  invalid and "not a certification" show with it (GRD-4).
+- **UX-7 The explorer.** Two panes: findings by severity, then unknowns, then not proven, then verified passes. The
+  detail pane gives what a hijacked agent gets, proof or indicator, the evidence, how we checked (the negative proof)
+  and the fix. Keys: arrows, `c` copy the fix, `o` open the web report, `/` filter, `esc` back, `q` quit.
 - **UX-8 Two palettes.** The web report's default, `graphite`, is the site's world, set as a compact document: a
   near-black page (#0a0a0a), panels a step lighter with hairline edges, quiet regular-weight Geist, Geist Mono only
   for what the tool reports, and red and green only for results. Results are pills: a failure is a red-tinted pill; a
   pass has a green legend; Info, No finding, Not run and N/A are neutral; an unknown is a dashed pill, never green.
-  Every other mark of an unknown is dashed too, as are the map's mark, a category row's `GREEN · NOT PROVEN` badge and
-  dot, and its line for a test that is not proven. The page shows no letter grade (SCR-3). `mission` (amber on black, a light CRT feel, a
+  Every other mark of an unknown is dashed too, as are the map's mark and a category row's line for a test that is
+  not proven. The page shows no letter grade (SCR-3). `mission` (amber on black, a light CRT feel, a
   failure in inverse video) is the alternative. `-theme` chooses one; any
   other value renders `graphite`, as an unknown value always rendered the default, and that includes `modern`, the
   cyan palette `graphite` replaced. The page remembers a palette chosen with its own button locally, reads a remembered
   `modern` as `graphite`, and ignores any other value it doesn't know. The page loads no font (OUT-2): it names Geist
   and Geist Mono first, then Inter and JetBrains Mono, then system fonts. The TUI prototype keeps its own `modern` and
   `mission`.
-- **UX-9 Accessibility.** Every category and check state shows as a symbol and a word, never color alone. `NO_COLOR`
-  (when set and non-empty) and `TERM=dumb` suppress ANSI color, and non-UTF-8 locales (`LC_ALL`/`LC_CTYPE`/`LANG` set
-  to `C` or `POSIX`) use ASCII symbols. Reduced motion (`SANDPROBE_REDUCED_MOTION=1`) disables in-place terminal
-  spinners. Terminal output wraps cleanly within 80 columns. Nothing flashes more than three times a second.
+- **UX-9 Accessibility.** Severity always shows as a symbol and a word, never color alone. `NO_COLOR` is honoured.
+  Reduced motion (`SANDPROBE_REDUCED_MOTION=1` or `-still`) shows static frames. Everything fits 80 columns. Nothing
+  flashes more than three times a second.
 - **UX-10 Time.** The probe itself takes at most 90 s. Create to delete takes about 2 minutes on Sprites and Modal
   (estimates, not yet measured). AWS takes longer, about 20 minutes (estimate), because its plan includes creating and
   deleting an EKS cluster; its adapter's step bounds are raised to match (cluster create 25 min, delete 20 min), and
   the plan says so.
-- **UX-11 The web report is the final report.** Every run writes OUT-2's page next to its JSON, and the score screen
-  offers `o` to open it in an interactive terminal. The page is laid out as SCR-3 says: it leads with the score and shows no letter grade. It
+- **UX-11 The web report is the final report.** Every run writes OUT-2's page next to its JSON, and the grade screen
+  offers `o` to open it. The page is laid out as SCR-3 says: it leads with the score and shows no letter grade. It
   holds one sentence saying what a hijacked agent can do, the containment map (each mark links to its evidence), every
   finding with its fix, the unknowns, the not-proven tests, every verified pass with its proof, and how the probe ran (identity, every
   host contacted, every marker and its fate, the reset's evidence). It carries both palettes, honours reduced motion,
@@ -2008,10 +1985,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 
 ### AGT: the agent contract
 
-- **AGT-1 No terminal, no animation.** unless both stdin and stdout are terminals (for prompts and UX-7's keys) or
-  stderr is a terminal (for UX-5's live phases), and never with `-o json`, `-o ndjson` or `TERM=dumb`, the CLI never
-  animates, enters raw mode, prompts or waits for input. Coding agents, wrappers, pipes and CI never block at the end
-  of a run.
+- **AGT-1 No terminal, no animation.** Without a TTY on stdout, or with `-o json` or `-o ndjson`, the CLI never
+  animates, prompts or waits for input.
 - **AGT-2 Commands.** Every one takes `-o json`.
 
 | Command | Does | Creates anything |
@@ -2710,7 +2685,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | AMP-1, PER-2 | `policy`, `sudors`, `deceptive`, `evidence` (a PATH entry of `link/..` whose sudo the kernel reaches: unknown, never absent); `internal/probe/reach_test.go` `TestRawPaths` (the same entry, absolute or relative); `internal/probe/amp_test.go` `TestPATHWorkingDirectory`, as nobody and as root (a writable working directory holding a file named `sudo`, with PATH empty, `::`, ending in a colon, or unset: PER-2 a finding or unknown, and AMP-1 unknown, never a pass or absent); `internal/probe/amp_test.go`, as nobody and as root: `TestPinSudo` (each allow-list refusal saying what failed, a setuid file not named sudo included), `TestWalk` (every link counted and named, a directory's included, `..` taken as the kernel takes it, refused past 8), `TestPrivileged` (root or any capability named, read with `capget`), `TestSudoList` (a stand-in run from its descriptor; a `#!` file never run; a run ended by a signal unknown); `test/probe.sh` also runs `TestSudoList` as root with a fake tree mounted over `/proc`, whose `/proc/self/fd/3` plays a sudo granting everything, and every listing must still come from the pinned stand-in |
 | SEC, EGR, PER, AMP | `holes` (found), `clean` (verified or scoped out), `deceptive` and `network` (never pass), `policy` and `sudors` (AMP-1), `evidence` (class right) |
 | OUT, AGT | contract tests; schema validation; the grader's injection cases |
-| UX, OUT-4, AGT-1 | `cmd/sandprobe/tui_test.go`: `TestResultGoldenNonTTY` (non-TTY output byte-identical to golden, zero ANSI escapes, zero key bar, no letter grade), `TestResultStatesAndWidth` (valid 1/6 with chain and receipts, clean 6/6, `x/5` not-applicable, `Green · not proven`, incomplete, no-canary, invalid with no counts, and unconfirmed cleanup exit 7, every line <= 80 columns), `TestTerminalInjectionEscaped` (control characters, ESC sequences and Unicode line separators in box name, evidence, invalid reason and cleanup escaped; category rows carry no box strings), `TestModeTable` (TTY vs non-TTY stdout/stdin, `NO_COLOR`, `TERM=dumb`, ASCII `LC_ALL=C`, reduced motion), `TestLivePhasesFromPlan` (plan-derived phases per provider, with no `reset` on Nitro or `exec`), `TestWalkerKeysNeverHangNonTTY` (interactive walker steps through findings, explains checks and quits on `q`/`Esc`, and never waits when stdin or stdout isn't a TTY), `TestMinScoreGate` (`-min 0..6` and `-min full`, exit precedence 7 > 6 > 5 > 0, and refusal of retired letter values) |
+| UX | golden frames |
 | UX-8, OUT-2 (palettes, nothing loaded) | `internal/report/report_test.go`: `TestThemes` (no theme, `graphite`, `modern` and any unknown value render `graphite`, `mission` renders `mission`; the button cycles exactly the two, and a remembered `modern` reads as `graphite`; the fonts named are Geist and Geist Mono first; the contents rail goes away under 900px), `TestHTMLLoadsNothing` (every saved report in `demo/reports` and `test/reports`, in both palettes and as a saved re-render: no `<link`, `@import` or `@font-face`, every `src`, `href`, `srcset`, `xlink:href`, `action` or `poster` attribute and every CSS `url(` is a fragment, and the CSP is unchanged) |
 | UX-4 (SEC-4's addresses) | `cmd/sandprobe/sec4_plan_test.go`: `TestPlansNameEverySEC4Address` (docker, aws-nitro, and run exec and run kubernetes with `-provider-endpoints SEC-4` each name 169.254.169.254:80, 169.254.170.2:80 and 169.254.170.23:80 word for word, with each one's condition and what is sent; sprites, e2b, daytona and run exec without SEC-4 name none), `TestProbeDialsTheCatalogMetadata` (the probe's address constants are `catalog.Metadata`'s, and no other metadata address is written in the probe, so a probe address the plans don't name fails) |
 | PRV | fake provider tests; then one live run per provider |

@@ -9,38 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"sandprobe/internal/catalog"
-	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 )
 
 func doc(letter string, valid, complete bool) report.Doc {
-	d := report.Doc{Schema: report.Schema, Run: report.Run{ID: "r1", Provider: "sprites", StartedAt: "2026-11-10T08:50:00Z"},
+	return report.Doc{Schema: report.Schema, Run: report.Run{ID: "r1", Provider: "sprites", StartedAt: "2026-11-10T08:50:00Z"},
 		Grade:   report.Grade{Letter: letter, Valid: valid, Complete: complete, Counts: map[string]int{}},
 		Cleanup: report.Cleanup{Outcome: "NOT confirmed deleted: delete sprite sandprobe-x (sprite-1) in org o by hand"}}
-	if !valid {
-		return d
-	}
-	failSet := map[string]bool{}
-	switch letter {
-	case "C":
-		failSet["PER-1"] = true
-	case "D":
-		failSet["PER-1"], failSet["SEC-1"], failSet["EGR-2"], failSet["AMP-4"] = true, true, true, true
-	case "F":
-		failSet["PER-1"], failSet["SEC-1"], failSet["EGR-2"], failSet["AMP-4"], failSet["AMP-2"], failSet["SEC-4"] = true, true, true, true, true, true
-	}
-	for _, id := range catalog.IDs() {
-		res, sev := obs.Pass, ""
-		if !complete && id == "AMP-2" {
-			res = obs.Unknown
-			d.Grade.Unknown = append(d.Grade.Unknown, "AMP-2")
-		} else if failSet[id] {
-			res, sev = obs.Finding, "high"
-		}
-		d.Checks = append(d.Checks, report.Check{ID: id, Result: res, Severity: sev})
-	}
-	return d
 }
 
 // OUT-4: a box not confirmed deleted ends 7, over every other outcome, and both reports are still written.
@@ -54,10 +29,10 @@ func TestFinish(t *testing.T) {
 		"graded and clean":                    {doc("A", true, true), true, "", exitGraded},
 		"incomplete":                          {doc("C", true, false), true, "", exitPartial},
 		"invalid":                             {doc("", false, false), true, "", exitPartial},
-		"below -min":                          {doc("D", true, true), true, "5", exitBelowMin},
-		"below -min, and incomplete":          {doc("D", true, false), true, "5", exitBelowMin},
+		"below -min":                          {doc("D", true, true), true, "B", exitBelowMin},
+		"below -min, and incomplete":          {doc("D", true, false), true, "B", exitBelowMin},
 		"cleanup unconfirmed":                 {doc("A", true, true), false, "", exitCleanup},
-		"cleanup unconfirmed, below -min too": {doc("F", true, false), false, "5", exitCleanup},
+		"cleanup unconfirmed, below -min too": {doc("F", true, false), false, "B", exitCleanup},
 		"cleanup unconfirmed, and invalid":    {doc("", false, false), false, "", exitCleanup},
 	} {
 		dir := t.TempDir()

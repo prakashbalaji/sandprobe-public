@@ -180,12 +180,15 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		}
 		return exitApproval, nil
 	}
-	lv := newLive(o, stderr, name, livePhasesFor(name, choice.none, false))
-	defer lv.close(false)
+	step := func(f string, a ...any) {
+		if !o.json() {
+			fmt.Fprintf(stderr, "· "+f+"\n", a...)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, recipeRunTimeout)
 	defer cancel()
 	start := time.Now()
-	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary"))
+	c, public, err := r.openCanary(ctx, choice, step)
 	if err != nil {
 		return 0, err
 	}
@@ -194,13 +197,8 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		closeCanary(public, stderr)
 		return 0, fail("local_error", "the box couldn't be recorded before its create, so nothing was created: "+err.Error(), "check that "+configDir()+" is writable", exitUsage)
 	}
-	if lv.inPlace {
-		lv.phase("box", "creating %s through %s in %s", box.Name, name, target)
-	} else {
-		fmt.Fprintf(stderr, "sandprobe: creating %s through the %s recipe in %s (recorded in %s)\n", box.Name, name, target, j.path())
-	}
+	fmt.Fprintf(stderr, "sandprobe: creating %s through the %s recipe in %s (recorded in %s)\n", box.Name, name, target, j.path())
 	if err := box.Create(ctx); err != nil && box.BoxID == "" {
-		lv.close(false)
 		closeCanary(public, stderr)
 		return 0, fail("provider_error", err.Error()+"; it stays recorded in "+j.path(), "look for "+box.Name+" yourself; Sandprobe deletes only by a returned ID", exitCleanup)
 	} else {
@@ -210,18 +208,14 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		}
 		if err != nil {
 			err = fmt.Errorf("the create returned %s, then: %w", box.BoxID, err)
-			if lv.inPlace {
-				lv.phase("delete", "deleting %s", box.BoxID)
-			}
 			cleanup, cleaned := recipeCleanup(box, j, stderr)
-			lv.close(cleaned)
 			closeCanary(public, stderr)
 			return 0, fail("provider_error", err.Error()+"; "+cleanup, "see the message", failExit(cleaned))
 		}
 	}
 	var run *host.Run
 	err = func() error {
-		lv.phase("box", "asking the box which probe it runs")
+		step("asking the box which probe it runs")
 		arch, err := box.Arch(ctx)
 		if err != nil {
 			return err
@@ -231,21 +225,17 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 			return err
 		}
 		box.Binary = bin
-		lv.phase("box", "checking who the box runs it as, before anything else")
+		step("checking who the box runs it as, before anything else")
 		w, err := box.Preflight(ctx, r.as)
 		if err != nil {
 			return err
 		}
-		lv.phase("probe", "running the probe as uid %d through the recipe", w.UIDs[1])
+		step("running the probe as uid %d through the recipe", w.UIDs[1])
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(recipeExclusions(rc), attested),
 			ExcludedKind: obs.SkipOptIn, Attested: attested, AllowLocalProxy: allowLocal, NoCanary: choice.none})
 		return err
 	}()
-	if lv.inPlace {
-		lv.phase("delete", "deleting %s", box.ID())
-	}
 	cleanup, cleaned := recipeCleanup(box, j, stderr)
-	lv.close(cleaned)
 	closeCanary(public, stderr)
 	if err != nil {
 		return 0, fail("provider_error", err.Error()+"; "+cleanup, "see the message", failExit(cleaned))

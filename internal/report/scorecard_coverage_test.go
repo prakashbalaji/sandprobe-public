@@ -208,30 +208,3 @@ func TestSavedExposureCoverageWithoutNewDisplayFields(t *testing.T) {
 		t.Fatal("historical v1 exposure no longer renders:", err)
 	}
 }
-
-func TestHistoricalDisplayFlagIsDerivedWithoutMutatingInput(t *testing.T) {
-	c := Score(doc(obs.NotFound, nil))
-	for i := range c.Rows {
-		c.Rows[i].GreenNotProven = false
-	}
-	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: c}
-	b, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "Green · not proven") && !strings.Contains(string(b), "GREEN · NOT PROVEN") {
-		t.Fatal("historical row did not gain derived unproven label")
-	}
-	for _, r := range x.Rows {
-		if r.GreenNotProven {
-			t.Fatal("render changed caller's saved card")
-		}
-	}
-	// A supplied positive flag that contradicts valid coverage remains invalid.
-	c = Score(doc(obs.Pass, nil))
-	c.Rows[0].GreenNotProven = true
-	x.Card = c
-	if validWorkloadExposure(x) {
-		t.Fatal("contradictory supplied flag accepted")
-	}
-}
