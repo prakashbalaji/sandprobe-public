@@ -145,10 +145,14 @@ func TestThemes(t *testing.T) {
 			if !strings.Contains(p, `themes = ["graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern") saved = "graphite";`) {
 				t.Errorf("-theme %q: the button doesn't cycle graphite and mission, or a remembered modern is lost", in)
 			}
-			for _, rule := range []string{`:root, [data-theme="graphite"] {`, `[data-theme="mission"] {`, "@media print {", "@media (prefers-reduced-motion: reduce) {"} {
+			for _, rule := range []string{`:root, [data-theme="graphite"] {`, `[data-theme="mission"] {`, "@media print {", "@media (prefers-reduced-motion: reduce) {",
+				`--sans: Geist, Inter, `, `--mono: "Geist Mono", "JetBrains Mono", `} {
 				if !strings.Contains(p, rule) {
 					t.Errorf("-theme %q: the page has no %s", in, rule)
 				}
+			}
+			if narrow := p[strings.Index(p, "@media (max-width: 900px) {"):]; !strings.Contains(narrow[:strings.Index(narrow, "\n}")], ".toc, .crumbs, .wide { display: none; }") {
+				t.Errorf("-theme %q: the contents rail stays under 900px", in)
 			}
 		}
 	}
@@ -253,9 +257,9 @@ func TestNoFindingIsNotAllRefusals(t *testing.T) {
 	}
 	b, _ := HTML(d, "modern")
 	page := string(b)
-	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="green"`) || !strings.Contains(r, `<td class="res"><span class="key">Pass</span></td>`) ||
+	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="row green"`) || !strings.Contains(r, `<span class="key">Pass</span>`) ||
 		!strings.Contains(r, "we proved it") || !strings.Contains(rowOf(page, "SEC-3"), "there isn&#39;t one") ||
-		!strings.Contains(rowOf(page, "SEC-2"), `<td class="res"><span class="key">N/A</span></td>`) {
+		!strings.Contains(rowOf(page, "SEC-2"), `<span class="key">N/A</span>`) {
 		t.Fatal("want the pass and the absence verified, and the scoped-out check not counted as either")
 	}
 	if strings.Contains(string(mapSVG(d)), `data-target="SEC-2"`) {
@@ -275,7 +279,7 @@ func TestIndicatorsStayIndicators(t *testing.T) {
 		t.Fatalf("lead: %q", d.Lead)
 	}
 	b, _ := HTML(d, "modern")
-	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<td class="res"><span class="key">Fail</span></td>`) ||
+	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<span class="key">Fail</span>`) ||
 		!strings.Contains(r, "a sign we saw, not something we confirmed") {
 		t.Fatal("the indicator's card doesn't say what kind of claim it is")
 	}
@@ -324,13 +328,19 @@ func TestPlannedIsNotContacted(t *testing.T) {
 	}
 }
 
-// rowOf is one check's table row on the page.
+// rowOf is one test's row on the page (SCR-3), or "" when it has none.
 func rowOf(page, id string) string {
-	i := strings.Index(page, `id="`+id+`"`)
-	if i < 0 {
-		return ""
+	i := strings.Index(page, `<li class="row `)
+	for i >= 0 {
+		j := strings.Index(page[i:], "</li>")
+		if r := page[i : i+j]; strings.Contains(r[:strings.Index(r, ">")], `id="`+id+`"`) {
+			return r
+		}
+		k := strings.Index(page[i+j:], `<li class="row `)
+		if k < 0 {
+			return ""
+		}
+		i += j + k
 	}
-	i = strings.LastIndex(page[:i], "<tr") // the row's class comes before its id
-	j := strings.Index(page[i:], "</tr>")
-	return page[i : i+j]
+	return ""
 }
