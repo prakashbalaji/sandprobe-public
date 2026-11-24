@@ -87,7 +87,7 @@ func writeInside(dir, name string, data []byte) error {
 func printable(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == 0x2028 || r == 0x2029 {
 			fmt.Fprintf(&b, "\\u%04x", r)
 			continue
 		}
