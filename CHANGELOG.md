@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.0 (2026-11-24)
 
 - `run docker` starts the container with Sandprobe's own idle process as its entrypoint and the image's health check
   off, so an image whose entrypoint exits without a task or a terminal runs as it is, and SEC-2 and SEC-5 don't count
@@ -25,6 +25,25 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 - A green category with no conclusive check, such as Cloud access when SEC-4 and AMP-7 both end `not_found`, now reads "Green · not proven" rather than plain green: a dashed `GREEN · NOT PROVEN` badge in the web report and the workload exposure page, `◌ GREEN · NOT PROVEN` in the terminal, and `green_not_proven: true` in `scorecard -o json`. It still counts toward the score (SCR-2).
 
 - Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.
+
+- Add `-block-device-path <path>` to `run exec` and `plan exec`, repeatable up to 32 times, so AMP-8.blk can assess a
+  block device at a custom path as well as the ones sysfs names. The check stays metadata-only, with no device I/O. A
+  declared path that is missing or of the wrong type stays unknown, and the grader refuses a `scoped_out` result when
+  a path was declared (EVD-13).
+
+- The web report's per-category "tests run" counts no longer count skipped or scoped-out checks as run, as they
+  already didn't count missing ones; unknown and not-found checks still count as run, never as passes. Scores are
+  unchanged (SCR-6).
+
+- A persistence reset recheck (PER-5) that stops on a marker mismatch now says whether the inode, the length or both
+  differed. It is still unknown, and a mismatch returns before the marker is ever opened for reading (TWN-3).
+
+- An unexpected HTTP reply from the canary exchange is now labelled by its status class (1xx to 5xx), keeping the
+  specific 403 and 407 labels. Response text is still discarded, and no label counts as delivery or denial.
+
+- Managed Daytona runs: a missing or non-executable local SDK interpreter now reports `local_sdk_unavailable` instead of
+  a generic provider error, each SDK call is recorded once rather than twice, and a workload preparation failure names
+  its stage (source read, upload, worker run or readiness) with only fixed labels, never raw errors or paths.
 
 - Retain optional, own-sandbox-bound organization network-policy context for managed Daytona runs without treating configuration as observed denial.
 
