@@ -123,7 +123,11 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   category/check usable-result and completion counts beside the score in JSON,
   terminal and HTML, including workload scorecards. A green category and a full
   score never imply complete coverage, and coverage still counts all six categories,
-  a not-applicable one's checks as skipped (SCR-2). Invalid runs claim no coverage; historical
+  a not-applicable one's checks as skipped (SCR-2). New derived display annotations must not become
+  required fields for existing `sandprobe.workload-exposure/1` records with valid coverage. Derive display
+  distinctions from validated coverage; never invent proof for a legacy record. Test:
+  `internal/report/scorecard_coverage_test.go` `TestSavedExposureCoverageWithoutNewDisplayFields`.
+  Invalid runs claim no coverage; historical
   scorecards without coverage remain readable and never gain an invented complete
   status. Derive coverage only from graded checks and grading unknowns, never a
   provider flag, supplied counter, workload pass or configuration declaration.

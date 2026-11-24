@@ -159,3 +159,52 @@ func TestCoverageVisibleInHTML(t *testing.T) {
 		t.Fatal("standard HTML missing coverage", err)
 	}
 }
+
+// SCR-5: derived display additions cannot make a previously valid v1 record unreadable.
+func TestSavedExposureCoverageWithoutNewDisplayFields(t *testing.T) {
+	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: Score(doc(obs.NotFound, nil))}
+	// Keep actual coverage in the record: historical coverage-free cases alone
+	// cannot catch a newly required presentation flag on a green/unproven row.
+	found := false
+	for _, r := range x.Rows {
+		if r.Green && r.Coverage != nil && r.Coverage.Conclusive == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fixture needs a green row without conclusive evidence")
+	}
+	b, err := json.Marshal(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]json.RawMessage
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(legacy["rows"], &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		delete(r, "green_not_proven")
+	}
+	legacy["rows"], err = json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored WorkloadExposure
+	if err := json.Unmarshal(b, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !validWorkloadExposure(restored) {
+		t.Fatal("historical v1 coverage requires a new display field")
+	}
+	if _, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, restored); err != nil {
+		t.Fatal("historical v1 exposure no longer renders:", err)
+	}
+}
