@@ -1001,9 +1001,10 @@ func expectPER5(result, why string) func(t *testing.T, w world, r *Run) {
 	}
 }
 
-// The substitute is never read, and is still there: nothing is ever removed by name.
+// The substitute is never read, and is still there: nothing is ever removed by name. It is a copy renamed over the
+// marker, so only its inode differs (TWN-3's recheck diagnostics).
 func expectSubstitute(t *testing.T, w world, r *Run) {
-	expectPER5(obs.Unknown, "a file at the marker's name isn't the placed marker; unread")(t, w, r)
+	expectPER5(obs.Unknown, "the marker's inode differs from the placed marker; unread")(t, w, r)
 	if log := run(t, "docker", "exec", r.Box.ID(), "cat", "/tmp/substitute-access.log"); strings.TrimSpace(log) != "" {
 		t.Errorf("the substitute was opened:\n%s", log)
 	}
