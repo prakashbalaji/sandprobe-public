@@ -11,6 +11,28 @@ import (
 
 var testPin = strings.Repeat("ab", 32)
 
+func TestExecBlockDevicePaths(t *testing.T) {
+	t.Setenv("SANDPROBE_CANARY", "")
+	t.Setenv("SANDPROBE_CANARY_URL", "")
+	t.Setenv("SANDPROBE_CANARY_PIN", "")
+	var out, errs bytes.Buffer
+	code := run([]string{"plan", "exec", "-o", "json", "-no-canary", "-block-device-path", "/dev/workload/disk", "-block-device-path", "/mounted-device", "--", "sh"}, &out, &errs)
+	if code != 0 || !strings.Contains(out.String(), "/dev/workload/disk") || !strings.Contains(out.String(), "/mounted-device") || !strings.Contains(out.String(), "never opened for I/O") {
+		t.Fatalf("declarations missing from plan: %d %s %s", code, out.String(), errs.String())
+	}
+	for _, args := range [][]string{
+		{"plan", "exec", "-block-device-path", "relative", "--", "sh"},
+		{"plan", "exec", "-block-device-path", "/dev/disk", "-block-device-path", "/dev/disk", "--", "sh"},
+		{"plan", "sprites", "-block-device-path", "/dev/disk"},
+	} {
+		out.Reset()
+		errs.Reset()
+		if code := run(args, &out, &errs); code != exitUsage {
+			t.Fatalf("invalid declaration accepted: exit %d", code)
+		}
+	}
+}
+
 // PRV-15 and HCN-5 at the command line: what run exec refuses before anything runs.
 func TestRunExecRefusals(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // no operator canary state

@@ -452,7 +452,7 @@ func amp5(e *env, ck *catalog.Check) obs.Observation {
 }
 
 // AMP-8 block devices: sysfs-name discovery still covers only /dev/<name>, not custom/nested paths.
-// EVD-12 verifies block type and pinned read permission, never I/O. With none visible, scoped out.
+// EVD-12 verifies block type and pinned read permission, never I/O. EVD-13 adds declared paths.
 func amp8blk(e *env, ck *catalog.Check) obs.Observation {
 	var devs []string
 	entries, err := os.ReadDir("/sys/class/block")
@@ -465,11 +465,19 @@ func amp8blk(e *env, ck *catalog.Check) obs.Observation {
 			devs = append(devs, p)
 		}
 	}
-	if len(devs) == 0 {
+	return assessBlockDevices(e, ck, devs)
+}
+
+func assessBlockDevices(e *env, ck *catalog.Check, devs []string) obs.Observation {
+	// EVD-13: an empty discovery must not hide an explicitly planned custom path.
+	if err := catalog.ValidateBlockDevicePaths(e.in.Targets[ck.ID]); err != nil {
+		return unknownObs("invalid declared block-device paths")
+	}
+	if len(devs) == 0 && len(e.in.Targets[ck.ID]) == 0 {
 		if why := reachPast(); why != "" {
 			return unknownObs(why)
 		}
-		return obs.Observation{Result: obs.ScopedOut, Reason: "no block device is visible to the probe",
+		return obs.Observation{Result: obs.ScopedOut, Reason: "no block device was found at sysfs-mapped /dev names and no custom path was declared",
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"block_devices": 0}}}
 	}
 	ts, counts, err := e.sweep(ck.ID, map[string][]string{"block_devices": devs}, blockPermCheck)

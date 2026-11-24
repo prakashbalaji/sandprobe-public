@@ -40,6 +40,13 @@ have no `agent` user and run as root.
 
 If `/tmp` isn't writable in the box, name another absolute directory with `-scratch <dir>`.
 
+If your workload already exposes a block device at a custom path, repeat `-block-device-path /dev/workload/disk`
+on `plan exec` and `run exec` to include it in AMP-8.blk. Up to 32 distinct canonical absolute paths are accepted;
+the plan lists each. Sandprobe checks resolved device type and pinned read permission through metadata only,
+never opens a device for I/O, and never attaches a device or grants permissions. Missing or wrong-type paths
+remain unknown. These paths supplement `/sys/class/block` to `/dev/<name>` discovery; neither covers every
+possible custom path automatically (EVD-12, EVD-13).
+
 ## What's skipped, and why
 
 | Check | Why |

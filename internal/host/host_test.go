@@ -76,6 +76,27 @@ func TestPlan(t *testing.T) {
 	}
 }
 
+func TestPlanBlockDevicePaths(t *testing.T) {
+	paths := []string{"/dev/workload/disk"}
+	m, in := Plan(Options{BlockDevicePaths: paths}, &obs.Survey{}, "box-1", Storage{}, "", "", "")
+	paths[0] = "/changed-after-plan"
+	for _, targets := range []map[string][]string{m.Targets, in.Targets} {
+		if !slices.Equal(targets["AMP-8.blk"], []string{"/dev/workload/disk"}) {
+			t.Fatal("host declaration not frozen", targets["AMP-8.blk"])
+		}
+	}
+	if !slices.Contains(m.Discover["AMP-8.blk"], "block_devices") || !slices.Contains(in.Discover["AMP-8.blk"], "block_devices") {
+		t.Fatal("declaration replaced discovery")
+	}
+}
+
+func TestExecuteRejectsInvalidBlockDevicePaths(t *testing.T) {
+	// A nil box/canary would panic if validation tried to contact either.
+	if _, err := Execute(context.Background(), nil, nil, Options{BlockDevicePaths: []string{"relative"}}); err == nil {
+		t.Fatal("invalid declaration reached execution")
+	}
+}
+
 // The survey's Kubernetes API reaches the manifest and the probe's input; a vsock device keeps AMP-6 selected, and
 // without one it's skipped (GRD-3).
 func TestPlanSurvey(t *testing.T) {

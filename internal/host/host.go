@@ -60,6 +60,7 @@ type Canary interface {
 }
 
 type Options struct {
+	BlockDevicePaths    []string              // EVD-13: host-declared metadata-only paths, supplementing discovery.
 	CanaryTCP80Protocol string                // EVD-10: explicit opt-in; empty preserves legacy traffic.
 	UploadAddresses     map[string]string     // MEAS-7: host-frozen addresses for selected names only
 	UploadHosts         []string              // MEAS-6: explicit TLS-only workload destinations; default off
@@ -121,6 +122,9 @@ func armWants(m obs.Manifest) []canary.Want {
 // Execute runs the probe in a box and grades it. An error means no run happened; a run that happened but can't be
 // graded comes back with an invalid report.
 func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
+	if err := catalog.ValidateBlockDevicePaths(o.BlockDevicePaths); err != nil {
+		return nil, err
+	}
 	if !obs.ValidCanaryTCP80Protocol(o.CanaryTCP80Protocol) || (o.NoCanary && o.CanaryTCP80Protocol != "") {
 		return nil, fmt.Errorf("invalid canary TCP/80 protocol option")
 	}
@@ -427,6 +431,10 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		}
 	}
 	targets, discover := catalog.Plan(probeSelected)
+	// EVD-13: copy the host declaration before launching the probe.
+	if len(o.BlockDevicePaths) > 0 {
+		targets["AMP-8.blk"] = append(targets["AMP-8.blk"], o.BlockDevicePaths...)
+	}
 	if skip["EGR-6"] == "" {
 		targets["EGR-6"] = append([]string(nil), uploadTargets...)
 	}
