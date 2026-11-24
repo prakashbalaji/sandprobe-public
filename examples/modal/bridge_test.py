@@ -414,7 +414,22 @@ def shapes():
         proc.stdout = iter(lambda: time.sleep(3600), b"never")
         proc.wait = lambda: 0
 
+    def in_flight(call):  # codex's barrier: a stdin call in flight when the remote ends; no drain may begin after it
+        def shape(proc):
+            began, returned = threading.Event(), threading.Event()
+
+            def slow(*args):
+                began.set()
+                returned.wait(5)
+                time.sleep(0.2)  # returns only after the main thread has seen the remote's end
+            setattr(proc.stdin, call, slow)
+            proc.stdin.drain = late(0, "drain begun after the remote ended")
+            proc.wait = lambda: (began.wait(5), returned.set(), 3)[2]
+        return shape
+
     return {
+        "write_in_flight": ("data", 3, in_flight("write")),
+        "eof_in_flight": ("devnull", 3, in_flight("write_eof")),
         "exit_open_stdin": ("open", 0, remote_exits_now()),
         "exit_code_passes": ("open", 3, remote_exits_now(3)),
         "stdin_closed": ("closed", 0, None),
@@ -511,6 +526,12 @@ class Sanitized(unittest.TestCase):
         for name, (how, want, _) in shapes().items():
             with self.subTest(scenario=name):
                 self.loop(LOOPS, "sh", ("shape:" + name,), want, stdin_mode=how)
+
+    def test_barrier(self):
+        for name in ("write_in_flight", "eof_in_flight"):
+            how, want, _ = shapes()[name]
+            with self.subTest(scenario=name):
+                self.loop(int(os.environ.get("BRIDGE_BARRIER_LOOPS", "200")), "sh", ("shape:" + name,), want, stdin_mode=how)
 
     def test_sh_list_failure_refuses(self):
         code, out = self.run_child("sh", "list")

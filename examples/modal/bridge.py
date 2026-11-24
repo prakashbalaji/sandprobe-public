@@ -266,9 +266,19 @@ STDIN_JOIN, OUTPUT_JOIN = 2.0, 5.0  # seconds each pump may take to finish once 
 def session(p):
     """FIX-10's ordered exit path: the remote's exit, then every pump stopped and joined, then one read of the failure
     slot, then the exit code. The remote's own code passes through only when no pump failed and none timed out."""
-    stop = threading.Event()  # set once the remote process has ended: the stdin pump starts no new call after it
-    lock = threading.Lock()
-    slot = {"failed": None, "closed": False}
+    lock = threading.Lock()  # guards the slot, and the remote's end, which every stdin call checks before it begins
+    slot = {"failed": None, "closed": False, "ended": False}
+
+    class Ended(Exception):
+        """The remote has ended: this stdin call doesn't begin."""
+
+    def begin(call, *args):
+        # The gate: under the lock the main thread holds to mark the remote's end. A call that passes it has begun
+        # (it is in flight); after the end is marked, none passes, so no stdin call begins after the remote ended.
+        with lock:
+            if slot["ended"]:
+                raise Ended()
+        call(*args)
 
     def record(e):
         with lock:
@@ -279,7 +289,10 @@ def session(p):
         # fd 0 through select and os.read, never a buffered stream, so the loop wakes every 0.1 s and holds no
         # stream lock. A closed or invalid descriptor reads as end of input; /dev/null and a regular file end at EOF.
         try:
-            while not stop.is_set():
+            while True:
+                with lock:
+                    if slot["ended"]:
+                        return
                 try:
                     ready, _, _ = select.select([0], [], [], 0.1)
                     chunk = os.read(0, 65536) if ready else None
@@ -287,14 +300,14 @@ def session(p):
                     chunk = b""
                 if chunk is None:
                     continue
-                if stop.is_set():  # the remote has ended: it gets no more input
-                    return
                 if not chunk:
-                    p.stdin.write_eof()
-                    p.stdin.drain()
+                    begin(p.stdin.write_eof)
+                    begin(p.stdin.drain)
                     return
-                p.stdin.write(chunk)
-                p.stdin.drain()
+                begin(p.stdin.write, chunk)
+                begin(p.stdin.drain)
+        except Ended:
+            return  # quietly: the remote didn't want more input
         except BaseException as e:
             record(e)
 
@@ -318,7 +331,8 @@ def session(p):
         code = p.wait()  # 1. the remote process ends, or waiting for it fails
     except BaseException as e:
         waited = type(e).__name__
-    stop.set()  # 2. every pump told to stop, then each joined within its bound
+    with lock:  # 2. the remote's end marked: no stdin call begins after this; then each pump joined within its bound
+        slot["ended"] = True
     late = False
     for t, bound in pumps:
         t.join(timeout=bound)
