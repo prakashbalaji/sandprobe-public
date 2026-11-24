@@ -43,7 +43,7 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 - **JON-1 Strict framing.** Protocol JSON is one bounded value, depth at most64, with no trailing data. Duplicate object member names, including case aliases which Go would map to the same field, are rejected before decoding. Case-distinct object names are conservatively rejected; arrays retain case-sensitive values. No raw malformed data/member names are echoed. Unknown-field rules on existing protocols remain strict. Preserve valid canonical existing messages and saved-run shapes.
 - **JON-2 Every boundary and tests.** Apply JON-1 to host observation parsing and every probe stdin mode, with the existing1MiB byte bound checked before parsing (not a truncated reader accepted as EOF). Reject unsupported/extra probe arguments. Add duplicate/alias/nesting/trailing/oversize/fuzz regressions. CI runs build/vet/unit tests on Linux without cloud/provider credentials; no live provider tests or new paid resources.
-- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
+- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. A `run exec` report's declared provider (PRV-17) is the person's word as recorded, but what it excludes comes from this binary's own table, never from the report: a name the table lacks, one on a report that isn't `run exec`, or skip kinds that differ from that name's entry are refused. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
 - **ANL-2 Coverage profile.** Five fixed areas are egress(EGR), secrets(SEC-1/2/3/5), privilege(AMP-1/2/3/8.sys/8.blk), persistence(PER), provider reach(SEC-4/AMP-4/5/6/7). SEC-3 stays aggregate secrets; no image/provider attribution is inferred. Each catalog check requires an explicit area mapping; an unmapped future check blocks offline analysis until classified. Counts distinguish findings, negative proofs, find-only no-finding, absent/out-of-scope, unknown, excluded and missing catalog coverage. No profile labels a wall secure/Held or changes the saved legacy letter/caps. Invalid reports have no assessed area. Terminal output escapes untrusted identifiers, including Unicode format controls (Cf), bidi overrides/isolates, zero-width format characters and BOM as visible code points; JSON labels reported data as unauthenticated and self-observed.
 - **CMP-1 Local comparison.** Compare two structurally validated reports by known check IDs/results/severities and declared scope/identity, never only the letter or prose heuristics. Flag new/worse findings and loss of coverage separately; removed/skipped/unknown checks cannot look like an improvement. Compare per-check scope/route, kind/evidence class, selected/skipped targets and recorded identity/config; unrecorded configuration remains unknown. Provider/mode/context differences are explicit; no-observed-change is conditional on matched coverage/context and means only the summarized fields, not equivalent security or an attestation. Ignore ephemeral runIDs/timestamps/nonces/receipt destinations when comparing observations. Keep invalid/incomplete inputs visible. Exit precedence is input/usage2, invalid/incomplete or unmatched context5, observed regression6, then assessed/no observed regression0. Automated gates must reject every nonzero exit and inspect both findings and context fields, rather than gate only on exit6. No network, file writes, schedules or notifications.
 - **CMP-2 Progress between two runs (24 November 2026).** A fix loop runs, applies fixes, runs again and compares, so `compare` also says what got better, without weakening CMP-1. From two valid reports (GRD-5) that ANL-1 accepts, check by check in catalog order:
@@ -86,17 +86,28 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   no-canary choice, the reason reads "not tested: run without a canary" (a host reason, never a box string), and the
   category stays red.
   A category is not applicable only when every one of its checks was skipped and each skip's kind is `provider_terms`:
-  a native adapter's PRV row excludes that provider-owned endpoint because the provider's terms do (PRV-5). In
-  practice that is Cloud access (SEC-4 and AMP-7) on a hosted provider. Provider terms limit what Sandprobe measures,
+  a native adapter's PRV row excludes that provider-owned endpoint under Sandprobe's reviewed scope for that provider
+  (PRV-5), or, on `run exec`, the PRV row of the provider the operator declared with `-provider` does (PRV-17). The
+  kind's wire name stays `provider_terms`, but what it means is that reviewed scope, which rests on the provider's
+  terms for some providers and on the project owner's own rules of engagement for others (Modal's, PRV-5), never on a
+  claim about the provider's terms alone. In
+  practice that is Cloud access (SEC-4 and AMP-7) on a hosted provider. That scope limits what Sandprobe measures,
   not whether a risk exists, so this rests on SCR-1's narrowed contract: on a hosted sandbox the metadata service and
   any Kubernetes API belong to the provider, and the box holds no cloud identity of the person's that these checks
   could reach. A credential of the person's own injected into the box (an environment variable, a key file) is still
   Secrets' to catch (SEC-1, SEC-3), never Cloud access's. The row reads "Not applicable: this box holds no cloud
-  identity of yours that Sandprobe checks here; the provider's own endpoints weren't tested (their terms)", fixed
-  text, and the line beside the score names the category with that provider's exclusion reasons from this binary's
-  own PRV rows, never the report's text. A kind is never taken on the report's word: the scorecard derives each
+  identity of yours that Sandprobe checks here; Sandprobe's reviewed scope for <name> excludes these provider-owned
+  endpoints", fixed text in which `<name>` is the PRV-row key (never a box string), and the line beside the score
+  reads "Cloud access isn't counted: Sandprobe's reviewed scope for <name> excludes these provider-owned endpoints
+  (<reasons>)", with that provider's exclusion reasons from this binary's own PRV rows, never the report's text. The
+  row carries `<name>` as `scope` in the card's JSON; a saved card from before it reads "for the provider" in its
+  place. For PRV-17's declared provider, the row and the line each also say "The operator declared the provider as
+  <name>; Sandprobe did not verify it".
+  A kind is never taken on the report's word: the scorecard derives each
   check's kind from this binary's own policy for the provider the run names (a native adapter's PRV-row exclusions are
-  `provider_terms`; `run exec`'s and a shipped recipe's defaults are `opt_in`; any other provider has none), uses it
+  `provider_terms`; `run exec`'s and a shipped recipe's defaults are `opt_in`, except that on a `run exec` report whose
+  manifest declares a provider (PRV-17) the checks that provider's PRV row excludes are `provider_terms`; any other
+  provider has none), uses it
   only when the manifest records the same, and ANL-1 refuses a saved report whose recorded kinds disagree with it, so
   editing `SkipKinds` alone changes nothing. Only the host writes a kind, and only for a check it excluded
   under GRD-3's provider-endpoint gate (`SkipKinds` in the manifest, never in the probe's input); a skip without one
@@ -114,8 +125,9 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   applicable ones. A not-applicable row is never green and never counted as passed: it leaves the denominator, so a
   run with one reads at most 5/5 and is never shown or serialized as 6/6. Coverage still counts its checks as
   skipped (SCR-5), so the card keeps the unmeasured endpoints visible. The letter doesn't change: GRD-3's skips already never touch GRD-1 or
-  GRD-2. `compare` reports a changed set of `provider_terms` skips as a changed setup (CMP-1's declared
-  configuration), so a newly not-applicable category is never read as like-for-like, and a check that goes from
+  GRD-2. `compare` reports a changed set of `provider_terms` skips, or a changed PRV-17 declared provider, as a
+  changed setup (CMP-1's declared configuration), so a newly not-applicable category is never read as like-for-like,
+  and a check that goes from
   tested to skipped stays coverage loss. An `opt_in` skip and one with no kind both read "Not tested", so a report
   from before this rule and a new `opt_in` one of the same box compare as a matched pair.
   A green row that rests on a check with no finding but no negative proof says so in one line ("not proven: DNS"),
@@ -1441,7 +1453,9 @@ one, the amended text lands in place only after review.
   - The box is an existing box (PRV-1): non-mutating checks only, GRD-3's existing-box skips, no reset, and the
     boundary is the person's attestation (PRV-2, UX-4). The launch mode is `exec` (SBX-4).
   - The provider isn't identified, so SEC-4, EGR-3, AMP-6 and AMP-7, the checks that contact a provider-owned
-    endpoint, are excluded by default, as kind `opt_in` (SCR-2) (Sandprobe checks the person's own box and sends only to the
+    endpoint, are excluded by default, as kind `opt_in` (SCR-2), unless the person names the provider with `-provider`,
+    when that provider's PRV row decides the ones it excludes (PRV-17) (Sandprobe checks the person's own box and
+    sends only to the
     canary). `-provider-endpoints <IDs>` selects named ones only (for example `SEC-4,AMP-7`), each one the person
     attests their provider's terms allow on their own account; the plan lists each with that attestation before
     approval (AGT-3), and the report records it beside the check. Nothing selects them all at once.
@@ -1952,8 +1966,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   and listed. Only the checks these gates name can be skipped (EGR-3, EGR-6, PER-5 and AMP-6, and SEC-4 and AMP-7 for
   a provider whose rules exclude them or under PRV-15's or RCP-4's default), only by the host, and each with its
   reason; AMP-2 and AMP-3 never are. A provider-endpoint skip (SEC-4, EGR-3, AMP-6, AMP-7) also records its kind in
-  the manifest's `SkipKinds` (SCR-2): `provider_terms` from a native adapter's PRV row (PRV-5), `opt_in` under
-  PRV-15's or RCP-4's default. Skips change no letter.
+  the manifest's `SkipKinds` (SCR-2): `provider_terms` from a native adapter's PRV row (PRV-5) or from the PRV row of
+  the provider a `run exec` declares (PRV-17), `opt_in` under PRV-15's or RCP-4's default. Skips change no letter.
 - **GRD-4 The grade says what it covers.** Beside every grade: "graded on N checks for this box at <time>, from a
   host-shipped probe's own observations; not a certification", SBX-10's boundary, the not-proven list (KND-2), and the
   scoped-out and skipped lists.
@@ -1981,7 +1995,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 ### OUT: what it writes
 
 - **OUT-1 JSON.** `schema`, the lowest version whose fields the report needs (AGT-6): `sandprobe/1`; `sandprobe/2`
-  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `sandprobe/3` for RUN-17's Nitro host-controller contract; `sandprobe/4` for EVD-10's explicit HTTP marker protocol; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
+  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `sandprobe/3` for RUN-17's Nitro host-controller contract; `sandprobe/4` for EVD-10's explicit HTTP marker protocol; `sandprobe/5` when the manifest carries PRV-17's `declared_provider`; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
   UTC)`, duration_ms, mode, provider, box {provider_id, name, created_by_sandprobe}}`; `manifest`; `identity` (SBX-4);
   `toolchain [{name, path, owner, mode, link_target}]` (lstat metadata of box tools, never a hash: only `probe.sha256` is a digest); `overrides []`; `checks [{id, category, kind, result, evidence_class,
   severity, scope {destination, port, route}, evidence, proof {mechanism, result}, clients, fix, duration_ms,
@@ -2005,8 +2019,9 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   deleted nor explicitly retained under PRV-7. `-min` is an absolute category-count gate only, not a severity or
   proof-coverage regression floor: a higher-severity finding inside an already-red category, or a proven `pass`
   degrading to find-only `not_found` (`Green · not proven`), can leave `Score` unchanged and still exit 0, and `-min full`
-  accepts 5/5 when Cloud access is not applicable (`Of == 5`). On providers whose terms exclude Cloud access (`Of == 5`),
-  `-min 6` can never pass and is refused before creation with exit 2 pointing to `-min full`. Regression-sensitive CI
+  accepts 5/5 when Cloud access is not applicable (`Of == 5`). On providers whose reviewed scope excludes Cloud access (`Of == 5`),
+  `run exec` with PRV-17's `-provider` among them, `-min 6` can never pass and is refused before creation (for `run
+  exec`, before anything runs in the box) with exit 2 pointing to `-min full`. Regression-sensitive CI
   must gate on `sandprobe compare` or validated OUT-1 JSON (`findings`, `grade.counts`, `checks`). Retired letter values
   (`-min A` to `-min F`) fail with exit 2. After a run, 7 takes precedence over 6, 6 over 5, and 5 over 0. A run that
   ends 5, 6 or 7 still writes its reports.
@@ -2143,7 +2158,10 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 - **AGT-3 Approval.** Outside a terminal, anything that creates, resets or deletes needs `-y`. Without it, `run`
   exits 3 and prints the plan as JSON with `needs_approval: true`. A local proxy for EGR-3 needs `-allow-local-proxy`, or EGR-3 is skipped. An existing box also needs `-attest <provider id>`,
   naming the box the person confirmed isn't production. The guide tells agents to show the plan to their person and
-  get both before running again.
+  get both before running again. The provider `run exec -provider` names (PRV-17) comes only from the person: an agent
+  never infers it from the exec command, a hostname, the environment, a report or provider-like text, and never adds
+  or changes it to turn a red category into not applicable. The guide, every block it installs and the CLI's own help
+  say so, and no remediation text suggests the flag.
 - **AGT-4 Streams.** `-o json` prints one OUT-1 document on stdout at the end. `-o ndjson` prints one event per line
   (`step`, `check`, `result`, `error`). Logs go to stderr.
 - **AGT-5 Errors say what to do.** `{"error": "<code>", "message": "...", "fix": "<command or action>"}`, with codes
@@ -2162,6 +2180,9 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   `attestation` (PRV-15), both new in one release; `sandprobe/3` adds RUN-17's Nitro host-controller contract semantics. A schema3 contract requires at least that report version, with or without schema2 fields.
   `sandprobe/4` adds EVD-10's manifest `canary_tcp80_protocol`: present empty/null declarations are refused;
   legacy reports omit it. A nonempty declaration requires exactly version4.
+  `sandprobe/5` adds PRV-17's manifest `declared_provider`: a report carrying it declares exactly `sandprobe/5`, a
+  `sandprobe/5` report without it is refused, and a present empty or null value is refused in any version. Only `run
+  exec` writes it, and `run exec` writes neither RUN-17's contract nor EVD-10's protocol, so no report needs both.
 
 ### PRV: providers
 
@@ -3023,6 +3044,129 @@ box or a machine holds.
   is always `[REDACTED]`. Exit codes: 0 when filed or when the link is printed; 2 for usage (`-y` included) or a
   refusal; 3 for a preview, a no, or a code that doesn't match; 5 when gh failed.
 
+## Declared provider for run exec, 24 November 2026
+
+On `run exec` the four provider-endpoint checks are off by default as `opt_in` (PRV-15), so Cloud access reads "Not
+tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow" and the score is out of six. On a
+provider whose PRV row excludes those checks, that red can never be acted on, and an agent running a fix loop chases
+it forever. PRV-17 lets the operator name the provider, so this binary's own PRV row for it decides those checks, as it
+already does for that provider's native adapter. It amends PRV-15, SCR-2, GRD-3, ANL-1, AGT-3, AGT-6, OUT-1 and OUT-4
+in place, each pointing here.
+
+- **PRV-17 A declared provider.** `sandprobe run exec -provider <name> ...` and `sandprobe plan exec -provider <name>
+  ...` name the provider the box runs on.
+  - **The name comes from the person, never from an agent.** The operator names it. An agent running Sandprobe never
+    infers it from the exec command, a hostname, the environment, a report or any provider-like text, and never adds
+    or changes it to turn a red category into not applicable. The CLI's own help (`sandprobe help`) says so today,
+    beside the flag; AGT-2's `sandprobe guide` isn't built yet, and when it is, its output and every block it
+    installs say so too (AGT-3). No remediation text suggests the flag: not Cloud access's "Not tested" reason, not a
+    check's fix or `explain`, and not the fix of an error the flag didn't cause. The rest of this rule, and security's
+    acceptance of `-min full` below, rest on this.
+  - **The binary's table decides what the name excludes, never the report.** `<name>` must be a key of this binary's
+    own table of PRV-row exclusions (`host.TermsExclusions`, the table SCR-2 already scores native adapters by:
+    today `baseten`, `boat`, `cloudflare`, `daytona`, `e2b`, `exe.dev`, `modal`, `sprites` and `vercel`), spelled
+    exactly as the table spells it. `modal` is already a key, from PRV-5's Modal exclusions, though there is no `run
+    modal`. Nothing a report, the box or the environment says adds a name or changes an entry. There is no alias, no
+    case folding and no environment default, so the declaration is typed for each run, like PRV-15's attestation.
+  - **Reviewed scope, not the provider's terms.** An entry is Sandprobe's reviewed scope for that provider: for some
+    providers it follows their published terms, and for others, Modal's among them, it is the project owner's own
+    rules of engagement (PRV-5). So nothing PRV-17 prints claims the provider's terms exclude an endpoint. It says
+    "Sandprobe's reviewed scope for <name> excludes these provider-owned endpoints", with the entry's own reasons.
+  - **Usage errors, before the plan exists (exit 2):** a name the table lacks, `exec`, `docker`, `aws-nitro`,
+    `kubernetes` and a differently cased key among them, where the error lists the valid names, sorted, and never
+    echoes the value given, since it may be pasted text or a credential; an empty value; the flag anywhere but `run
+    exec` and `plan exec` (a native adapter is already its own provider, a shipped recipe keeps RCP-4's exclusions,
+    `run docker` runs these checks, and an offline command reads only what a report records); and
+    `-provider-endpoints` naming a check the declared provider's entry excludes, since that scope keeps it off. That
+    error's fix is "leave out -provider-endpoints for the checks that scope excludes", never a change of provider.
+    Every entry today excludes all four, so with `-provider`, any `-provider-endpoints` value is refused. The rule is
+    per check so that an entry excluding fewer leaves the rest `opt_in`, and attestable.
+  - **What it changes in the run.** Each check the entry excludes is skipped with the entry's own reason and kind
+    `provider_terms` (PRV-5, GRD-3), in place of PRV-15's `opt_in` skip. Any other check of PRV-15's four keeps its
+    `opt_in` skip, which `-provider-endpoints` may lift as before. Nothing else changes: the same checks run, nothing
+    more is contacted, the letter is the same (GRD-3's skips touch neither GRD-1 nor GRD-2), and the box is still an
+    existing box under PRV-15: non-mutating checks only, no reset, its residual kept.
+  - **Recording.** The report still records the run as provider `exec` (`run.provider`). The host writes the name to
+    the manifest's `declared_provider`, beside `SkipKinds` and `Attested`: like them it is a policy input the host
+    fixed before the probe ran, so it belongs in the host's record (GRD-5), and it never reaches the probe's input.
+    Only `run exec` writes it, only when `-provider` was given, and a report carrying it declares `sandprobe/5`
+    (AGT-6). `Execute` refuses, before anything runs, a name the table lacks, a run that isn't `run exec`'s (kind
+    `opt_in`, no workload contract, no EVD-10 protocol), and exclusions that don't carry each of the entry's checks
+    with the entry's own reason, unattested; so this binary never writes a report its own reader refuses.
+  - **Policy.** For a report whose `run.provider` is `exec` and whose manifest has `declared_provider`, SCR-2's policy
+    kinds come from that name's entry in this binary's table: each check it excludes is `provider_terms`, and the
+    rest of PRV-15's four are `opt_in`. Without `declared_provider`, or with a name the table lacks, an `exec` report's
+    policy is PRV-15's `opt_in` for all four, unchanged.
+  - **Every human-readable plan and result says it's the operator's word.** Wherever a declared provider makes Cloud
+    access not applicable, the text says "The operator declared the provider as <name>; Sandprobe did not verify
+    it". The not-applicable row reads SCR-2's fixed reason, then that sentence: "Not applicable: this box holds no
+    cloud identity of yours that Sandprobe checks here; Sandprobe's reviewed scope for <name> excludes these
+    provider-owned endpoints. The operator declared the provider as <name>; Sandprobe did not verify it". The line
+    beside the score reads "Cloud access isn't counted: Sandprobe's reviewed scope for <name> excludes these
+    provider-owned endpoints (<reasons>). The operator declared the provider as <name>; Sandprobe did not verify it.",
+    with the entry's reasons from this binary's table, never the report's text. Both reach every rendering that shows
+    the row and the line: the run's own summary, `scorecard`'s text and its `-out` page, and the run's page. In the
+    card's JSON the row carries `scope` and `declared_provider`, both the name, so a reader of the rows can tell it
+    from a native adapter's not-applicable row, which carries `scope` alone. A workload exposure card (SCR-4) never
+    carries `declared_provider`, since the managed workload runners never declare one, and its validator refuses a
+    card that does, so the workload page never shows a declared provider at all; its native rows read the same
+    reviewed-scope line. A workload card is unauthenticated input, so the workload page never names a provider on its
+    word: it renders a not-applicable row's reason as the fixed "Not applicable: this box holds no cloud identity of
+    yours that Sandprobe checks here; Sandprobe's reviewed scope for the provider excludes these provider-owned
+    endpoints", never the stored reason, and the line beside the score names "the provider", never the stored
+    `scope`. A card carrying `declared_provider`, or a `scope` or `terms` on a counted row, is refused.
+  - **Plan.** Before approval (AGT-3), the plan has a "Provider, as the operator declared it (-provider, PRV-17)"
+    section, which reads "Cloud access: not applicable — Sandprobe's reviewed scope for <name> excludes these
+    provider-owned endpoints. The operator declared the provider as <name>; Sandprobe did not verify it.", then each
+    excluded check as "<ID> (<what it reaches>) stays off: <the entry's reason>". Its box-named destinations read
+    "none: <IDs> stay off: Sandprobe's reviewed scope for <name> excludes these provider-owned endpoints (PRV-17)", and
+    its residual ends "The operator declared the provider as <name> with -provider; Sandprobe did not verify it, and
+    Cloud access isn't counted on that word alone (PRV-17)." Its JSON carries `declared_provider` and those lines as
+    `declared`. `plan`, and a run that isn't approved, contact nothing, as before.
+  - **`-min 6`** with `-provider` is refused before anything runs in the box (OUT-4), with "-min 6 can never pass on
+    exec: Cloud access is not applicable, since Sandprobe's reviewed scope for <name> excludes these provider-owned
+    endpoints, so the score is out of 5. The operator declared the provider as <name>; Sandprobe did not verify it".
+  - **ANL-1.** A saved report is refused (exit 2, as for any refused input) when: `declared_provider` is present but
+    empty or null, or present under any version but `sandprobe/5` (AGT-6); it is on a report whose `run.provider`
+    isn't `exec`, or beside any workload contract (WGR-1, RUN-17's included) or EVD-10's protocol; it names a provider
+    this binary's table lacks, a report from a newer binary with a newer entry included, since its kinds can't be
+    checked; any check the entry excludes isn't skipped with kind `provider_terms`, or is attested; or any other check
+    carries `provider_terms`. As today, `provider_terms` on a `run exec` report without `declared_provider` is
+    refused, so editing `SkipKinds` alone still changes nothing.
+  - **Compare.** A report with a declared provider against one without it, or one declaring another provider, is a
+    changed setup (CMP-1's `declared_configuration`, exit 5), never like-for-like and never an improvement, even when
+    their `provider_terms` skip sets are the same.
+  - **What this changes, and why it's acceptable.** Until now only a native adapter could make Cloud access not
+    applicable, and there the binary itself created the box through that provider's API, so the run established the
+    provider. With PRV-17 the operator's word at run time does it for an existing box. That word can't be checked from
+    the box: GRD-5 never lets anything the box returns shrink the score, and asking the provider's own endpoints what
+    it is would contact exactly what its reviewed scope excludes. A host-side hint such as the command's first word
+    (`modal`, `sprite`) is the operator's own text too, and proves nothing about where the shell lands. So the
+    declared provider is the operator's word, recorded like the rest of the manifest. It is acceptable because:
+    - It is never a pass (rule 1). A not-applicable row is never green; it leaves only the denominator; SCR-5's
+      coverage still counts SEC-4 and AMP-7 as skipped; and the letter doesn't change. Under `opt_in` and under a
+      declared provider alike those checks never ran, so a false declaration turns a red "Not tested" into "Not
+      applicable", never an untested check into a proven one.
+    - It has the same standing as the two declarations `run exec` already rests on: PRV-2's that the box is the
+      agent's and not production, and PRV-15's per-check attestation that the provider's terms allow a check. Each is
+      typed for each run, shown in the plan before approval, and recorded in the report.
+    - It comes from the person, never from the agent the score is about (above), and every human-readable plan and
+      result says Sandprobe didn't verify it.
+    - `compare` never reads adding or changing it as an improvement (above), so a fix loop or CI gate that compares
+      runs sees a changed setup.
+    - Saved reports gain no new forgery. Today an edited `run exec` report whose `run.provider` is changed to a native
+      adapter's name, with its four kinds changed to `provider_terms`, already reads out of five, and ANL-1 already
+      says such an edit can't be told apart; what SCR-2's tests pin is narrower, that editing the kinds alone changes
+      nothing. That still holds for every report without `declared_provider`, and for one with it, whose kinds must
+      equal the named entry's. Adding `declared_provider` means editing it, the kinds and the schema together: an
+      edit of the same kind as changing `run.provider`, which ANL-1 already can't detect.
+
+    The cost, stated: a gate on `-min full` alone accepts 5/5 once Cloud access is not applicable (OUT-4), so an
+    operator who names a provider falsely turns that gate's exit 6 into 0 for Cloud access. The security review
+    accepted this under the trust boundary above: it holds only while the name comes from the person and every result
+    says it is unverified. Regression-sensitive gates use `compare` or OUT-1's JSON, as OUT-4 already says. Nothing
+    stronger is available without trusting the box or contacting the provider.
+
 ## Tests
 
 Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
@@ -3186,6 +3330,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | PRV-15 (transport) | `internal/host/exec_test.go`: through a real `sh`, nothing runs before the preflight, a refused preflight stops everything, every run is bound with `-expect-uid`, banners outside the markers are ignored, SEC-1's twin is set, a pre-existing scratch path is left alone even when its "already exists" answer is lost, and a path the box swaps in during a run survives the wrapper's own trap (only a path carrying this box's owner token is ever removed, by the trap, the removal invocation or the suggested command), an invocation killed past its limit is cleared by the separate removal invocation, an unreachable box leaves the path and its removal command reported and blocks further runs, a command that fails after running the script counts for nothing, a removal through a failing command or under an unsearchable parent isn't "gone", arguments with shell syntax are refused; `TestExecBoxDocker` (SANDPROBE_FIXTURES=1): the shipped probe through `docker exec -i` as nobody, a switch to root refused with nothing written, no scratch left |
 | PRV-15 (provider endpoints) | `cmd/sandprobe/endpoints_test.go`: `TestProviderEndpointsParse` (the four IDs, each once, trimmed; empty, an empty item, `all`, `*`, lowercase, any other ID, a duplicate, another separator, or a check the run doesn't exclude are refused, and an unknown value is never echoed; the rest stay excluded), `TestProviderEndpointsOnlyWhereTheyApply` (refused on run docker, native adapters, aws-nitro and offline commands, and empty or `all` on exec), `TestProviderEndpointsPlan` (each attested check with its attestation, the metadata address and the API handshake it adds, the checks still off, the residual; AMP-6 still won't run on an existing box; `-allow-local-proxy` only with EGR-3; an unapproved run exits 3 with the attestation in its JSON plan), `TestProviderEndpointsWithExplicitCanary` (endpoint selection survives an explicit no-canary or public-canary choice beside stale environment defaults, with no network calls), `TestProviderEndpointsRecipePlan` (a shipped recipe, through a stub kubectl: the same plan lines under RCP-4, nothing past sp_ready), `TestProviderEndpointsAttestationRecord` (ANL-1: the fixed sentence beside exactly the attested checks; another sentence, a missing one, a non-endpoint, a still-skipped check, an attestation on a native adapter's run, or one in a report that declares `sandprobe/1` is refused), `TestRunExecProviderEndpointsDocker` (`SANDPROBE_FIXTURES=1`: run exec through `docker exec` into a container with no network, so no metadata is reachable: the report declares `sandprobe/2`; SEC-4 and AMP-7 run and end `not_found` or unknown, never a pass or an absence, each with its attestation; EGR-3 and AMP-6 keep `opt_in`; Cloud access is never "not tested" or not applicable, and a green row names its not-proven checks); `internal/host`: `TestPlanAttested` (attested checks selected and recorded sorted in the manifest, never in the probe's input; the rest keep `opt_in`; AMP-6 skipped on an existing box whatever was attested, selected on a throwaway one; EGR-3 attested without a canary is sound, graded but never sent to the probe, and a loopback proxy without `-allow-local-proxy` is skipped with no kind; the grader refuses a non-endpoint, a duplicate or a still-kinded attestation; Execute refuses one that isn't an endpoint, is named twice, or is still excluded); `internal/report`: `TestReportRecordsAttestation` (the sentence beside exactly the attested checks, in the JSON and on the page); `internal/analysis/attested_test.go`, on a Docker fixture run planned with `-provider-endpoints SEC-4,AMP-7`: `TestInvalidRunKeepsAttestedRows` (an invalid run keeps both rows, unknown with "not graded" and the attestation, grades nothing else and lists no unknowns, loads under ANL-1, and its page shows each attestation and the report's real schema; a valid run's page shows each attestation beside its test and in the appendix), `TestAttestedRowsAreRequired` (the code review's reproduction: a report with the attested SEC-4 row deleted is refused, invalid or valid; an invalid report with an unknown row nobody attested, or with unknowns in its grade, is refused), `TestInvalidAttestedRowsStayNotGraded` (the code review of #12: an invalid report whose attested SEC-4 row is turned `not_found` with a reason of its own is refused, as are an attested row turned a finding, given another reason, evidence or a scope, and a graded row nobody attested; the unchanged report still reads) |
 | PRV-15 (command) | `cmd/sandprobe/exec_test.go`: run exec refuses a missing command, a passthrough to another provider, a relative or unsafe `-scratch`, a malformed `-as`, a command not on PATH, and `-canary-url` without a pin; with no canary named, even beside a stray `canary-*.state` file, the plan uses the hosted canary and states its retention, and the shipped URL and pin pass `CheckCanaryURL` (`TestRunExecDefaultsToTheHostedCanary`, HCN-5); a pin without its URL, by flag or environment, is refused rather than set aside (`TestRunExecPinWithoutURLIsRefused`); a URL or pin pasted with a credential (userinfo, query, fragment, path, a bad pin) is refused before the plan exists and never appears in its text or JSON, while a valid one is shown canonical; the plan names the box, the scratch path, the user check, the public canary and HCN-4's retention, the four checks off and PER-5 skipped, and no metadata address; without `-y` nothing runs; `TestExecuteThroughExecBox` (SANDPROBE_FIXTURES=1): Execute drives the shipped probe through `docker exec` as nobody, the base64 upload keeps SBX-5's digest, the run is valid, SEC-4, EGR-3, AMP-6, AMP-7 and PER-5 are skipped with their reasons, and no scratch is left |
+| PRV-17 (and its SCR-2, GRD-3, ANL-1, AGT-3, AGT-6, OUT-1 and OUT-4 amendments) | `cmd/sandprobe/exec_provider_test.go`: `TestExecProviderParse` (`host.DeclarableProviders` is exactly the table's keys, each accepted; a name the table lacks, `exec`, `docker`, `aws-nitro` and `kubernetes` among them, a differently cased or padded key, a list, a credential-shaped value and an empty value are refused with exit 2 before the plan exists, the error listing the valid names sorted and never echoing the value; the flag is refused on run and plan of a native adapter, `plan kubernetes`, `plan docker`, `scorecard`, `compare` and `providers`), `TestExecProviderConflictsWithOptIn` (`-provider modal` with `-provider-endpoints` naming any of the four is refused, its fix never a change of provider), `TestExecProviderPlan` (the text plan's section, Cloud access line, each excluded check with Modal's own reason, box-named line and residual, byte for byte as PRV-17 quotes them, and never "terms exclude" or "their terms"; an unapproved run exits 3 with `declared_provider`, the five `declared` lines and the residual in its JSON; a plan without `-provider` names no declaration and no reviewed scope), `TestExecProviderMinSix` (`run exec -provider modal -min 6 -y` exits 2 with the unverified sentence before the box's command runs; without `-provider`, and with `-min full`, it isn't refused), `TestScorecardDeclaredProvider` (a saved run exec report declaring modal: "Score 2/5", the row's reason and the line beside the score as PRV-17 quotes them, in `scorecard`'s text; `scope` and `declared_provider` on the row in `-o json`; and the unverified sentence and reviewed scope on the `-out` page, the run's own page and the run's summary), `TestScorecardRefusesForgedDeclaredProvider` (refused with exit 2 and never read out of five: `provider_terms` with the declaration removed; a kind turned `opt_in` or removed; an excluded check attested or run; a provider the binary doesn't know, `aws-nitro`, `exec` and `Modal` among them; the declaration on a Sprites report, under `sandprobe/2`, or beside EVD-10's protocol; `declared_provider` present but empty or null; and, scored directly with `report.Score`, each report whose kinds differ from the entry stays out of six), `TestCompareDeclaredProvider` (undeclared against modal either way, and modal against sprites with the same skips, each exit 5 with `declared_configuration`; the same declaration on both sides a matched pair), `TestHelpSaysTheProviderComesFromThePerson` (`sandprobe help` says the name comes only from the person, is never inferred, added or changed to clear a red, is the operator's word and never verified, and lists exactly the table's keys), `TestNothingSuggestsProvider` (with `-provider-endpoints` set aside, no `-provider` in any catalog advice or fix, `explain` for the four checks, any rendering of an undeclared run exec report (scorecard text and JSON, profile, compare, the page and the run's summary), or the message and fix of an error the flag didn't cause; undeclared Cloud access still reads PRV-15's opt-in reason); `cmd/sandprobe/scorecard_na_test.go`: `TestScorecardNotApplicable` (Sprites and E2B read the reviewed-scope row and line) and `TestReportSchemaVersions` (the refusal names `sandprobe/1` to `sandprobe/5`); `internal/report/declared_test.go`: `TestScoreDeclaredProvider` (for every key of `host.TermsExclusions`, a run exec report declaring it declares `sandprobe/5` and reads out of five, Cloud access not applicable and never green with its `terms` from that entry, `scope` and `declared_provider` set, and the unverified sentence on the row, the line, the card's JSON and the page; its letter is the undeclared run's), `TestWorkloadPageReviewedScope` (a native not-applicable row on the workload page reads the fixed reason and "Sandprobe's reviewed scope for the provider", never a stored scope or reason and never "their terms", whether the card stores its own scope, another provider's name or arbitrary text, and rendering leaves the caller's card unchanged; a card carrying `declared_provider`, or a scope or terms on a counted row, is refused); `internal/report/scorecard_na_test.go`: `TestScoreNotApplicable` (each native adapter's row and line name Sandprobe's reviewed scope for it, `scope` set and no declaration, never "their terms" or "terms exclude"), `TestNativesAreThePolicy` extended (`PolicyFor`: an exec report declaring modal takes `provider_terms`; no declaration, `aws-nitro`, `Modal` or `exec` take `opt_in`; a declaration beside another provider changes nothing); `internal/host/declared_test.go`: `TestPlanDeclaredProvider` (the manifest records `declared_provider` and each excluded check with Modal's own reason and kind `provider_terms`, the probe's input carries none of it, and the grader accepts the manifest; `checkDeclared` and `Execute` refuse a name the table lacks, a differently cased key, a native adapter's kind or none, run exec's own or another provider's reasons, an excluded check lifted, EVD-10's protocol and a workload contract); `internal/analysis/declared_test.go`: `TestDeclaredProviderPresentIsCanonical` (AGT-6: a canonical `sandprobe/5` report reads; `declared_provider` empty, null or absent under `sandprobe/5`, or carried under `sandprobe/2` or `sandprobe/4`, is refused; a declaration the table lacks or on a native adapter's report is refused; the same report with no declaration and `opt_in` kinds reads as `sandprobe/2`) |
 | RUN-22 | fixed diagnostic/refusal/consistency tests; Linux known-fixture success, dependency, syntax and wrong-output cases; both controller artifact and no-text-leak tests |
 | RUN-21 | native loopback pinned TLS success/wrong-pin/no-application-data/timeout/invalid-metadata tests and shell fixed-result refusal matrix |
 | RUN-20 | offline receiver TLS/port failure-stage, success, no-output-leak and read-only-status tests |
