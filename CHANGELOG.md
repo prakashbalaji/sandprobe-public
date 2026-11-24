@@ -5,6 +5,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.
+
 - Retain optional, own-sandbox-bound organization network-policy context for managed Daytona runs without treating configuration as observed denial.
 
 - Stop HTTP-opted managed Nitro and Daytona runs before paid resources when the shared canary capability is unavailable.

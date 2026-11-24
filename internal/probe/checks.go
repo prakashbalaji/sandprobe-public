@@ -451,7 +451,8 @@ func amp5(e *env, ck *catalog.Check) obs.Observation {
 	return obs.Observation{Result: obs.Pass, Proof: &obs.Proof{Mechanism: ck.Mechanism, Twin: twin, Count: rows, Root: e.root}}
 }
 
-// AMP-8 block devices: read permission on each, never opened. With none visible, scoped out.
+// AMP-8 block devices: sysfs-name discovery still covers only /dev/<name>, not custom/nested paths.
+// EVD-12 verifies block type and pinned read permission, never I/O. With none visible, scoped out.
 func amp8blk(e *env, ck *catalog.Check) obs.Observation {
 	var devs []string
 	entries, err := os.ReadDir("/sys/class/block")
@@ -471,7 +472,7 @@ func amp8blk(e *env, ck *catalog.Check) obs.Observation {
 		return obs.Observation{Result: obs.ScopedOut, Reason: "no block device is visible to the probe",
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"block_devices": 0}}}
 	}
-	ts, counts, err := e.sweep(ck.ID, map[string][]string{"block_devices": devs}, permCheck)
+	ts, counts, err := e.sweep(ck.ID, map[string][]string{"block_devices": devs}, blockPermCheck)
 	if err != nil {
 		return sweepErr(err)
 	}

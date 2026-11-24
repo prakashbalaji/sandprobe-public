@@ -1029,6 +1029,14 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
   the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
   it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
+- **EVD-12 Typed block-device permission evidence.** AMP-8.blk may test only a resolved block-device node
+  pinned with `O_PATH`; regular files, character devices, other types and paths that cannot be pinned remain
+  unknown, never a block-device finding or negative proof. Read permission uses
+  `faccessat2(fd, "", R_OK, AT_EMPTY_PATH|AT_EACCESS)` on that pinned object, never an I/O open. Its regular-file
+  permission twins use the same syscall. Unsupported syscall/flags remain unknown without a path-based fallback.
+  Re-resolving the reported path after the permission call must identify the same pinned block-device inode;
+  observed removal, replacement or retargeting makes the measurement unknown. This does not broaden discovery:
+  the existing `/sys/class/block` to `/dev/<name>` mapping still misses custom or nested device-node paths.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -1783,7 +1791,7 @@ counters, and no history across runs is shown anywhere.
 |-|-|-|
 | file read (SEC-2, SEC-3, SEC-5) | `EACCES`, `EPERM` on `open` of a resolved regular target (SBX-2); and TWN-4 holds | the probe's own 0600 file opens through the same call; as non-root, its own 0000 file is refused |
 | write permission (PER-1 to PER-4, AMP-4, AMP-8 kernel settings) | `faccessat(AT_EACCESS, W_OK)` gives `EACCES` or `EROFS` for the path and every ancestor directory up to `/`, through symlinks; an ancestor counts as safe only if not writable, or sticky with neither it nor the path owned by the agent; and TWN-4 holds | the same call allows the probe's scratch directory, and refuses its own 0500 directory as non-root, which shows the call answers; TWN-4 decides what a refusal means (the probe owns that directory, so its refusal alone is no negative) |
-| read permission (AMP-8 block devices) | `faccessat(AT_EACCESS, R_OK)` gives `EACCES` or `EPERM` on each block device, never opened; and TWN-4 holds | the same call allows the probe's own scratch file, and refuses its own 0000 file as non-root |
+| read permission (AMP-8 block devices) | `faccessat2(AT_EMPTY_PATH\|AT_EACCESS, R_OK)` gives `EACCES` or `EPERM` on each pinned block-device node (EVD-12), never opened for I/O; and TWN-4 holds | the same call allows the probe's own scratch file, and refuses its own 0000 file as non-root |
 | `/proc/<pid>/environ`, `/proc/<pid>/mem` | `EACCES`, `EPERM`; and TWN-4 holds | the same file of a child the probe starts opens |
 | TCP or TLS out (EGR-2, EGR-5 TCP) | exactly one of `ENETUNREACH`, `EHOSTUNREACH`, `ECONNREFUSED` (each subject to the evidence rule beside it), or `ETIMEDOUT` on both tries; `EACCES`/`EPERM` are always unknown; any other error, or any failure after the TCP handshake, is unknown | all four: kernel evidence the attempt happened. For a non-blocking `connect` that returns `EINPROGRESS`, `TCP_INFO` must show `SYN_SENT`, or count the SYN in `tcpi_segs_out`, before the final error arrives through `SO_ERROR` (and SYN retransmits for a timeout). The counter survives the socket closing, so an exchange too fast to sample in `SYN_SENT` (a local network) still shows the SYN went out; a connect never issued sends nothing. An immediate error (no `EINPROGRESS`) counts only when kernel state independently implies it: `ENETUNREACH` or `EHOSTUNREACH` only when the kernel's own route lookup for the canary's address (netlink `RTM_GETROUTE`, after policy rules) returns no route, unreachable or prohibit. An immediate `ECONNREFUSED`, `EACCES` or `EPERM` never counts: an active filter elsewhere doesn't show it denied this call. A bound local port alone is not evidence; the same client call reached the loopback listener the probe bound itself in this run (SBX-1 (d)); confirmed canary health on that port covered the attempt's whole span (SBX-11); no receipt for this run on that port. The pass names destination, port and route. |
 
@@ -2745,6 +2753,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
+| EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance; managed HTTP capability failure stops before paid receiver/provider creation |
 | EVD-9 | `internal/canary/http_marker_test.go`: canonical HTTP/80 + independently collected receipts, unarmed completion without proof, legacy compatibility, malformed/oversized/body/host/port rejection, bounded acknowledgement parsing and no raw response leakage |
 | EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
