@@ -31,11 +31,12 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   declared path that is missing or of the wrong type stays unknown, and the grader refuses a `scoped_out` result when
   a path was declared (EVD-13).
 
-- The web report's per-category "tests run" counts no longer count skipped, missing or scoped-out checks as run;
-  unknown and not-found checks still count as run, never as passes. Scores are unchanged (SCR-6).
+- The web report's per-category "tests run" counts no longer count skipped or scoped-out checks as run, as they
+  already didn't count missing ones; unknown and not-found checks still count as run, never as passes. Scores are
+  unchanged (SCR-6).
 
 - A persistence reset recheck (PER-5) that stops on a marker mismatch now says whether the inode, the length or both
-  differed. It is still unknown, and the marker is never opened (TWN-3).
+  differed. It is still unknown, and a mismatch returns before the marker is ever opened for reading (TWN-3).
 
 - An unexpected HTTP reply from the canary exchange is now labelled by its status class (1xx to 5xx), keeping the
   specific 403 and 407 labels. Response text is still discarded, and no label counts as delivery or denial.
