@@ -74,7 +74,7 @@ func replan(t *testing.T, o host.Options) (obs.Manifest, *obs.Doc, obs.CanaryEvi
 		delete(m.CheckNonces, id)
 		delete(m.Endpoints, id)
 	}
-	m.SkipKinds, m.Attested = plan.SkipKinds, plan.Attested
+	m.SkipKinds, m.Attested, m.DeclaredProvider = plan.SkipKinds, plan.Attested, plan.DeclaredProvider
 	return m, pd, q.Evidence
 }
 
@@ -92,11 +92,16 @@ func TestScoreNotApplicable(t *testing.T) {
 		d := replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipProviderTerms})
 		c := Score(d)
 		r := row(t, c, "Cloud access")
-		if !r.NotApplicable || r.Green || r.Why != NotApplicable || !strings.Contains(r.Terms, excluded["SEC-4"]) || !strings.Contains(r.Terms, excluded["AMP-7"]) {
+		if !r.NotApplicable || r.Green || r.Why != NotApplicableWhy(provider, false) || r.Scope != provider || r.DeclaredProvider != "" ||
+			!strings.Contains(r.Terms, excluded["SEC-4"]) || !strings.Contains(r.Terms, excluded["AMP-7"]) {
 			t.Errorf("%s: Cloud access %+v", provider, r)
 		}
-		if c.Of != 5 || c.Score > 5 || len(c.NotCounted()) != 1 || !strings.HasPrefix(c.NotCounted()[0], "Cloud access isn't counted: the provider's terms exclude its own endpoints (") {
+		if c.Of != 5 || c.Score > 5 || len(c.NotCounted()) != 1 || !strings.HasPrefix(c.NotCounted()[0], "Cloud access isn't counted: Sandprobe's reviewed scope for "+provider+" excludes these provider-owned endpoints (") {
 			t.Errorf("%s: score %d/%d, line %q", provider, c.Score, c.Of, c.NotCounted())
+		}
+		// SCR-2, PRV-5: Sandprobe's reviewed scope, never a claim about the provider's own terms, and no declaration.
+		if s := r.Why + c.NotCounted()[0]; strings.Contains(s, "their terms") || strings.Contains(s, "terms exclude") || strings.Contains(s, "declared") {
+			t.Errorf("%s: %q", provider, s)
 		}
 		for _, other := range c.Rows {
 			if other.Name != "Cloud access" && other.NotApplicable {
@@ -302,6 +307,15 @@ func TestNativesAreThePolicy(t *testing.T) {
 		"docker": "", "aws-nitro": "", "": ""} {
 		if got := PolicyKinds(provider)["AMP-7"]; got != want {
 			t.Errorf("%q: AMP-7 %q, want %q", provider, got, want)
+		}
+	}
+	// PRV-17: a run exec report's declared provider takes that entry's kinds; a name the table lacks, or a declaration
+	// beside any other provider, derives nothing new.
+	for _, tc := range []struct{ provider, declared, want string }{{"exec", "modal", obs.SkipProviderTerms}, {"exec", "", obs.SkipOptIn},
+		{"exec", "aws-nitro", obs.SkipOptIn}, {"exec", "Modal", obs.SkipOptIn}, {"exec", "exec", obs.SkipOptIn},
+		{"sprites", "modal", obs.SkipProviderTerms}, {"aws-nitro", "modal", ""}, {"kubernetes", "modal", obs.SkipOptIn}} {
+		if got := PolicyFor(tc.provider, tc.declared); got["SEC-4"] != tc.want || got["AMP-7"] != tc.want {
+			t.Errorf("%q declaring %q: %v, want %q", tc.provider, tc.declared, got, tc.want)
 		}
 	}
 }

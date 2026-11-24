@@ -79,6 +79,10 @@ type Options struct {
 	// Attested is PRV-15's -provider-endpoints: the provider-endpoint checks the person attests their provider's terms
 	// allow on their own account. None may also be excluded.
 	Attested []string
+	// DeclaredProvider is PRV-17's -provider on run exec: a key of TermsExclusions, the operator's word. Each check its
+	// entry excludes must be in Excluded with the entry's own reason, and gets kind provider_terms; the rest keep
+	// ExcludedKind, which must be opt_in.
+	DeclaredProvider string
 	// Existing is an existing box (PRV-1): it gets non-mutating checks only, so AMP-6 makes no vsock connect.
 	Existing bool
 	// OwnInit is DKR-2: the adapter read from the provider's own record of the box, never from the box, that PID 1 is
@@ -165,6 +169,9 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 		if _, excluded := o.Excluded[id]; !excludable[id] || excluded || slices.Contains(o.Attested[:i], id) {
 			return nil, fmt.Errorf("%s can't be attested (PRV-15)", id)
 		}
+	}
+	if err := checkDeclared(o); err != nil {
+		return nil, err
 	}
 	out, err := b.Probe(ctx, []string{"-survey"}, nil)
 	if err != nil {
@@ -383,14 +390,19 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		delete(skip, "EGR-6") // MEAS-6: only explicit finite workload destinations lift this gate.
 	}
 	var kinds map[string]string // SCR-2: only the host's own exclusions get a kind, never a survey-driven skip
+	declared := DeclaredExclusions(o.DeclaredProvider)
 	for id, why := range o.Excluded {
 		if excludable[id] {
 			skip[id] = why
-			if o.ExcludedKind != "" {
+			kind := o.ExcludedKind
+			if _, ok := declared[id]; ok { // PRV-17: the declared provider's PRV row decides this one
+				kind = obs.SkipProviderTerms
+			}
+			if kind != "" {
 				if kinds == nil {
 					kinds = map[string]string{}
 				}
-				kinds[id] = o.ExcludedKind
+				kinds[id] = kind
 			}
 		}
 	}
@@ -459,7 +471,7 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		Selected: selected, Skipped: skipped, Targets: targets, Discover: discover,
 		CheckNonces: map[string]string{}, Endpoints: map[string]string{}, Proxy: proxy, AllowLocalProxy: o.AllowLocalProxy,
 		ProxyMalformed: s.Proxy != nil && s.Proxy.Malformed && skip["EGR-3"] == "", KubeAPI: s.KubeAPI, NoCanary: o.NoCanary,
-		SkipKinds: kinds, Attested: attested(o.Attested)}
+		SkipKinds: kinds, Attested: attested(o.Attested), DeclaredProvider: o.DeclaredProvider}
 	if o.WorkloadContract != nil {
 		contract := *o.WorkloadContract
 		m.WorkloadContract = &contract

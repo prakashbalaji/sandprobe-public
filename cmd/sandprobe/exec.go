@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
 	"slices"
@@ -108,7 +109,37 @@ func (r runFlags) chooseCanary() (canaryChoice, error) {
 		retainNote: publicCanaryRetention}, nil
 }
 
-func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, allowLocalProxy bool) planDoc {
+// declaredProvider reads PRV-17's -provider: a key of this binary's PRV-row table, exactly as the table spells it.
+// A name it lacks is never echoed, since it may be pasted text; and a check that table entry excludes can't also be
+// attested with -provider-endpoints. The name is the operator's word: nothing here infers it.
+func declaredProvider(value string, set bool, attested []string) (string, error) {
+	if !set {
+		return "", nil
+	}
+	names := strings.Join(host.DeclarableProviders(), ", ")
+	entry := host.DeclaredExclusions(value)
+	if entry == nil {
+		return "", fail("usage", "-provider takes only a provider Sandprobe has a reviewed scope for, spelled exactly: "+names+" (PRV-17)",
+			"give the name the operator named, from that list, or leave -provider out; an agent never chooses it", exitUsage)
+	}
+	for _, id := range attested {
+		if _, ok := entry[id]; ok {
+			return "", fail("usage", "-provider-endpoints can't turn on "+id+": "+report.ReviewedScope(value)+", and the operator declared "+value+" (PRV-17)",
+				"leave out -provider-endpoints for the checks that scope excludes", exitUsage)
+		}
+	}
+	return value, nil
+}
+
+// execExclusions is run exec's exclusions (PRV-15), with a declared provider's PRV-row entry in place of the default for
+// each check it excludes (PRV-17), and the attested checks lifted.
+func execExclusions(declared string, attested []string) map[string]string {
+	excluded := host.ExecExclusions()
+	maps.Copy(excluded, host.DeclaredExclusions(declared))
+	return lift(excluded, attested)
+}
+
+func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, allowLocalProxy bool, declared string) planDoc {
 	sec3, _ := catalog.Get("SEC-3")
 	user := "whoever it runs as, which the report calls unconfirmed as the agent's user"
 	if as != "" {
@@ -122,11 +153,31 @@ func execPlan(box *host.ExecBox, as string, c canaryChoice, attested []string, a
 	if c.none { // HCN-5: the connections the attested checks still make are named, never hidden behind "no canary"
 		contacts[0] = noCanaryLine(attested)
 	}
-	lines, extra, boxNamed := attestedPlan(attested, host.ExecExclusions(), true, c.none, "PRV-15")
+	off, entry := host.ExecExclusions(), host.DeclaredExclusions(declared)
+	var declaredLines []string
+	var declaredOff string
+	if entry != nil { // PRV-17: the declared provider's PRV row decides its checks; the operator's word, never verified
+		ids := slices.Sorted(maps.Keys(entry))
+		declaredLines = []string{"Cloud access: not applicable — " + report.ReviewedScope(declared) + ". " + report.DeclaredUnverified(declared) + "."}
+		for _, id := range ids {
+			declaredLines = append(declaredLines, id+" ("+endpointNames[id]+") stays off: "+entry[id])
+			delete(off, id)
+		}
+		declaredOff = strings.Join(ids, ", ") + " stay off: " + report.ReviewedScope(declared) + " (PRV-17)"
+		named = []string{"none: " + declaredOff}
+		if rest := slices.Sorted(maps.Keys(off)); len(rest) > 0 {
+			named = append(named, strings.Join(rest, ", ")+" stay off, since they'd contact your provider's own endpoints (PRV-15)")
+		}
+		residual += " The operator declared the provider as " + declared + " with -provider; Sandprobe did not verify it, and Cloud access isn't counted on that word alone (PRV-17)."
+	}
+	lines, extra, boxNamed := attestedPlan(attested, off, true, c.none, "PRV-15")
 	if len(attested) > 0 {
 		contacts, named = append(contacts, extra...), boxNamed
+		if declaredOff != "" {
+			named = append([]string{declaredOff}, named...)
+		}
 	}
-	return planDoc{Provider: "exec",
+	return planDoc{Provider: "exec", DeclaredProvider: declared, Declared: declaredLines,
 		Creates: []string{"nothing: your existing box, reached by: " + strings.Join(box.Command, " "),
 			"a scratch directory " + box.Scratch + " in the box (mode 700) for each invocation, removed on exit and confirmed gone after each"},
 		LaunchPath:    "your command, as " + user + "; it must start sh reading stdin. It first asks the box's machine type (uname -m) to pick the probe, then who it runs as, before any check",
@@ -212,8 +263,12 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	declared, err := declaredProvider(r.provider, r.providerSet, attested)
+	if err != nil {
+		return 0, err
+	}
 	allowLocal := r.allowLocalProxy && slices.Contains(attested, "EGR-3") // SBX-1 (e): only once EGR-3 is on
-	p := execPlan(box, r.as, choice, attested, allowLocal)
+	p := execPlan(box, r.as, choice, attested, allowLocal, declared)
 	for _, path := range r.blockDevicePaths {
 		p.OpensReadOnly = append(p.OpensReadOnly, "block-device metadata only (never opened for I/O): "+path)
 	}
@@ -274,8 +329,9 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 			return err
 		}
 		lv.phase("probe", "running the probe as uid %d through your command", w.UIDs[1])
-		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(host.ExecExclusions(), attested),
-			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none, BlockDevicePaths: r.blockDevicePaths})
+		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: execExclusions(declared, attested),
+			ExcludedKind: obs.SkipOptIn, Attested: attested, DeclaredProvider: declared, Existing: true, AllowLocalProxy: allowLocal,
+			NoCanary: choice.none, BlockDevicePaths: r.blockDevicePaths})
 		if err == nil {
 			lv.done("probe", "")
 		}

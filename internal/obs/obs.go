@@ -55,11 +55,15 @@ type Manifest struct {
 	// Attested is the provider-endpoint checks the person attests their provider's terms allow on their own account
 	// (PRV-15's -provider-endpoints), sorted. Only the host writes it, and it never reaches the probe's input.
 	Attested []string `json:"Attested,omitempty"`
+	// DeclaredProvider is PRV-17's -provider on run exec: the provider the operator says the box runs on, a key of this
+	// binary's PRV-row table. It is the operator's word, never verified. Only the host writes it, and it never reaches
+	// the probe's input.
+	DeclaredProvider string `json:"declared_provider,omitempty"`
 }
 
 // Skip kinds (SCR-2). Only a provider-terms skip can make a scorecard category not applicable.
 const (
-	SkipProviderTerms = "provider_terms" // a native adapter's PRV row: the provider's terms exclude its own endpoint (PRV-5)
+	SkipProviderTerms = "provider_terms" // a PRV row: Sandprobe's reviewed scope for the provider excludes its own endpoint (PRV-5, PRV-17)
 	SkipOptIn         = "opt_in"         // PRV-15's or RCP-4's default, which the person may lift (-provider-endpoints)
 )
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"sandprobe/internal/catalog"
+	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 	"sandprobe/internal/strictjson"
@@ -46,6 +47,7 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 			SkipKinds           json.RawMessage `json:"SkipKinds"`
 			Attested            json.RawMessage `json:"Attested"`
 			CanaryTCP80Protocol json.RawMessage `json:"canary_tcp80_protocol"`
+			DeclaredProvider    json.RawMessage `json:"declared_provider"`
 		} `json:"manifest"`
 		Checks []struct {
 			Attestation json.RawMessage `json:"attestation"`
@@ -58,6 +60,9 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 		return false
 	}
 	if p.Manifest.CanaryTCP80Protocol != nil && d.Manifest.CanaryTCP80Protocol == "" {
+		return false
+	}
+	if p.Manifest.DeclaredProvider != nil && d.Manifest.DeclaredProvider == "" { // AGT-6, PRV-17
 		return false
 	}
 	for i, c := range p.Checks {
@@ -147,7 +152,21 @@ func Validate(d *report.Doc) error {
 			return ErrInput
 		}
 	}
-	policy := report.PolicyKinds(d.Run.Provider)
+	policy := report.PolicyFor(d.Run.Provider, d.Manifest.DeclaredProvider)
+	// PRV-17: a declared provider is the operator's recorded word, but what it excludes is this binary's: a key of its
+	// own table, on a run exec report that needs exactly sandprobe/5, with every check that entry excludes skipped
+	// under kind provider_terms. The kind checks below refuse any other kind, so the two must match exactly.
+	if name := d.Manifest.DeclaredProvider; name != "" {
+		entry := host.DeclaredExclusions(name)
+		if entry == nil || d.Run.Provider != "exec" || d.Manifest.WorkloadContract != nil || d.Manifest.CanaryTCP80Protocol != "" {
+			return ErrInput
+		}
+		for id := range entry {
+			if _, skipped := d.Manifest.Skipped[id]; !skipped || d.Manifest.SkipKinds[id] != obs.SkipProviderTerms {
+				return ErrInput
+			}
+		}
+	}
 	// PRV-15: an attestation names a provider endpoint once, never one that still carries a skip kind, only where this
 	// binary's own policy makes it opt-in (run exec, a shipped recipe), and each report row carries the fixed sentence
 	// exactly when its check was attested.
@@ -464,8 +483,9 @@ func Compare(a, b *report.Doc) Comparison {
 	if !reflect.DeepEqual(referenceContextNotes(a.Grade.Notes), referenceContextNotes(b.Grade.Notes)) {
 		out.ContextChanges = append(out.ContextChanges, "reported_reference_context")
 	}
-	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup.
-	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) {
+	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup;
+	// so does any change to a declared provider (PRV-17), even with the same skips.
+	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) || a.Manifest.DeclaredProvider != b.Manifest.DeclaredProvider {
 		out.ContextChanges = append(out.ContextChanges, "declared_configuration")
 	}
 	rowsA, rowsB := map[string]report.Check{}, map[string]report.Check{}

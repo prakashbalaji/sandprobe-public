@@ -81,18 +81,23 @@ func CategoryOf(id string) (Category, bool) {
 // row rests on without a negative proof (KND-2), so a green never reads as more than it is, and GreenNotProven says a
 // green row has no conclusive check at all. A not-applicable row is never green and is out of the score.
 type Row struct {
-	Name           string         `json:"name"`
-	Question       string         `json:"question"`
-	Green          bool           `json:"green"`
-	GreenNotProven bool           `json:"green_not_proven,omitempty"` // SCR-2: green with Conclusive == 0; still counts toward Score
-	NotApplicable  bool           `json:"not_applicable,omitempty"`
-	Why            string         `json:"why,omitempty"`
-	Terms          string         `json:"terms,omitempty"` // SCR-2: a not-applicable row's provider-terms reasons, from this binary's own PRV rows
-	NotProven      string         `json:"not_proven,omitempty"`
-	Found          []string       `json:"found,omitempty"`
-	Unknown        []string       `json:"unknown,omitempty"`
-	Unproven       []string       `json:"unproven,omitempty"`
-	Coverage       *CheckCoverage `json:"coverage,omitempty"`
+	Name           string `json:"name"`
+	Question       string `json:"question"`
+	Green          bool   `json:"green"`
+	GreenNotProven bool   `json:"green_not_proven,omitempty"` // SCR-2: green with Conclusive == 0; still counts toward Score
+	NotApplicable  bool   `json:"not_applicable,omitempty"`
+	Why            string `json:"why,omitempty"`
+	Terms          string `json:"terms,omitempty"` // SCR-2: a not-applicable row's PRV-row reasons, from this binary's own table
+	// Scope is the PRV-row key whose reviewed scope made the row not applicable (SCR-2): the run's provider, or the
+	// provider a run exec report declares. DeclaredProvider is set only in that second case (PRV-17): the operator's
+	// word, never verified.
+	Scope            string         `json:"scope,omitempty"`
+	DeclaredProvider string         `json:"declared_provider,omitempty"`
+	NotProven        string         `json:"not_proven,omitempty"`
+	Found            []string       `json:"found,omitempty"`
+	Unknown          []string       `json:"unknown,omitempty"`
+	Unproven         []string       `json:"unproven,omitempty"`
+	Coverage         *CheckCoverage `json:"coverage,omitempty"`
 }
 
 // Card is the headline: Score green rows of Of, the categories that apply (SCR-2). An invalid run has no score.
@@ -108,14 +113,16 @@ type Card struct {
 // Score is SCR-2. A row is green only when one of its checks was tested, none is unknown, and none has a finding
 // above Info. Only the results named below count as clean: anything else, or a check the grade lists as unknown, is
 // "couldn't prove". Its reason is built from the fixed labels above, never from a string the box returned. A row is
-// not applicable only when the host skipped every one of its checks for the provider's terms, as its manifest records
-// and as this binary's own policy for the run's provider derives: a report's word alone never shrinks the score.
+// not applicable only when the host skipped every one of its checks under a PRV row's reviewed scope, as its manifest
+// records and as this binary's own policy for the run's provider derives: a report's word alone never shrinks the
+// score. On run exec that provider may be one the operator declared (PRV-17), which the row and the line say.
 func Score(d Doc) Card {
 	c := Card{Valid: d.Grade.Valid, Of: len(Categories)}
 	if !d.Grade.Valid {
 		return c
 	}
-	policy := PolicyKinds(d.Run.Provider)
+	policy := PolicyFor(d.Run.Provider, d.Manifest.DeclaredProvider)
+	scope, declared := scopeOf(d.Run.Provider, d.Manifest.DeclaredProvider)
 	got, unknown := map[string]Check{}, map[string]bool{}
 	for _, ck := range d.Checks {
 		got[ck.ID] = ck
@@ -168,7 +175,11 @@ func Score(d Doc) Card {
 		case len(r.Unknown) > 0:
 			r.Why = "Couldn't prove: " + labels(cat, r.Unknown)
 		case tested == 0 && len(terms) == len(cat.Checks): // SCR-2: the provider's own endpoints, out of the score
-			r.NotApplicable, r.Why, r.Terms = true, NotApplicable, termsReasons(d.Run.Provider, terms)
+			r.NotApplicable, r.Why, r.Terms = true, NotApplicableWhy(scope, declared), termsReasons(scope, terms)
+			r.Scope = scope
+			if declared {
+				r.DeclaredProvider = scope
+			}
 			c.Of--
 		case tested == 0 && len(optIn) > 0: // SCR-2: PRV-15's or RCP-4's default, which the person may lift
 			r.Why = "Not tested: opt in with -provider-endpoints " + strings.Join(optIn, ",") + " if your provider's terms allow"
@@ -195,12 +206,56 @@ func skipKind(m obs.Manifest, id string) string {
 	return m.SkipKinds[id]
 }
 
-// NotApplicable is SCR-2's fixed reason for a not-applicable row, under SCR-1's narrowed Cloud access contract.
-const NotApplicable = "Not applicable: this box holds no cloud identity of yours that Sandprobe checks here; the provider's own endpoints weren't tested (their terms)"
+// NotApplicableWhy is SCR-2's fixed reason for a not-applicable row, under SCR-1's narrowed Cloud access contract.
+// name is a key of this binary's PRV-row table, never a box string; a declared one (PRV-17) is said to be the
+// operator's word.
+func NotApplicableWhy(name string, declared bool) string {
+	why := "Not applicable: this box holds no cloud identity of yours that Sandprobe checks here; " + ReviewedScope(name)
+	if declared {
+		why += ". " + DeclaredUnverified(name)
+	}
+	return why
+}
+
+// ReviewedScope is what a provider_terms skip means (SCR-2, PRV-5): Sandprobe's own reviewed scope for that provider,
+// never a claim about the provider's published terms. An empty name is a saved card from before the row named it.
+func ReviewedScope(name string) string {
+	if name == "" {
+		return "Sandprobe's reviewed scope for the provider excludes these provider-owned endpoints"
+	}
+	return "Sandprobe's reviewed scope for " + name + " excludes these provider-owned endpoints"
+}
+
+// DeclaredUnverified is PRV-17's statement on every human-readable plan and result that uses a declared provider.
+func DeclaredUnverified(name string) string {
+	return "The operator declared the provider as " + name + "; Sandprobe did not verify it"
+}
+
+// PolicyFor is SCR-2's skip kinds for a report: on a run exec report that declares a provider this binary's table has
+// (PRV-17), that entry's checks are provider_terms and the rest of PRV-15's defaults opt_in; on any other report,
+// PolicyKinds for its provider. A declared name the table lacks, or one beside another provider, derives nothing new.
+func PolicyFor(provider, declared string) map[string]string {
+	kinds := PolicyKinds(provider)
+	if provider != "exec" {
+		return kinds
+	}
+	for id := range host.DeclaredExclusions(declared) {
+		kinds[id] = obs.SkipProviderTerms
+	}
+	return kinds
+}
+
+// scopeOf is the PRV-row key whose reviewed scope a not-applicable row rests on, and whether the operator declared it.
+func scopeOf(provider, declared string) (string, bool) {
+	if provider == "exec" && host.DeclaredExclusions(declared) != nil {
+		return declared, true
+	}
+	return provider, false
+}
 
 // PolicyKinds is SCR-2's skip kinds as this binary's own policy derives them for the provider a run names, never as a
 // report states them: a native adapter's PRV-row exclusions are provider_terms (PRV-5); run exec's (PRV-15) and a
-// shipped recipe's (RCP-4) default exclusions are opt_in; any other provider has none.
+// shipped recipe's (RCP-4) default exclusions are opt_in; any other provider has none. PolicyFor adds PRV-17.
 func PolicyKinds(provider string) map[string]string {
 	kinds := map[string]string{}
 	if excluded, ok := host.TermsExclusions[provider]; ok {
@@ -235,12 +290,22 @@ func termsReasons(provider string, ids []string) string {
 	return strings.Join(out, "; ")
 }
 
-// NotCounted is SCR-2's line beside the score for each category it leaves out, and why.
+// NotCounted is SCR-2's line beside the score for each category it leaves out, and why; for a declared provider it
+// also says the operator declared it and Sandprobe did not verify it (PRV-17). A name is shown only when it is a key of
+// this binary's own PRV-row table, so a card's word never becomes "Sandprobe's reviewed scope".
 func (c Card) NotCounted() []string {
 	var out []string
 	for _, r := range c.Rows {
 		if r.NotApplicable {
-			out = append(out, r.Name+" isn't counted: the provider's terms exclude its own endpoints ("+r.Terms+")")
+			scope := r.Scope
+			if host.DeclaredExclusions(scope) == nil {
+				scope = ""
+			}
+			line := r.Name + " isn't counted: " + ReviewedScope(scope) + " (" + r.Terms + ")"
+			if scope != "" && r.DeclaredProvider == scope {
+				line += ". " + DeclaredUnverified(scope) + "."
+			}
+			out = append(out, line)
 		}
 	}
 	return out

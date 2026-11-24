@@ -9,9 +9,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -372,13 +374,47 @@ func ExecExclusions() map[string]string {
 	return map[string]string{"SEC-4": why, "EGR-3": why, "AMP-6": why, "AMP-7": why}
 }
 
-// TermsExclusions is each native adapter's PRV-row exclusions by the provider name its reports record (PRV-5): the
-// provider's terms exclude its own endpoints, so a report naming that provider may mark them provider_terms (SCR-2).
-// It is the binary's own policy, so a scorecard never takes a saved report's word for a kind.
+// TermsExclusions is each native adapter's PRV-row exclusions by the provider name its reports record (PRV-5):
+// Sandprobe's reviewed scope for that provider excludes its own endpoints, so a report naming that provider, or a run
+// exec report declaring it (PRV-17), may mark them provider_terms (SCR-2). It is the binary's own policy, so a
+// scorecard never takes a saved report's word for a kind.
 var TermsExclusions = map[string]func() map[string]string{
 	"sprites": SpritesExclusions, "e2b": E2BExclusions, "daytona": DaytonaExclusions, "vercel": VercelExclusions,
 	"cloudflare": CloudflareExclusions, "boat": BoatExclusions, "baseten": BasetenExclusions, "exe.dev": ExedevExclusions,
 	"modal": func() map[string]string { return ModalExcluded },
+}
+
+// DeclarableProviders are the names run exec's -provider takes (PRV-17): exactly the keys of TermsExclusions, sorted.
+func DeclarableProviders() []string {
+	return slices.Sorted(maps.Keys(TermsExclusions))
+}
+
+// DeclaredExclusions is the PRV-row entry for a provider run exec declares (PRV-17), or nil for "" or a name this
+// binary's table lacks.
+func DeclaredExclusions(name string) map[string]string {
+	if f, ok := TermsExclusions[name]; ok && name != "" {
+		return f()
+	}
+	return nil
+}
+
+// checkDeclared is PRV-17 before anything runs: a declared provider is a key of this binary's table, only on run
+// exec (opt_in defaults, no workload contract or TCP/80 protocol, so the report needs exactly sandprobe/5), and each
+// check its entry excludes is excluded with the entry's own reason and never attested.
+func checkDeclared(o Options) error {
+	if o.DeclaredProvider == "" {
+		return nil
+	}
+	entry := DeclaredExclusions(o.DeclaredProvider)
+	if entry == nil || o.ExcludedKind != obs.SkipOptIn || o.WorkloadContract != nil || o.CanaryTCP80Protocol != "" {
+		return errors.New("a declared provider is only a key of this binary's PRV-row table, on run exec (PRV-17)")
+	}
+	for id, why := range entry {
+		if o.Excluded[id] != why || slices.Contains(o.Attested, id) {
+			return fmt.Errorf("%s must stay excluded with the declared provider's own reason (PRV-17)", id)
+		}
+	}
+	return nil
 }
 
 // ExecResidual is what a run exec report says it can't vouch for (PRV-1, PRV-2).

@@ -69,6 +69,6 @@ side, the run stops and exits 8, and keeps only a private note (POC-5).
 
 The proof of concept doesn't use the hosted canary. It needs `-canary <state file>`, naming a canary you deployed with
 `deploy/canary.sh`, which it reaches over AWS SSM. Cloud access is not applicable here: PRV-5 excludes Modal's own
-metadata and Kubernetes endpoints, so the box holds no cloud identity of yours to check. Cloud access is never green,
-the score is out of five, and a line under the score says why. A credential of yours put into the box is still caught
-under Secrets.
+metadata and Kubernetes endpoints under Sandprobe's own rules of engagement, not Modal's terms, so the box holds no
+cloud identity of yours to check. Cloud access is never green, the score is out of five, and a line under the score
+says why. A credential of yours put into the box is still caught under Secrets.

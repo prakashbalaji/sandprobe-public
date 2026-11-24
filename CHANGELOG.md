@@ -24,6 +24,15 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   ancestors such as ssh's session process included. `run kubernetes` and recipes get the same fix; `run docker` never
   had the shell (LNC-1 to LNC-5).
 
+- `run exec` and `plan exec` take `-provider <name>` when you know which provider your box runs on: one of baseten,
+  boat, cloudflare, daytona, e2b, exe.dev, modal, sprites or vercel. Sandprobe's reviewed scope for that provider
+  then keeps SEC-4, EGR-3, AMP-6 and AMP-7 off with its own reasons, and Cloud access reads not applicable, out of
+  five, as on that provider's own adapter. It's your word: the plan, the run's summary, the scorecard and both pages
+  say Sandprobe didn't verify it, and an agent never infers, adds or changes it to clear a red. The report keeps
+  `exec` as its provider, records the name as `declared_provider` and declares `sandprobe/5`. `compare` treats any
+  change to it as a changed setup (PRV-17). A not-applicable Cloud access now says it rests on Sandprobe's reviewed
+  scope for the provider, never on the provider's own terms; Modal's is Sandprobe's own rules of engagement (SCR-2).
+
 ## 0.3.0 (2026-11-24)
 
 - `run docker` starts the container with Sandprobe's own idle process as its entrypoint and the image's health check

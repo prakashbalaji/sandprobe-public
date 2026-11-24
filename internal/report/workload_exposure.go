@@ -38,6 +38,12 @@ func WorkloadExposureHTML(r grade.WorkloadReport, coverage grade.EvidenceCoverag
 	for i := range exposure.Rows {
 		row := &exposure.Rows[i]
 		row.GreenNotProven = row.Green && row.Coverage != nil && row.Coverage.Conclusive == 0
+		// PRV-17: a card is unauthenticated, so the page never names a provider on its stored word: a not-applicable
+		// row reads fixed text, never its stored reason or scope.
+		row.Scope = ""
+		if row.NotApplicable {
+			row.Why = NotApplicableWhy("", false)
+		}
 	}
 	return workloadHTML(r, &coverage, &exposure)
 }
@@ -57,7 +63,7 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 		if row.Name != Categories[i].Name {
 			return false
 		}
-		if !row.NotApplicable && row.Terms != "" {
+		if !row.NotApplicable && (row.Terms != "" || row.Scope != "") || row.DeclaredProvider != "" { // PRV-17: run exec only
 			return false
 		}
 		if row.NotApplicable { // SCR-2: never green, never found or unknown, and out of the score
