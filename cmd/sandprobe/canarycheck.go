@@ -55,10 +55,19 @@ func canaryCheck(o opts, r runFlags, args []string, insecure bool) (int, error) 
 		return exitLogin, fail("needs_login", who+": its second signed status didn't match its first", "try again", exitLogin)
 	}
 	out := map[string]string{"control": c.URL, "address": st.Addr, "domain": st.Domain, "receipt_pin": st.Pin}
+	if r.requireHTTPMarker {
+		if err := host.RequireHTTPMarkerV1(ctx, c); err != nil {
+			return exitLogin, fail("needs_login", "the canary's HTTP marker capability is not verified", "deploy a canary version supporting EVD-10, then try again", exitLogin)
+		}
+		out["tcp80_protocol"] = canary.HTTPMarkerV1
+	}
 	if o.json() {
 		o.emit(out)
 	} else {
 		fmt.Fprintf(o.stdout, "%s, signed by the pinned control key\n  receipt address %s\n  domain %s\n  receipt pin %s\n", who, st.Addr, st.Domain, st.Pin)
+		if r.requireHTTPMarker {
+			fmt.Fprintln(o.stdout, "  TCP/80 HTTP marker capability verified; guest delivery remains untested")
+		}
 	}
 	return 0, nil
 }

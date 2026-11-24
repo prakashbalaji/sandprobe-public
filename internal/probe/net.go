@@ -276,6 +276,17 @@ func egrDirect(e *env, ck *catalog.Check) obs.Observation {
 		}
 		return exchangeAt("read_reply", canary.ReadMarkerAck(c, nonce))
 	}
+	if ck.Canary.Port == 80 && e.in.CanaryTCP80Protocol != "" {
+		if e.in.CanaryTCP80Protocol != canary.HTTPMarkerV1 {
+			return unknownObs("unsupported canary TCP/80 protocol")
+		}
+		use = func(c net.Conn) error {
+			if err := canary.WriteHTTPMarkerV1(c, e.in.CanaryDomain, nonce); err != nil {
+				return exchangeAt("send_marker", err)
+			}
+			return exchangeAt("read_reply", canary.ReadHTTPMarkerAckV1(c, nonce))
+		}
+	}
 	if ck.Canary.Port == 443 {
 		use = e.tlsUse(nonce)
 	}

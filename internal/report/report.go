@@ -27,12 +27,18 @@ const SchemaSkipKinds = "sandprobe/2"
 // SchemaHostController adds RUN-17's Nitro host-controller contract semantics.
 const SchemaHostController = "sandprobe/3"
 
+// SchemaCanaryHTTP adds EVD-10 explicit TCP/80 protocol selection.
+const SchemaCanaryHTTP = "sandprobe/4"
+
 // Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController}
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP}
 
 // SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
 // reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
 func SchemaFor(m obs.Manifest) string {
+	if m.CanaryTCP80Protocol != "" {
+		return SchemaCanaryHTTP
+	}
 	if m.WorkloadContract != nil && m.WorkloadContract.Schema == "sandprobe.workload-contract/3" {
 		return SchemaHostController
 	}
@@ -233,6 +239,9 @@ func Build(r *host.Run, m Meta) Doc {
 		Toolchain: []any{}, Overrides: []string{}, Contacted: []Contact{}, Receipts: r.Evidence.Receipts, Markers: []Marker{},
 		ProviderCalls: m.Calls, Cleanup: Cleanup{Outcome: m.Cleanup, Residual: m.Residual},
 		Limits: Limits{NotTested: NotTested, NotProven: rep.NotProven, ScopedOut: rep.ScopedOut, Skipped: rep.Skipped}}
+	if man.CanaryTCP80Protocol != "" && obs.ValidCanaryTCP80Protocol(man.CanaryTCP80Protocol) {
+		d.Toolchain = append(d.Toolchain, map[string]string{"canary_tcp80_protocol": man.CanaryTCP80Protocol})
+	}
 	if d.Receipts == nil {
 		d.Receipts = []obs.Receipt{}
 	}

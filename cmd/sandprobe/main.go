@@ -124,6 +124,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if r.tlsInsecure && cmd != "canary" {
 		return reportErr(o, stderr, fail("usage", "-tls-insecure applies only to canary check", "sandprobe canary check -tls-insecure -canary-url <url> -canary-pin <pin>", exitUsage))
 	}
+	if r.requireHTTPMarker && cmd != "canary" {
+		return reportErr(o, stderr, fail("usage", "-require-http-marker-v1 applies only to canary check", "sandprobe canary check -require-http-marker-v1", exitUsage))
+	}
 	if r.setup != "" && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "sprites") {
 		return reportErr(o, stderr, fail("usage", "-setup applies only to a Sprites plan or run", "sandprobe run sprites -setup <file> -y", exitUsage))
 	}

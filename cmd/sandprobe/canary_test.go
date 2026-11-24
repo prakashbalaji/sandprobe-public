@@ -540,3 +540,49 @@ func TestPublicCanaryPlansDiscloseRetention(t *testing.T) {
 		t.Errorf("the docker plan changed: %+v", d)
 	}
 }
+
+// EVD-10: capability preflight reserves nothing and fails before any guest exists.
+func TestCanaryHTTPMarkerPreflight(t *testing.T) {
+	isolateCanary(t)
+	pub := standInHosted(t)
+	var out, errs bytes.Buffer
+	if code := run([]string{"canary", "check", "-require-http-marker-v1", "-o", "json"}, &out, &errs); code != 0 || !strings.Contains(out.String(), canary.HTTPMarkerV1) {
+		t.Fatalf("capability: exit %d, %s%s", code, out.String(), errs.String())
+	}
+	// An older server can still serve status but has no protocols operation.
+	open := newPublicCanary
+	newPublicCanary = func(ctx context.Context, control string, pins []string) (*host.HTTPSCanary, error) {
+		c, err := open(ctx, control, pins)
+		if err == nil {
+			client := *c.Client
+			base := client.Transport
+			if base == nil {
+				base = http.DefaultTransport
+			}
+			client.Transport = missingHTTPMarkerTransport{base}
+			c.Client = &client
+		}
+		return c, err
+	}
+	t.Cleanup(func() { newPublicCanary = open })
+	out.Reset()
+	errs.Reset()
+	if code := run([]string{"canary", "check", "-require-http-marker-v1"}, &out, &errs); code == 0 || out.Len() != 0 || !strings.Contains(errs.String(), "capability is not verified") {
+		t.Fatalf("unverified capability: exit %d, %s%s", code, out.String(), errs.String())
+	}
+	slotsFree(t, pub)
+	out.Reset()
+	errs.Reset()
+	if code := run([]string{"version", "-require-http-marker-v1"}, &out, &errs); code == 0 {
+		t.Fatal("check-only option accepted by another command")
+	}
+}
+
+type missingHTTPMarkerTransport struct{ base http.RoundTripper }
+
+func (t missingHTTPMarkerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/protocols") {
+		return nil, errors.New("synthetic capability unavailable")
+	}
+	return t.base.RoundTrip(r)
+}

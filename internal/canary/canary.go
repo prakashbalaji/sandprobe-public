@@ -61,16 +61,17 @@ type Request struct {
 // Answer is the canary's reply, always with its pin. A query's answer is complete only when OK, under the run's pin,
 // for the run asked about; Overloaded means no network negative may rest on it.
 type Answer struct {
-	Pin        string  `json:"pin"`
-	OK         bool    `json:"ok"`
-	Error      string  `json:"error,omitempty"`
-	Run        string  `json:"run,omitempty"`
-	Overloaded bool    `json:"overloaded,omitempty"`
-	Counts     []Count `json:"counts,omitempty"`
-	Key        string  `json:"key"`                  // the canary's public key (base64 DER SubjectPublicKeyInfo), whose SHA-256 is the pin
-	Generation string  `json:"generation,omitempty"` // public arm and query: the run's random generation (HCN-2)
-	Addr       string  `json:"addr,omitempty"`       // public: the receipt address boxes must reach, signed (HCN-1)
-	Domain     string  `json:"domain,omitempty"`     // public: the canary's domain, signed (HCN-1)
+	Protocols  []string `json:"protocols,omitempty"` // EVD-10: only protocols responses; legacy answer bytes stay unchanged.
+	Pin        string   `json:"pin"`
+	OK         bool     `json:"ok"`
+	Error      string   `json:"error,omitempty"`
+	Run        string   `json:"run,omitempty"`
+	Overloaded bool     `json:"overloaded,omitempty"`
+	Counts     []Count  `json:"counts,omitempty"`
+	Key        string   `json:"key"`                  // the canary's public key (base64 DER SubjectPublicKeyInfo), whose SHA-256 is the pin
+	Generation string   `json:"generation,omitempty"` // public arm and query: the run's random generation (HCN-2)
+	Addr       string   `json:"addr,omitempty"`       // public: the receipt address boxes must reach, signed (HCN-1)
+	Domain     string   `json:"domain,omitempty"`     // public: the canary's domain, signed (HCN-1)
 }
 
 // Key is the canary's public key, as an answer over the control channel gave it, checked against the answer's pin.
@@ -285,6 +286,8 @@ func (c *Canary) Handle(q Request) Answer {
 	c.purge()
 	a := Answer{Pin: c.Pin, Run: q.Run, Key: c.key()}
 	switch q.Op {
+	case "protocols":
+		a.OK, a.Protocols = true, []string{HTTPMarkerV1}
 	case "status":
 		a.OK = true
 	case "arm":
@@ -349,6 +352,8 @@ func (c *Canary) HandlePublic(q Request, src string) Answer {
 		return a
 	}
 	switch q.Op {
+	case "protocols":
+		a.OK, a.Protocols = true, []string{HTTPMarkerV1}
 	case "status":
 		a.OK = true
 	case "reserve":

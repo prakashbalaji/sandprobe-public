@@ -150,8 +150,8 @@ func (c *HTTPSCanary) Reserve(ctx context.Context, n int) error {
 // run's secret; a query whose generation isn't the one the arm answered with is an error, never a clean zero.
 func (c *HTTPSCanary) Ask(ctx context.Context, q canary.Request) (canary.Answer, error) {
 	switch q.Op {
-	case "status":
-		return c.call(ctx, "status", canary.Request{})
+	case "status", "protocols":
+		return c.call(ctx, q.Op, canary.Request{})
 	case "arm":
 		c.mu.Lock()
 		if len(c.pending) == 0 {

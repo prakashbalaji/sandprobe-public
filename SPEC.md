@@ -1005,6 +1005,17 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   independent receipt is still required for delivery; no receipt or HTTP error proves no denial. This first
   stage changes no probe requests, default canary selection, grading, plan or evidence schema. Explicit client
   selection/capability and calibration must be reviewed before the new exchange is used for assessment.
+- **EVD-10 Explicit HTTP marker selection.** TCP/80 may use `tcp80-http-marker-v1` only when explicitly
+  selected and the existing trusted canary control verifies that capability for the same boot pin. A separate
+  `protocols` control operation advertises it; legacy status/arm/query answers omit the new field. Default
+  requests remain legacy, and unsupported/unverified capability stops the assessment before check traffic.
+  The declared protocol is copied from host options to the manifest and probe input; unknown protocols and
+  no-canary combinations are rejected. Only EGR-5.80 changes payload: no new destination, port, proxy, retry,
+  TLS setting or provider-endpoint permission. Kernel refusal and independent host receipt rules stay unchanged.
+  Reports carrying the field declare `sandprobe/4`; old reports keep their minimum schema, and comparisons
+  report a changed measurement configuration. Both managed bridges can declare the generic protocol; no
+  successful exchange or HTTP error independently becomes a pass or finding.
+  `canary check -require-http-marker-v1` verifies capability without reserving slots or testing guest delivery.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -1908,7 +1919,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 ### OUT: what it writes
 
 - **OUT-1 JSON.** `schema`, the lowest version whose fields the report needs (AGT-6): `sandprobe/1`; `sandprobe/2`
-  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `sandprobe/3` for RUN-17's Nitro host-controller contract; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
+  when the manifest carries SCR-2's `SkipKinds` or PRV-15's `Attested`; `sandprobe/3` for RUN-17's Nitro host-controller contract; `sandprobe/4` for EVD-10's explicit HTTP marker protocol; `probe {version, sha256, host_shipped}`; `run {id, nonce, started_at` (RFC 3339,
   UTC)`, duration_ms, mode, provider, box {provider_id, name, created_by_sandprobe}}`; `manifest`; `identity` (SBX-4);
   `toolchain [{name, path, owner, mode, link_target}]` (lstat metadata of box tools, never a hash: only `probe.sha256` is a digest); `overrides []`; `checks [{id, category, kind, result, evidence_class,
   severity, scope {destination, port, route}, evidence, proof {mechanism, result}, clients, fix, duration_ms,
@@ -2032,7 +2043,9 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   a `sandprobe/1` report carries none of them in any form (JON-1). A reader older than a report refuses
   it as unsupported input; its fix names the versions it reads, and the report's own `schema` says which it is. Versions:
   `sandprobe/1`; `sandprobe/2` adds the manifest's `SkipKinds` (SCR-2), and its `Attested` with a check's
-  `attestation` (PRV-15), both new in one release; `sandprobe/3` adds RUN-17's Nitro host-controller contract semantics. A schema3 contract requires that report version, with or without schema2 fields.
+  `attestation` (PRV-15), both new in one release; `sandprobe/3` adds RUN-17's Nitro host-controller contract semantics. A schema3 contract requires at least that report version, with or without schema2 fields.
+  `sandprobe/4` adds EVD-10's manifest `canary_tcp80_protocol`: present empty/null declarations are refused;
+  legacy reports omit it. A nonempty declaration requires exactly version4.
 
 ### PRV: providers
 
@@ -2706,6 +2719,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
+| EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance |
 | EVD-9 | `internal/canary/http_marker_test.go`: canonical HTTP/80 + independently collected receipts, unarmed completion without proof, legacy compatibility, malformed/oversized/body/host/port rejection, bounded acknowledgement parsing and no raw response leakage |
 | EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
 | EVD-7 | `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable` (missing/non-executable interpreter, fixed private-safe error), `TestDaytonaCommandRecordsOneCall` (one event, success/local/provider failure classification) |

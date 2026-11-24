@@ -41,6 +41,7 @@ type runFlags struct {
 	dockerOpts                                 []string // docker: run options after "--" (PRV-14); exec: the person's command (PRV-15)
 	scratch, canaryURL, canaryPin              string   // exec: the scratch directory (PRV-15); a public canary and its pin (HCN-5)
 	tlsInsecure                                bool     // canary check: accept a staging certificate; trust rests on the pin
+	requireHTTPMarker                          bool     // EVD-10: canary check only, signed capability preflight
 	noCanary                                   bool     // exec: run without a canary (HCN-5); Exfiltration isn't tested
 	providerEndpoints                          string   // exec and recipes: the checks the person attests (PRV-15)
 	providerEndpointsSet                       bool     // -provider-endpoints was given, even empty
@@ -79,6 +80,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&r.noCanary, "no-canary", false, "exec: run without a canary; the exfiltration checks aren't tested, so the run can't grade above C (HCN-5)")
 	fs.StringVar(&r.providerEndpoints, "provider-endpoints", "", "exec and recipes: turn on named checks that contact your provider's own endpoints (SEC-4, EGR-3, AMP-6, AMP-7), attesting your provider's terms allow each on your own account (PRV-15)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
+	fs.BoolVar(&r.requireHTTPMarker, "require-http-marker-v1", false, "canary check only: require signed TCP/80 HTTP marker capability")
 	fs.StringVar(&r.canaryPin, "canary-pin", os.Getenv("SANDPROBE_CANARY_PIN"), "that canary's control-key pin, or two comma-separated during a rotation (HCN-1)")
 	fs.StringVar(&r.variant, "variant", "isolated", "aws-nitro: isolated, network-isolated, reference-open or reference-network-isolated")
 }

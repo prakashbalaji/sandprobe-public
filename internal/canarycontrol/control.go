@@ -35,7 +35,7 @@ import (
 // MaxBody is the most a control request may carry (HCN-1).
 const MaxBody = 16 << 10
 
-var ops = map[string]bool{"status": true, "reserve": true, "arm": true, "query": true, "disarm": true}
+var ops = map[string]bool{"protocols": true, "status": true, "reserve": true, "arm": true, "query": true, "disarm": true}
 
 // The headers that carry an answer's proof (HCN-1).
 const (

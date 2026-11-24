@@ -1,6 +1,6 @@
 // sandprobe-canary runs the canary (SBX-11): TLS echo on 443, plain TCP on 22, 80 and 8080, and DNS on UDP 53. It
 // counts only the nonces the host armed, and answers the host on a unix socket only the host reaches (docker exec
-// into the fixture canary, or SSM on the live one): sandprobe-canary -ctl status|arm|query|disarm. The box's network
+// into the fixture canary, or SSM on the live one): sandprobe-canary -ctl status|protocols|arm|query|disarm. The box's network
 // never sees that socket. With -public-control it also serves HCN-1's public path on 443, by SNI, every answer signed
 // by the control key in -control-key (make one with -make-control-key).
 package main
@@ -28,7 +28,7 @@ import (
 func main() {
 	domain := flag.String("domain", "sandprobe.test", "the canary's domain")
 	control := flag.String("control", "/run/sandprobe-canary.sock", "the control socket")
-	op := flag.String("ctl", "", "ask the running canary: status, arm, query or disarm; print its answer as JSON and exit")
+	op := flag.String("ctl", "", "ask the running canary: status, protocols, arm, query or disarm; print its answer as JSON and exit")
 	run := flag.String("run", "", "the run to arm, query or disarm")
 	ttl := flag.Int("ttl", 0, "arm: the run's lifetime in seconds")
 	wants := flag.String("wants", "", "arm: the run's nonces, as nonce/proto/port,...")
