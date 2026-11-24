@@ -30,12 +30,18 @@ const SchemaHostController = "sandprobe/3"
 // SchemaCanaryHTTP adds EVD-10 explicit TCP/80 protocol selection.
 const SchemaCanaryHTTP = "sandprobe/4"
 
+// SchemaDeclaredProvider adds PRV-17's manifest declared_provider, which only run exec writes.
+const SchemaDeclaredProvider = "sandprobe/5"
+
 // Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP}
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider}
 
 // SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
 // reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
 func SchemaFor(m obs.Manifest) string {
+	if m.DeclaredProvider != "" {
+		return SchemaDeclaredProvider
+	}
 	if m.CanaryTCP80Protocol != "" {
 		return SchemaCanaryHTTP
 	}

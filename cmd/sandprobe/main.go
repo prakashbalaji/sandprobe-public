@@ -110,6 +110,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	r.outSet = given["out"]
 	r.settleCanary(given) // HCN-5: a canary flag beats every SANDPROBE_CANARY* value
 	r.providerEndpointsSet = given["provider-endpoints"]
+	r.providerSet = given["provider"]
 	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
 	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
 	if given["block-device-path"] && !execRun {
@@ -127,6 +128,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if r.providerEndpointsSet && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
 		return reportErr(o, stderr, fail("usage", "-provider-endpoints applies only to run exec, a recipe such as run kubernetes, and their plans: run docker already runs these checks, and a provider's own PRV row decides them (PRV-15)", "sandprobe run exec -provider-endpoints SEC-4,AMP-7 -y -- <command>", exitUsage))
+	}
+	if r.providerSet && !execRun { // PRV-17: a native adapter is its own provider; a recipe keeps RCP-4's exclusions
+		return reportErr(o, stderr, fail("usage", "-provider applies only to run exec and plan exec (PRV-17)", "leave -provider out: a native adapter is its own provider, and a recipe or saved report takes none", exitUsage))
 	}
 	if r.tlsInsecure && cmd != "canary" {
 		return reportErr(o, stderr, fail("usage", "-tls-insecure applies only to canary check", "sandprobe canary check -tls-insecure -canary-url <url> -canary-pin <pin>", exitUsage))
@@ -260,6 +264,11 @@ run exec also takes repeatable -block-device-path <absolute path> for an existin
 AMP-8.blk checks its type and read permission through metadata, never device I/O.
 run exec and recipes keep SEC-4, EGR-3, AMP-6 and AMP-7 off, since they contact your provider's own endpoints;
 -provider-endpoints <IDs> turns named ones on, each one you attest your provider's terms allow on your account (PRV-15).
+run exec also takes -provider <name>, the provider the operator says the box runs on: one of baseten, boat,
+cloudflare, daytona, e2b, exe.dev, modal, sprites or vercel. Sandprobe's reviewed scope for that provider then keeps
+its provider-owned endpoints off, and Cloud access isn't counted (PRV-17). It is the operator's word, never verified.
+The name comes only from your person: an agent never infers it from the command, a hostname, the environment or a
+report, and never adds or changes it to turn a red category into not applicable.
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....

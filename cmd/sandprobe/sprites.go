@@ -46,6 +46,8 @@ type runFlags struct {
 	noCanary                                   bool     // exec: run without a canary (HCN-5); Exfiltration isn't tested
 	providerEndpoints                          string   // exec and recipes: the checks the person attests (PRV-15)
 	providerEndpointsSet                       bool     // -provider-endpoints was given, even empty
+	provider                                   string   // run exec: the provider the operator declares (PRV-17)
+	providerSet                                bool     // -provider was given, even empty
 	canaryFlags                                bool     // -canary, -canary-url or -canary-pin given as a flag (HCN-5)
 	keepSandbox                                bool
 	basetenState                               string
@@ -83,6 +85,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.scratch, "scratch", "", "exec: an absolute directory in the box for the probe's scratch (default /tmp)")
 	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "a public canary you run, https://control.<domain>, instead of the hosted one (HCN-5)")
 	fs.BoolVar(&r.noCanary, "no-canary", false, "exec and recipes: run without a canary; Exfiltration isn't tested, so the run stays incomplete (HCN-5)")
+	fs.StringVar(&r.provider, "provider", "", "run exec only: the provider the operator says the box runs on, one Sandprobe has a reviewed scope for (PRV-17); the operator's word, never verified, and never inferred, added or changed by an agent")
 	fs.StringVar(&r.providerEndpoints, "provider-endpoints", "", "exec and recipes: turn on named checks that contact your provider's own endpoints (SEC-4, EGR-3, AMP-6, AMP-7), attesting your provider's terms allow each on your own account (PRV-15)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
 	fs.BoolVar(&r.requireHTTPMarker, "require-http-marker-v1", false, "canary check only: require signed TCP/80 HTTP marker capability")
@@ -339,15 +342,18 @@ type planDoc struct {
 	Probe         string   `json:"probe"`
 	Markers       string   `json:"markers"`
 	Attested      []string `json:"attested,omitempty"` // PRV-15: each check the person attests, before approval (AGT-3)
-	Contacts      []string `json:"contacts"`
-	BoxNamed      []string `json:"box_named_destinations"`
-	OpensReadOnly []string `json:"opens_read_only"`
-	Runs          []string `json:"runs"`
-	Reset         string   `json:"reset"`
-	Deletes       string   `json:"deletes"`
-	LocalProxy    string   `json:"local_proxy"`
-	Time          string   `json:"time"`
-	Residual      string   `json:"residual"`
+	// DeclaredProvider is PRV-17's -provider, with Declared its plan lines: the operator's word, never verified.
+	DeclaredProvider string   `json:"declared_provider,omitempty"`
+	Declared         []string `json:"declared,omitempty"`
+	Contacts         []string `json:"contacts"`
+	BoxNamed         []string `json:"box_named_destinations"`
+	OpensReadOnly    []string `json:"opens_read_only"`
+	Runs             []string `json:"runs"`
+	Reset            string   `json:"reset"`
+	Deletes          string   `json:"deletes"`
+	LocalProxy       string   `json:"local_proxy"`
+	Time             string   `json:"time"`
+	Residual         string   `json:"residual"`
 }
 
 // readSetup reads SPR-1's setup script before any plan is shown. It opens without blocking (so a pipe put at the path
@@ -425,6 +431,9 @@ func printPlan(w io.Writer, p planDoc) {
 	line("Marks", p.Markers)
 	if len(p.Attested) > 0 {
 		line("Turns on, on your attestation (-provider-endpoints, PRV-15)", p.Attested...)
+	}
+	if p.DeclaredProvider != "" {
+		line("Provider, as the operator declared it (-provider, PRV-17)", p.Declared...)
 	}
 	line("Contacts", p.Contacts...)
 	line("Contacts only what the box names", p.BoxNamed...)
@@ -510,8 +519,16 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 		return 0, fail("usage", "-min takes a score from 0 to 6, or full", "-min 6 or -min full", exitUsage)
 	}
 	if !fullMin && wantMin == 6 && len(args) > 0 {
-		if pol := report.PolicyKinds(args[0]); pol["SEC-4"] == obs.SkipProviderTerms && pol["AMP-7"] == obs.SkipProviderTerms {
-			return 0, fail("usage", "-min 6 can never pass on "+args[0]+": Cloud access is not applicable under the provider's terms, so the score is out of 5", "use -min full (every applicable category green) or -min 5", exitUsage)
+		name, declared := args[0], ""
+		if args[0] == "exec" && host.DeclaredExclusions(r.provider) != nil { // PRV-17: the operator's declared provider
+			name, declared = r.provider, r.provider
+		}
+		if pol := report.PolicyFor(args[0], declared); pol["SEC-4"] == obs.SkipProviderTerms && pol["AMP-7"] == obs.SkipProviderTerms {
+			msg := "-min 6 can never pass on " + args[0] + ": Cloud access is not applicable, since " + report.ReviewedScope(name) + ", so the score is out of 5"
+			if declared != "" {
+				msg += ". " + report.DeclaredUnverified(declared)
+			}
+			return 0, fail("usage", msg, "use -min full (every applicable category green) or -min 5", exitUsage)
 		}
 	}
 	if len(args) == 1 && args[0] == "exec" {

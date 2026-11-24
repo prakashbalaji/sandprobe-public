@@ -62,7 +62,7 @@ clearance for this bounded run, never represented as provider-written permission
 Test traffic goes to the hosted canary at `control.pub.probe.ac0.dev` by default. It keeps the box's public address,
 with the run's nonces, for the run's lifetime (at most 30 minutes), and your machine's public address in a rate
 counter for at most an hour, both in memory only. To use a canary you run, name it with
-`-canary-url <url> -canary-pin <pin>`, or with `-canary <state file>` for one from `deploy/canary.sh`. Cloud access
-is not applicable here: PRV-13 excludes exe.dev's own metadata and Kubernetes endpoints because of its terms, so the
-box holds no cloud identity of yours to check. Cloud access is never green, the score is out of five, and a line under
-the score says why. A credential of yours put into the box is still caught under Secrets.
+`-canary-url <url> -canary-pin <pin>`, or with `-canary <state file>` for one from `deploy/canary.sh`. Cloud access is
+not applicable here: PRV-13 excludes exe.dev's own metadata and Kubernetes endpoints under Sandprobe's reviewed scope
+for it, so the box holds no cloud identity of yours to check. Cloud access is never green, the score is out of five,
+and a line under the score says why. A credential of yours put into the box is still caught under Secrets.

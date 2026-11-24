@@ -95,7 +95,7 @@ func skipSaved(t *testing.T, provider string, o host.Options) string {
 		d.Planned = slices.DeleteFunc(d.Planned, func(c report.Contact) bool { return c.Check == id })
 		d.Contacted = slices.DeleteFunc(d.Contacted, func(c report.Contact) bool { return c.Check == id })
 	}
-	d.Manifest.SkipKinds, d.Run.Provider = plan.SkipKinds, provider
+	d.Manifest.SkipKinds, d.Manifest.DeclaredProvider, d.Run.Provider = plan.SkipKinds, plan.DeclaredProvider, provider
 	d.Schema = report.SchemaFor(d.Manifest) // AGT-6: the version its fields need
 	out, _ := json.Marshal(d)
 	path := filepath.Join(t.TempDir(), "report.json")
@@ -116,9 +116,9 @@ func TestScorecardNotApplicable(t *testing.T) {
 		o          host.Options
 		score, row string
 	}{
-		"sprites": {host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: the provider's terms exclude its own endpoints (" + host.SpritesExclusions()["SEC-4"] + ")\n",
-			"N/A    Cloud access  Can it use your cloud identity?\n                         " + report.NotApplicable + "\n"},
-		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: the provider's terms exclude its own endpoints (" + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + ")\n",
+		"sprites": {host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: Sandprobe's reviewed scope for sprites excludes these provider-owned endpoints (" + host.SpritesExclusions()["SEC-4"] + ")\n",
+			"N/A    Cloud access  Can it use your cloud identity?\n                         " + report.NotApplicableWhy("sprites", false) + "\n"},
+		"e2b": {host.Options{Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, "Score 2/5\nCloud access isn't counted: Sandprobe's reviewed scope for e2b excludes these provider-owned endpoints (" + host.E2BExclusions()["SEC-4"] + "; " + host.E2BExclusions()["AMP-7"] + ")\n",
 			"N/A    Cloud access"},
 		"exec": {host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}, "Score 2/6\n\n",
 			"RED    Cloud access  Can it use your cloud identity?\n                         Not tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms allow\n"},
@@ -261,7 +261,7 @@ func TestReportSchemaVersions(t *testing.T) {
 	} {
 		var out, errs bytes.Buffer
 		code := run([]string{"scorecard", tc.path}, &out, &errs)
-		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 report file") {
+		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 or sandprobe/5 report file") {
 			t.Errorf("%s: exit %d, %s", name, code, errs.String())
 		}
 	}

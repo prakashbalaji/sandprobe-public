@@ -136,12 +136,19 @@ The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/
 it, with each provider's setup, the exact command, what it skips and why, and its terms.
 
 Read your provider's terms before you probe: some require consent for security testing, and Sandprobe never presents
-a run as a provider's permission. Each native adapter skips the checks its provider's terms rule out, as its PRV row
-in SPEC.md says. `run exec` and recipes keep four checks off by default: SEC-4, EGR-3 and AMP-7, which would contact
+a run as a provider's permission. Each native adapter skips the checks Sandprobe's reviewed scope for that provider
+rules out, as its PRV row in SPEC.md says. `run exec` and recipes keep four checks off by default: SEC-4, EGR-3 and AMP-7, which would contact
 a provider's own endpoints (cloud metadata, the box's proxy and the Kubernetes API), and AMP-6, which only checks for
 a vsock device and connects to nothing. **New in 0.3.0:** if your provider's
 terms allow one on your own account, turn it on by name, for example `-provider-endpoints SEC-4,AMP-7`; the plan
 lists each one with your attestation before anything runs, and the report records it beside the check.
+
+If a box you check with `run exec` runs on a provider Sandprobe already has a reviewed scope for, you can name it with
+`-provider <name>`, for example `-provider modal`. That provider's scope then keeps the four checks off with its own
+reasons, and Cloud access reads not applicable, out of five (PRV-17). It's your word: the plan, the scorecard and
+the report each say Sandprobe didn't verify it. The name comes only from you. An agent never infers it, adds it or
+changes it to turn a red Cloud access into not applicable. [docs/providers/exec.md](docs/providers/exec.md) has the
+details.
 
 ## What leaves your machine
 
@@ -203,9 +210,9 @@ A category is green only when something in it was tested, nothing in it was left
 and nothing above Info was found; when none of its checks is conclusive, it reads "Green · not proven".
 
 Cloud access asks whether the agent can use your cloud identity: your own cloud roles, your own cloud's metadata
-service, your own Kubernetes API. On a hosted provider whose terms rule out probing its own metadata and Kubernetes
-endpoints, the box holds no cloud identity of yours to check, so Cloud access is not applicable: it is never green,
-the score is out of five, and a line under the score says why. A credential of yours put into the box is still caught
+service, your own Kubernetes API. On a hosted provider whose own metadata and Kubernetes endpoints Sandprobe's
+reviewed scope for that provider rules out, the box holds no cloud identity of yours to check, so Cloud access is not
+applicable: it is never green, the score is out of five, and a line under the score says why. A credential of yours put into the box is still caught
 under Secrets. `run exec` and recipes leave Cloud access "Not tested", since there those endpoints may be yours.
 
 The score sits beside measurement coverage (SCR-5): which checks have usable or conclusive results, and which stayed

@@ -64,6 +64,6 @@ Test traffic goes to the hosted canary at `control.pub.probe.ac0.dev` by default
 with the run's nonces, for the run's lifetime (at most 30 minutes), and your machine's public address in a rate
 counter for at most an hour, both in memory only. To use a canary you run, name it with
 `-canary-url <url> -canary-pin <pin>`, or with `-canary <state file>` for one from `deploy/canary.sh`. Cloud access
-is not applicable here: PRV-11 excludes Boat's own metadata and Kubernetes endpoints because of its terms, so the box
-holds no cloud identity of yours to check. Cloud access is never green, the score is out of five, and a line under
-the score says why. A credential of yours put into the box is still caught under Secrets.
+is not applicable here: PRV-11 excludes Boat's own metadata and Kubernetes endpoints under Sandprobe's reviewed scope
+for it, so the box holds no cloud identity of yours to check. Cloud access is never green, the score is out of five,
+and a line under the score says why. A credential of yours put into the box is still caught under Secrets.
