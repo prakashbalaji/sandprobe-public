@@ -40,7 +40,11 @@ func ReadMarkerAck(r io.Reader, nonce string) error {
 	}
 	if line != "sandprobe:"+nonce+"\n" {
 		if match := httpStatusLine.FindStringSubmatch(line); match != nil {
-			label := "http_other_status"
+			// EVD-6: fixed classes aid diagnosis without retaining response text.
+			label := map[byte]string{
+				'1': "http_status_1xx", '2': "http_status_2xx", '3': "http_status_3xx",
+				'4': "http_status_4xx", '5': "http_status_5xx",
+			}[match[1][0]]
 			switch match[1] {
 			case "403":
 				label = "http_status_403"

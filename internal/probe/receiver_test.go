@@ -17,8 +17,15 @@ import (
 // MEAS-2/3: run the actual guest path against an owned loopback fixture, as both
 // root and nobody in test/probe.sh. An unrelated reply cannot complete exchange.
 func TestReceiverAttemptOwnedMarker(t *testing.T) {
-	for _, valid := range []bool{true, false} {
-		t.Run(strconv.FormatBool(valid), func(t *testing.T) {
+	for _, tc := range []struct{ name, reply, want string }{
+		{"valid", "", "completed"},
+		{"forbidden", "HTTP/1.1 403 Forbidden\r\n", "http_status_403"},
+		{"success-shaped", "HTTP/1.1 200 synthetic-sensitive-text\r\n", "http_status_2xx"},
+		{"redirect", "HTTP/1.1 302 synthetic-sensitive-text\r\n", "http_status_3xx"},
+		{"client-error", "HTTP/1.1 400 synthetic-sensitive-text\r\n", "http_status_4xx"},
+		{"server-error", "HTTP/1.1 502 synthetic-sensitive-text\r\n", "http_status_5xx"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp4", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -37,8 +44,8 @@ func TestReceiverAttemptOwnedMarker(t *testing.T) {
 				defer c.Close()
 				line, _ := bufio.NewReader(c).ReadString('\n')
 				seen <- line
-				reply := "HTTP/1.1 403 Forbidden\r\n"
-				if valid {
+				reply := tc.reply
+				if reply == "" {
 					reply = "sandprobe:" + nonce + "\n"
 				}
 				io.WriteString(c, reply)
@@ -51,12 +58,8 @@ func TestReceiverAttemptOwnedMarker(t *testing.T) {
 			if d.UID != os.Geteuid() || d.GID != os.Getegid() || d.Nonce != nonce || d.Attempt.Outcome != "connected" || <-seen != nonce+"\n" {
 				t.Fatal("guest identity or marker changed")
 			}
-			want := "http_status_403"
-			if valid {
-				want = "completed"
-			}
-			if d.Attempt.ExchangeResult != want {
-				t.Fatalf("exchange result %q, want %q", d.Attempt.ExchangeResult, want)
+			if d.Attempt.ExchangeResult != tc.want {
+				t.Fatalf("exchange result %q, want %q", d.Attempt.ExchangeResult, tc.want)
 			}
 		})
 	}

@@ -1008,11 +1008,13 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   provider support stays unknown. No cloud run is needed for this offline change.
 
 - **EVD-6 Bounded network failure classification.** Shared marker clients may retain
-  fixed labels for exact HTTP403/407 status lines, other HTTP status replies,
+  fixed labels for exact HTTP403/407 status lines and other HTTP status classes (1xx through5xx),
   connection reset, broken pipe and non-TLS record failures. Read at most256bytes;
   do not retain response text, headers, bodies, certificates or raw error strings.
   The labels identify observed protocol behavior, never provider attribution or an
-  authenticated policy denial. Preserve pinned TLS, nonce acknowledgement, kernel
+  authenticated policy denial. Keep the historical `http_other_status` label valid when loading older
+  records. A status class is diagnostic only, including2xx: it is not the nonce acknowledgement.
+  Preserve pinned TLS, nonce acknowledgement, kernel
   refusal and host receipt rules. These diagnostics cannot alter any verdict,
   complete an unknown, or create an additional request/target. Historical records
   remain unchanged. Verify real probe paths against owned local fixtures and run
