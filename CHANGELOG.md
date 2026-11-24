@@ -10,10 +10,9 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   rerun proved it there (Docker, from a fixture test that applies each one; Modal, from three rounds by hand), and the
   check's own fix, labelled general advice, everywhere else. Every action is a prediction until a rerun shows it;
   `-platform` names a `run exec` report's platform; `-o json` gives agents the same, and an incomplete report keeps
-  its plan, says so and exits 5 (FIX-1 to FIX-10). A setting proven elsewhere that may also clear other checks lists
+  its plan, says so and exits 5 (FIX-1 to FIX-9). A setting proven elsewhere that may also clear other checks lists
   them as "may also clear" and never hides their own actions. The run summary's
-  `Fix first` now ends "Run sandprobe fix <report.json> for every fix, in order." `examples/modal/bridge.py` probes your
-  own Modal sandbox through `run exec`.
+  `Fix first` now ends "Run sandprobe fix <report.json> for every fix, in order."
 
 - `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that
   was a finding or unknown and now passes with proof or is verified absent; separate lists, never counted as better,

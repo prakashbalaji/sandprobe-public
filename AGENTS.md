@@ -43,7 +43,6 @@ Every test runs on public data: saved reports come from `demo/reports` and `test
 | `test/` | Docker fixtures, each with an expected result, and the probe and calibration scripts |
 | `demo/` | three demo boxes (vibe, hardened, regressed) and their reports |
 | `docs/providers/` | each provider's status, setup, command and skipped checks |
-| `examples/` | small scripts that reach a sandbox for `run exec`, such as `examples/modal/bridge.py` |
 | `experiments/` | research harnesses, not part of the product: the EKS and Daytona agent evaluations and the TUI prototype ([README](experiments/README.md)) |
 
 ## Hard rules
