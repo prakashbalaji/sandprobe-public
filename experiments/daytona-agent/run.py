@@ -298,6 +298,17 @@ def main(args):
     call(["make", "probes"], env, timeout=300)
     call([args.go, "build", "-trimpath", "-ldflags", "-X main.sourceCommit=" + source,
           "-o", str(folder / "runner"), "./cmd/sandprobe-daytona-workload"], env, timeout=180)
+    # EVD-10: check shared deployment readiness before the first paid receiver/resource.
+    if getattr(args, "canary_tcp80_protocol", "legacy") == "http-v1":
+        checker = str(folder / "canary-preflight")
+        call([args.go, "build", "-trimpath", "-o", checker, "./cmd/sandprobe"], env, timeout=180)
+        check_env = {k: v for k, v in env.items() if k not in
+                     {"SANDPROBE_CANARY", "SANDPROBE_CANARY_URL", "SANDPROBE_CANARY_PIN"}}
+        try:
+            call([checker, "canary", "check", "-require-http-marker-v1", "-o", "json"], check_env, timeout=35)
+        except Failure:
+            raise Failure("shared_canary_http_capability_unverified") from None
+        persist(folder / "canary-capability-preflight.json", {"protocol": "tcp80-http-marker-v1", "verified": True})
     env, zone = auth_environment(args, env)
     zones = json.loads(call(["cf", "zones", "list"], env))
     if len(zones) != 1 or zones[0].get("name") != "ac0.dev" or zones[0].get("id") != zone:

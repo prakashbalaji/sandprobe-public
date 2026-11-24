@@ -308,7 +308,8 @@ operator's account. [AWS model card](https://docs.aws.amazon.com/bedrock/latest/
 EVD-10 keeps the legacy payload by default. Before selecting `--canary-tcp80-protocol http-v1`,
 run `bin/sandprobe canary check -require-http-marker-v1` from this checkout. It verifies the
 shared canary's signed capability without reserving slots or creating provider resources.
-The shared deployment must contain the EVD-10 server support; a successful preflight does
-not prove guest delivery. Opted-in reports use `sandprobe/4`, declare the protocol, and
+The shared deployment must contain the EVD-10 server support. Opted-in managed runs
+automatically repeat this preflight before creating any paid receiver or provider resource,
+and the collector checks again before assessment. A successful preflight does not prove guest delivery. Opted-in reports use `sandprobe/4`, declare the protocol, and
 require an updated report reader. The same bounded TCP/80 destination and independent
 receipt rules apply; HTTP errors remain inconclusive. There is no automatic fallback.
