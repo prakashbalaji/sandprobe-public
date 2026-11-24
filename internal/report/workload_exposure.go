@@ -5,6 +5,7 @@ import (
 	"sandprobe/internal/grade"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
+	"slices"
 )
 
 // WorkloadExposure retains SCR-4's RC score independently of workload permission
@@ -30,6 +31,13 @@ func WorkloadExposureScore(m obs.Manifest, raw []byte, evidence *obs.CanaryEvide
 func WorkloadExposureHTML(r grade.WorkloadReport, coverage grade.EvidenceCoverage, exposure WorkloadExposure) ([]byte, error) {
 	if !validWorkloadExposure(exposure) || exposure.RunID != r.RunID || exposure.BoxID != r.BoxID {
 		return nil, errors.New("workload exposure binding mismatch")
+	}
+	// SCR-2, SCR-5: old v1 rows omit this display flag. Derive it only after validating their coverage, without
+	// mutating the caller or treating an omitted flag as proof.
+	exposure.Rows = slices.Clone(exposure.Rows)
+	for i := range exposure.Rows {
+		row := &exposure.Rows[i]
+		row.GreenNotProven = row.Green && row.Coverage != nil && row.Coverage.Conclusive == 0
 	}
 	return workloadHTML(r, &coverage, &exposure)
 }
@@ -57,6 +65,9 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 				return false
 			}
 			applicable--
+		}
+		if !row.Green && row.GreenNotProven || x.Coverage == nil && row.GreenNotProven { // SCR-2: never on a red row, never unbacked
+			return false
 		}
 		if row.Green {
 			if len(row.Found) > 0 || len(row.Unknown) > 0 {

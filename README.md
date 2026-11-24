@@ -195,7 +195,7 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 
 The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
 and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
-and nothing above Info was found.
+and nothing above Info was found; when none of its checks is conclusive, it reads "Green · not proven".
 
 Cloud access asks whether the agent can use your cloud identity: your own cloud roles, your own cloud's metadata
 service, your own Kubernetes API. On a hosted provider whose terms rule out probing its own metadata and Kubernetes

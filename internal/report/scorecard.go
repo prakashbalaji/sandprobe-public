@@ -78,20 +78,21 @@ func CategoryOf(id string) (Category, bool) {
 }
 
 // Row is one category's verdict (SCR-2). Why is empty when the row is green; NotProven names the checks a green
-// row rests on without a negative proof (KND-2), so a green never reads as more than it is. A not-applicable row is
-// never green and is out of the score.
+// row rests on without a negative proof (KND-2), so a green never reads as more than it is, and GreenNotProven says a
+// green row has no conclusive check at all. A not-applicable row is never green and is out of the score.
 type Row struct {
-	Name          string         `json:"name"`
-	Question      string         `json:"question"`
-	Green         bool           `json:"green"`
-	NotApplicable bool           `json:"not_applicable,omitempty"`
-	Why           string         `json:"why,omitempty"`
-	Terms         string         `json:"terms,omitempty"` // SCR-2: a not-applicable row's provider-terms reasons, from this binary's own PRV rows
-	NotProven     string         `json:"not_proven,omitempty"`
-	Found         []string       `json:"found,omitempty"`
-	Unknown       []string       `json:"unknown,omitempty"`
-	Unproven      []string       `json:"unproven,omitempty"`
-	Coverage      *CheckCoverage `json:"coverage,omitempty"`
+	Name           string         `json:"name"`
+	Question       string         `json:"question"`
+	Green          bool           `json:"green"`
+	GreenNotProven bool           `json:"green_not_proven,omitempty"` // SCR-2: green with Conclusive == 0; still counts toward Score
+	NotApplicable  bool           `json:"not_applicable,omitempty"`
+	Why            string         `json:"why,omitempty"`
+	Terms          string         `json:"terms,omitempty"` // SCR-2: a not-applicable row's provider-terms reasons, from this binary's own PRV rows
+	NotProven      string         `json:"not_proven,omitempty"`
+	Found          []string       `json:"found,omitempty"`
+	Unknown        []string       `json:"unknown,omitempty"`
+	Unproven       []string       `json:"unproven,omitempty"`
+	Coverage       *CheckCoverage `json:"coverage,omitempty"`
 }
 
 // Card is the headline: Score green rows of Of, the categories that apply (SCR-2). An invalid run has no score.
