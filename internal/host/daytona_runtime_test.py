@@ -5,6 +5,59 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('daytona_runtime',Path(__file__).with_name('daytona_runtime.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 SID='12345678-1234-1234-1234-123456789abc'
 class Tests(unittest.TestCase):
+ def test_organization_network_policy_uses_only_bound_organization(self):
+  import types,copy
+  org='22345678-1234-1234-1234-123456789abc'
+  req={'id':SID,'nonce':'fixture-nonce','born':'2026-11-24T00:00:00Z','organization':org}
+  sandbox=types.SimpleNamespace(id=SID,name='fixture',organization_id=org,created_at=req['born'],
+      state=types.SimpleNamespace(value='started'),desired_state=None,labels={'sandprobe_run':req['nonce']},
+      user='root',public=False,auto_delete_interval=0,auto_stop_interval=15,auto_pause_interval=0,
+      toolbox_proxy_url='https://proxy.app.daytona.io/toolbox',volumes=[])
+  api=object()
+  def run(value=None,error=None,changed=None):
+   native=types.SimpleNamespace(get_organization=unittest.mock.Mock(return_value=value,side_effect=error))
+   lookup=unittest.mock.Mock(return_value=changed or sandbox)
+   client=types.SimpleNamespace(_api_client=api,_sandbox_api=types.SimpleNamespace(get_sandbox=lookup))
+   with patch('daytona_api_client.api.organizations_api.OrganizationsApi',return_value=native) as constructor:
+    out=m.organization_network_policy(client,req)
+   lookup.assert_called_once_with(SID,_request_timeout=25)
+   if constructor.called:native.get_organization.assert_called_once_with(org,_request_timeout=15)
+   return out,native,constructor
+  for limited in (True,False):
+   value=types.SimpleNamespace(id=org,sandbox_limited_network_egress=limited,name='NEVER_EXPORT_ORGANIZATION')
+   out,native,constructor=run(value)
+   constructor.assert_called_once_with(api)
+   native.get_organization.assert_called_once_with(org,_request_timeout=15)
+   self.assertEqual(out,{'result':'observed','reason':'matching_organization_readback','limited_network_egress':limited})
+   self.assertNotIn(org,json.dumps(out));self.assertNotIn('NEVER_EXPORT',json.dumps(out))
+  for value in (None,'false',0):
+   out,_,_=run(types.SimpleNamespace(id=org,sandbox_limited_network_egress=value))
+   self.assertEqual(out,{'result':'unknown','reason':'response_mismatch'})
+  for value in (types.SimpleNamespace(id='other',sandbox_limited_network_egress=False),types.SimpleNamespace(id=org)):
+   out,_,_=run(value);self.assertEqual(out,{'result':'unknown','reason':'response_mismatch'})
+  class Denied(Exception):status=403
+  for error,reason in ((Denied('NEVER_EXPORT_CREDENTIAL'),'permission_denied'),(RuntimeError('NEVER_EXPORT_PROVIDER'),'readback_unavailable')):
+   out,_,_=run(error=error);self.assertEqual(out,{'result':'unknown','reason':reason})
+  for field,bad in [('id','other'),('organization_id','other'),('created_at','2026-11-23T00:00:00Z'),('labels',{})]:
+   changed=copy.copy(sandbox);setattr(changed,field,bad)
+   out,native,constructor=run(changed=changed)
+   self.assertEqual(out,{'result':'unknown','reason':'binding_unverified'})
+   constructor.assert_not_called();native.get_organization.assert_not_called()
+
+ def test_organization_policy_pinned_sdk_uses_explicit_id_path(self):
+  from daytona_api_client import ApiClient,Configuration
+  from daytona_api_client.api.organizations_api import OrganizationsApi
+  org='22345678-1234-1234-1234-123456789abc'
+  client=ApiClient(Configuration(host=m.API))
+  with patch.object(client,'param_serialize',side_effect=ValueError('fixture serializer stop')) as serialize:
+   with self.assertRaisesRegex(ValueError,'fixture serializer stop'):
+    OrganizationsApi(client).get_organization(org,_request_timeout=15)
+  wire=serialize.call_args.kwargs
+  self.assertEqual(wire['method'],'GET')
+  self.assertEqual(wire['resource_path'],'/organizations/{organizationId}')
+  self.assertEqual(wire['path_params'],{'organizationId':org})
+  self.assertEqual(wire['query_params'],[])
+
  def test_rejected_create_requires_exact_audit_and_independent_absence(self):
   import types,copy
   from datetime import datetime,timedelta,timezone

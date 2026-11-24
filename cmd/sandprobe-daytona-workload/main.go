@@ -609,6 +609,12 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = save(o.folder, "configuration-evidence.json", configurationEvidence); e != nil {
 		return e
 	}
+	// EVD-11: optional organization-default readback, never an enforcement verdict.
+	organizationPolicy := b.OrganizationNetworkPolicy(ctx, o.runID, contract.ConfigSHA256)
+	if e = save(o.folder, "organization-network-policy.json", organizationPolicy); e != nil {
+		return e
+	}
+
 	stage = "workload"
 	task := workload(ctx, o, b)
 	if e = save(o.folder, "workload.json", task); e != nil {
