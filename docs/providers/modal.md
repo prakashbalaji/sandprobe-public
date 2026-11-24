@@ -59,8 +59,11 @@ agent has its own user), and `sandprobe compare round-0/*.json round-1/*.json`. 
 "Got better"; DNS and UDP 53 under `block_network=True` show as "No longer found, but not proven", which isn't a fix.
 
 `run exec` keeps SEC-4, EGR-3, AMP-6 and AMP-7 off, since each would contact an endpoint Modal owns. Leave them off:
-on Modal they are outside Sandprobe's reviewed scope, so Cloud access reads "Not tested", and `fix` lists it as not an
-action for an agent.
+on Modal they are outside Sandprobe's reviewed scope. Without a declared provider, Cloud access reads "Not tested",
+and `fix` lists it as not an action for an agent. When you, the person, declare the provider yourself with
+`run exec -provider modal` (PRV-17, [exec.md](exec.md)), that scope keeps them off and Cloud access reads not
+applicable; an agent never adds the flag. `fix` still takes its platform only from `-platform`, never from the
+report's declared provider.
 
 ### The fixes proven on Modal
 

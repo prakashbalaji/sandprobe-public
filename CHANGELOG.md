@@ -5,15 +5,6 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
-- Add `sandprobe fix <report.json>`: a saved report's red checks as a short, ranked list of changes to the sandbox's
-  own config or code, with the rerun and compare steps for the loop. It gives a platform's own setting only where a
-  rerun proved it there (Docker, from a fixture test that applies each one; Modal, from three rounds by hand), and the
-  check's own fix, labelled general advice, everywhere else. Every action is a prediction until a rerun shows it;
-  `-platform` names a `run exec` report's platform; `-o json` gives agents the same, and an incomplete report keeps
-  its plan, says so and exits 5 (FIX-1 to FIX-9). A setting proven elsewhere that may also clear other checks lists
-  them as "may also clear" and never hides their own actions. The run summary's
-  `Fix first` now ends "Run sandprobe fix <report.json> for every fix, in order."
-
 - `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that
   was a finding or unknown and now passes with proof or is verified absent; separate lists, never counted as better,
   for checks that no longer apply (nothing left for them to check) and for findings that are only no longer found;
@@ -41,6 +32,15 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   `exec` as its provider, records the name as `declared_provider` and declares `sandprobe/5`. `compare` treats any
   change to it as a changed setup (PRV-17). A not-applicable Cloud access now says it rests on Sandprobe's reviewed
   scope for the provider, never on the provider's own terms; Modal's is Sandprobe's own rules of engagement (SCR-2).
+
+- Add `sandprobe fix <report.json>`: a saved report's red checks as a short, ranked list of changes to the sandbox's
+  own config or code, with the rerun and compare steps for the loop. It gives a platform's own setting only where a
+  rerun proved it there (Docker, from a fixture test that applies each one; Modal, from three rounds by hand), and the
+  check's own fix, labelled general advice, everywhere else. Every action is a prediction until a rerun shows it;
+  `-platform` names a `run exec` report's platform; `-o json` gives agents the same, and an incomplete report keeps
+  its plan, says so and exits 5 (FIX-1 to FIX-9). A setting proven elsewhere that may also clear other checks lists
+  them as "may also clear" and never hides their own actions. The run summary's
+  `Fix first` now ends "Run sandprobe fix <report.json> for every fix, in order."
 
 ## 0.3.0 (2026-11-24)
 
