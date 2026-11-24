@@ -224,3 +224,43 @@ func TestRecheckStartup(t *testing.T) {
 		t.Errorf("want ~/.bashrc observed writable at its path, got %+v", d.Startup)
 	}
 }
+
+// TWN-3: metadata failure is diagnostic only, never a reason to read a replacement.
+func TestRecheckIdentityDiagnostics(t *testing.T) {
+	const run = "identity-diagnostic-run"
+	for _, tc := range []struct {
+		name        string
+		inode, size bool
+		want        string
+	}{
+		{"inode", true, false, "the marker's inode differs from the placed marker; unread"},
+		{"length", false, true, "the marker's length differs from the placed marker; unread"},
+		{"both", true, true, "the marker's inode and length differ from the placed marker; unread"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			p := markOne(t, plannedIn(t, root, run), run)
+			if !p.Placed {
+				t.Fatalf("mark failed: %+v", p)
+			}
+			// Set recorded expectations to mismatching metadata; content is also
+			// deliberately wrong so a read would instead return a content error.
+			if err := os.WriteFile(p.Path, []byte(strings.Repeat("x", len(run))), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.inode {
+				p.Ino++
+			}
+			if tc.size {
+				p.Size++
+			}
+			r := recheckOne(p, run)
+			if r.State != "unknown" || r.Why != tc.want {
+				t.Fatalf("metadata mismatch: %+v", r)
+			}
+			if _, err := os.Lstat(p.Path); err != nil {
+				t.Fatal("recheck removed marker:", err)
+			}
+		})
+	}
+}
