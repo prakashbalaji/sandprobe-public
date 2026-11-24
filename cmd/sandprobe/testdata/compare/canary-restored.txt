@@ -2,14 +2,19 @@
 Got worse: none
 No longer tested: none
 Got better:
-  ● Exfiltration: Can it send data over HTTPS to a server we control?
-  ● Exfiltration: Can it connect out on port 22 (SSH)?
-  ● Exfiltration: Can it connect out on port 80 (HTTP)?
-  ● Exfiltration: Can it connect out on port 8080?
-  ● Privilege: Could running a setuid program, or a file with capabilities, raise its privileges?
+  ● Exfiltration › Can it send data over HTTPS to a server we control?
+  ● Exfiltration › Can it connect out on port 22 (SSH)?
+  ● Exfiltration › Can it connect out on port 80 (HTTP)?
+  ● Exfiltration › Can it connect out on port 8080?
+  ● Privilege › Could running a setuid program, or a file with capabilities,
+    raise its privileges?
 Score: 2/6 → 3/6
 Setup differs, so the two aren't a like-for-like pair: ["identity"]
-The agent's identity differs: its user, group, capabilities or privilege settings. That's expected when the fix was to change the agent's user or drop its privileges, but the two reports still measured different identities.
-Some checks couldn't be proven in at least one report, so an all-clear here wouldn't count either.
+The agent's identity differs: its user, group, capabilities or privilege
+settings. That's expected when the fix was to change the agent's user or drop
+its privileges, but the two reports still measured different identities.
+Some checks couldn't be proven in at least one report, so an all-clear here
+wouldn't count either.
 This compares the two reports only; it doesn't vouch for either box.
-From a saved report: structurally checked only. Its observations and canary receipts weren't re-verified, and an edited report can't be told apart (ANL-1).
+From a saved report: structurally checked only. Its observations and canary
+receipts weren't re-verified, and an edited report can't be told apart (ANL-1).

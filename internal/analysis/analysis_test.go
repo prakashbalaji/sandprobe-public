@@ -223,31 +223,34 @@ func TestCompareBetter(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		before, beforeSev, after, afterSev string
-		better, notProven, loss, worse     bool
+		before, beforeSev, after, afterSev      string
+		better, applies, notProven, loss, worse bool
 	}{
-		{obs.Finding, "high", obs.Pass, "", true, false, false, false},
-		{obs.Finding, "high", obs.Absent, "", true, false, false, false},
-		{obs.Finding, "high", obs.ScopedOut, "", true, false, false, false},
-		{obs.Finding, "info", obs.Pass, "", true, false, false, false},
-		{obs.Unknown, "", obs.Pass, "", true, false, false, false},
-		{obs.Finding, "high", obs.NotFound, "", false, true, false, false},
-		{obs.Finding, "high", obs.Unknown, "", false, true, true, false},
-		{obs.Unknown, "", obs.NotFound, "", false, false, false, false},
-		{obs.Finding, "high", obs.Finding, "low", false, false, false, false},
-		{obs.Pass, "", obs.Pass, "", false, false, false, false},
-		{obs.Pass, "", obs.Finding, "high", false, false, false, true},
+		{obs.Finding, "high", obs.Pass, "", true, false, false, false, false},
+		{obs.Finding, "high", obs.Absent, "", true, false, false, false, false},
+		{obs.Finding, "info", obs.Pass, "", true, false, false, false, false},
+		{obs.Unknown, "", obs.Pass, "", true, false, false, false, false},
+		{obs.Finding, "high", obs.ScopedOut, "", false, true, false, false, false},
+		{obs.Unknown, "", obs.ScopedOut, "", false, true, false, false, false},
+		{obs.Finding, "high", obs.NotFound, "", false, false, true, false, false},
+		{obs.Finding, "high", obs.Unknown, "", false, false, true, true, false},
+		{obs.Unknown, "", obs.NotFound, "", false, false, false, false, false},
+		{obs.Finding, "high", obs.Finding, "low", false, false, false, false, false},
+		{obs.Pass, "", obs.Pass, "", false, false, false, false, false},
+		{obs.Pass, "", obs.ScopedOut, "", false, false, false, false, false},
+		{obs.Pass, "", obs.Finding, "high", false, false, false, false, true},
 	} {
 		a, b := baseline(t), baseline(t)
 		set(a, "SEC-2", tc.before, tc.beforeSev)
 		set(b, "SEC-2", tc.after, tc.afterSev)
 		c := Compare(a, b)
 		has := func(ids []string) bool { return len(ids) == 1 && ids[0] == "SEC-2" }
-		if has(c.GotBetter) != tc.better || has(c.NotProven) != tc.notProven || has(c.CoverageLoss) != tc.loss || has(c.NewOrWorse) != tc.worse {
-			t.Errorf("%s/%s to %s/%s: better %q, not proven %q, loss %q, worse %q", tc.before, tc.beforeSev, tc.after, tc.afterSev,
-				c.GotBetter, c.NotProven, c.CoverageLoss, c.NewOrWorse)
+		if has(c.GotBetter) != tc.better || has(c.NoLongerApplies) != tc.applies || has(c.NotProven) != tc.notProven ||
+			has(c.CoverageLoss) != tc.loss || has(c.NewOrWorse) != tc.worse {
+			t.Errorf("%s/%s to %s/%s: better %q, no longer applies %q, not proven %q, loss %q, worse %q", tc.before, tc.beforeSev,
+				tc.after, tc.afterSev, c.GotBetter, c.NoLongerApplies, c.NotProven, c.CoverageLoss, c.NewOrWorse)
 		}
-		if len(c.GotBetter)+len(c.NotProven) > 1 || has(c.GotBetter) && has(c.NotProven) {
+		if len(c.GotBetter)+len(c.NoLongerApplies)+len(c.NotProven) > 1 {
 			t.Errorf("%s to %s: a check listed twice", tc.before, tc.after)
 		}
 	}
@@ -269,7 +272,7 @@ func TestCompareBetter(t *testing.T) {
 	set(a, "PER-1", obs.Finding, "low")
 	a.Grade.Valid = false
 	c = Compare(a, b)
-	if c.ScoreBefore != nil || c.ScoreAfter == nil || c.GotBetter == nil || len(c.GotBetter) != 0 || c.NotProven == nil || !c.Incomplete {
+	if c.ScoreBefore != nil || c.ScoreAfter == nil || c.GotBetter == nil || len(c.GotBetter) != 0 || c.NoLongerApplies == nil || c.NotProven == nil || !c.Incomplete {
 		t.Fatalf("invalid before: %+v", c)
 	}
 }

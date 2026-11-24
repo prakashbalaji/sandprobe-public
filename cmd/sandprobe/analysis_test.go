@@ -171,39 +171,60 @@ func TestCompareVerdictWords(t *testing.T) {
 	}
 }
 
-// CMP-2: compare's text and JSON, byte for byte, on saved reports of Docker boxes: a firewall closed (better, and DNS
-// and UDP 53 only no longer found), a canary restored and the identity changed (unknown to pass), the demo's fix
-// loop, and a pair that got both better and worse, which still exits 6. SANDPROBE_UPDATE_GOLDEN=1 rewrites the files.
-func TestCompareGolden(t *testing.T) {
-	// mixed is the hardened demo box with vibe's PER-1 finding, its findings entry and its count: PER-1 then gets
-	// better against the regressed box, whose SEC-3 got worse.
-	var hardened, vibe report.Doc
-	for path, d := range map[string]*report.Doc{"../../demo/reports/hardened.json": &hardened, "../../demo/reports/vibe.json": &vibe} {
+// comparePairs are CMP-2's before and after reports, from saved reports of Docker boxes: a firewall closed (better, and
+// DNS and UDP 53 only no longer found), a canary restored and the identity changed (unknown to pass), the demo's fix
+// loop, a pair that got both better and worse, which still exits 6, and a check that no longer applies. The last two
+// "before" reports, and the last "after", are built from public reports, and pass analysis.Load.
+func comparePairs(t *testing.T) []struct {
+	name, before, after string
+	exit                int
+} {
+	t.Helper()
+	load := func(path string) report.Doc {
+		var d report.Doc
 		b, err := os.ReadFile(path)
+		if err == nil {
+			err = json.Unmarshal(b, &d)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = json.Unmarshal(b, d); err != nil {
+		return d
+	}
+	vibe := load("../../demo/reports/vibe.json")
+	// transplant gives d vibe's finding on id: its row, its findings entry and its count.
+	transplant := func(d report.Doc, id string) report.Doc {
+		d.Checks[slices.IndexFunc(d.Checks, func(c report.Check) bool { return c.ID == id })] =
+			vibe.Checks[slices.IndexFunc(vibe.Checks, func(c report.Check) bool { return c.ID == id })]
+		f := vibe.Findings[slices.IndexFunc(vibe.Findings, func(f report.Finding) bool { return f.ID == id })]
+		d.Findings = append(d.Findings, f)
+		d.Grade.Counts[f.Severity]++
+		return d
+	}
+	dir := t.TempDir()
+	save := func(name string, d report.Doc) string {
+		path := filepath.Join(dir, name)
+		b, err := json.Marshal(d)
+		if err == nil {
+			err = os.WriteFile(path, b, 0o600)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
+		return path
 	}
-	for i, c := range hardened.Checks {
-		if c.ID == "PER-1" {
-			hardened.Checks[i] = vibe.Checks[slices.IndexFunc(vibe.Checks, func(c report.Check) bool { return c.ID == "PER-1" })]
+	mixed := save("mixed.json", transplant(load("../../demo/reports/hardened.json"), "PER-1"))
+	sec2 := save("sec2-found.json", transplant(load("../../demo/reports/hardened.json"), "SEC-2"))
+	hidden := load("../../demo/reports/hardened.json") // SEC-2 with no other process visible (KND-1)
+	i := slices.IndexFunc(hidden.Checks, func(c report.Check) bool { return c.ID == "SEC-2" })
+	hidden.Checks[i].Result, hidden.Checks[i].Proof, hidden.Checks[i].Reason = obs.ScopedOut, nil, "no other process is visible to the probe"
+	scoped := save("sec2-scoped-out.json", hidden)
+	for _, p := range []string{mixed, sec2, scoped} {
+		if _, err := analysis.Load(p); err != nil {
+			t.Fatalf("%s isn't a valid report: %v", p, err)
 		}
 	}
-	hardened.Findings = append(hardened.Findings, vibe.Findings[slices.IndexFunc(vibe.Findings, func(f report.Finding) bool { return f.ID == "PER-1" })])
-	hardened.Grade.Counts["low"]++
-	mixed := filepath.Join(t.TempDir(), "mixed.json")
-	b, err := json.Marshal(hardened)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(mixed, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
+	return []struct {
 		name, before, after string
 		exit                int
 	}{
@@ -211,7 +232,14 @@ func TestCompareGolden(t *testing.T) {
 		{"canary-restored", "../../test/reports/canary-down.json", "../../test/reports/egress-refused.json", 5},
 		{"fix-loop", "../../demo/reports/vibe.json", "../../demo/reports/hardened.json", 5},
 		{"better-and-worse", mixed, "../../demo/reports/regressed.json", 6},
-	} {
+		{"no-longer-applies", sec2, scoped, 0},
+	}
+}
+
+// CMP-2: compare's text and JSON, byte for byte, in a UTF-8 locale. SANDPROBE_UPDATE_GOLDEN=1 rewrites the files.
+func TestCompareGolden(t *testing.T) {
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	for _, tc := range comparePairs(t) {
 		for _, format := range []string{"txt", "json"} {
 			args := []string{"compare", tc.before, tc.after}
 			if format == "json" {
@@ -241,9 +269,40 @@ func TestCompareGolden(t *testing.T) {
 	}
 }
 
-// CMP-2: a report with no score says which, and a check that got better by being scoped out is never called a pass.
-func TestCompareNoScoreAndScopedOut(t *testing.T) {
-	after := &report.Doc{Checks: []report.Check{{ID: "SEC-2", Result: obs.ScopedOut}, {ID: "SEC-3", Result: obs.Pass}}}
+// CMP-2, UX-9: under C or POSIX, compare writes ASCII only (`*` bullets, `->` in the score line); in every locale,
+// each line is within 80 display columns.
+func TestCompareASCIIAndWidth(t *testing.T) {
+	for _, locale := range []string{"C", "POSIX", "en_US.UTF-8"} {
+		t.Setenv("LC_ALL", locale)
+		ascii := locale != "en_US.UTF-8"
+		for _, tc := range comparePairs(t) {
+			var out, errb bytes.Buffer
+			run([]string{"compare", tc.before, tc.after}, &out, &errb)
+			s := out.String()
+			for i, line := range strings.Split(s, "\n") {
+				if cols := displayWidth(line); cols > 80 {
+					t.Errorf("%s under %s: line %d is %d columns: %q", tc.name, locale, i+1, cols, line)
+				}
+			}
+			if !ascii {
+				continue
+			}
+			for _, r := range s {
+				if r > 0x7f {
+					t.Errorf("%s under %s: non-ASCII %q in:\n%s", tc.name, locale, r, s)
+					break
+				}
+			}
+			if !strings.Contains(s, "  * ") || !strings.Contains(s, " > ") || !strings.Contains(s, "Score: ") || !strings.Contains(s, " -> ") {
+				t.Errorf("%s under %s: want * bullets, > and the -> arrow:\n%s", tc.name, locale, s)
+			}
+		}
+	}
+}
+
+// CMP-2: a report with no score says which, and a check that ends scoped_out is listed apart, never as better.
+func TestCompareNoScoreAndNoLongerApplies(t *testing.T) {
+	t.Setenv("LC_ALL", "en_US.UTF-8")
 	for _, tc := range []struct {
 		before, after *analysis.Score
 		want          string
@@ -254,14 +313,16 @@ func TestCompareNoScoreAndScopedOut(t *testing.T) {
 		{&analysis.Score{Score: 0, Of: 6}, &analysis.Score{Score: 4, Of: 5}, "Score: 0/6 → 4/5\n"},
 	} {
 		var out bytes.Buffer
-		printComparison(opts{stdout: &out}, analysis.Comparison{GotBetter: []string{"SEC-2", "SEC-3"}, ScoreBefore: tc.before, ScoreAfter: tc.after}, after)
+		printComparison(opts{stdout: &out}, analysis.Comparison{GotBetter: []string{"SEC-3"}, NoLongerApplies: []string{"SEC-2"},
+			ScoreBefore: tc.before, ScoreAfter: tc.after})
 		s := out.String()
 		if !strings.Contains(s, tc.want) || strings.Contains(s, "Score:") != (tc.before != nil && tc.after != nil) {
 			t.Errorf("want %q in:\n%s", tc.want, s)
 		}
-		if !strings.Contains(s, "other programs' environment variables, where keys are often passed? (nothing left for it to apply to)\n") ||
-			strings.Contains(s, "/etc/shadow? (nothing left") {
-			t.Errorf("scoped-out wording wrong:\n%s", s)
+		better, rest, _ := strings.Cut(s, "No longer applies (nothing left for it to check):\n")
+		if !strings.Contains(better, "/etc/shadow?") || strings.Contains(better, "other programs' environment") ||
+			!strings.HasPrefix(rest, "  ● Secrets › Can the agent open other programs' environment variables") {
+			t.Errorf("SEC-2 must be listed only under No longer applies:\n%s", s)
 		}
 	}
 }

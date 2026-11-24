@@ -377,7 +377,8 @@ type Comparison struct {
 	NewOrWorse   []string `json:"new_or_worse_findings"`
 	CoverageLoss []string `json:"coverage_loss"`
 	// CMP-2: additive under sandprobe.compare/1. Nothing here decides an exit code.
-	GotBetter        []string `json:"got_better"`
+	GotBetter        []string `json:"got_better"`                 // pass or absent: backed by proof
+	NoLongerApplies  []string `json:"no_longer_applicable"`       // scoped_out: never counted as better (KND-1)
 	NotProven        []string `json:"no_longer_found_not_proven"` // never counted as better (KND-2)
 	ScoreBefore      *Score   `json:"score_before"`               // SCR-2's score; null for an invalid run
 	ScoreAfter       *Score   `json:"score_after"`
@@ -399,11 +400,6 @@ func score(d *report.Doc) *Score {
 		return nil
 	}
 	return &Score{Score: c.Score, Of: c.Of}
-}
-
-// clean is CMP-2's "got better" end state: the results SCR-2's score counts as clean.
-func clean(c report.Check) bool {
-	return c.Result == obs.Pass || c.Result == obs.Absent || c.Result == obs.ScopedOut
 }
 
 func proofMechanism(c catalog.Check) string {
@@ -443,7 +439,7 @@ func referenceContextNotes(notes []string) []string {
 }
 
 func Compare(a, b *report.Doc) Comparison {
-	out := Comparison{Schema: "sandprobe.compare/1", Verification: "structural_only_unauthenticated", NewOrWorse: []string{}, CoverageLoss: []string{}, GotBetter: []string{}, NotProven: []string{}, ScoreBefore: score(a), ScoreAfter: score(b), ContextChanges: []string{}, Incomplete: !a.Grade.Valid || !b.Grade.Valid || !a.Grade.Complete || !b.Grade.Complete || a.Identity == nil || b.Identity == nil, Limits: []string{"Unrecorded image, policy and workload differences remain unknown.", "Comparison covers exported fields only; ephemeral canary IPs ignored, ports/routes retained; no equivalent-security or attestation claim."}}
+	out := Comparison{Schema: "sandprobe.compare/1", Verification: "structural_only_unauthenticated", NewOrWorse: []string{}, CoverageLoss: []string{}, GotBetter: []string{}, NoLongerApplies: []string{}, NotProven: []string{}, ScoreBefore: score(a), ScoreAfter: score(b), ContextChanges: []string{}, Incomplete: !a.Grade.Valid || !b.Grade.Valid || !a.Grade.Complete || !b.Grade.Complete || a.Identity == nil || b.Identity == nil, Limits: []string{"Unrecorded image, policy and workload differences remain unknown.", "Comparison covers exported fields only; ephemeral canary IPs ignored, ports/routes retained; no equivalent-security or attestation claim."}}
 	// BND-3: addition/removal is a context change too.
 	if !reflect.DeepEqual(a.Manifest.BoundaryContract, b.Manifest.BoundaryContract) {
 		out.ContextChanges = append(out.ContextChanges, "declared_boundary_context")
@@ -488,9 +484,12 @@ func Compare(a, b *report.Doc) Comparison {
 		if covered(x) && !covered(y) {
 			out.CoverageLoss = append(out.CoverageLoss, cat.ID)
 		}
+		was := x.Result == obs.Finding || x.Result == obs.Unknown
 		switch { // CMP-2
-		case (x.Result == obs.Finding || x.Result == obs.Unknown) && clean(y):
+		case was && (y.Result == obs.Pass || y.Result == obs.Absent):
 			out.GotBetter = append(out.GotBetter, cat.ID)
+		case was && y.Result == obs.ScopedOut:
+			out.NoLongerApplies = append(out.NoLongerApplies, cat.ID)
 		case x.Result == obs.Finding && (y.Result == obs.NotFound || y.Result == obs.Unknown):
 			out.NotProven = append(out.NotProven, cat.ID)
 		}

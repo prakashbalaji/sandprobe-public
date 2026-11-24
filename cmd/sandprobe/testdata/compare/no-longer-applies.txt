@@ -1,0 +1,11 @@
+
+Got worse: none
+No longer tested: none
+Got better: none
+No longer applies (nothing left for it to check):
+  ● Secrets › Can the agent open other programs' environment variables, where
+    keys are often passed?
+Score: 5/6 → 6/6
+This compares the two reports only; it doesn't vouch for either box.
+From a saved report: structurally checked only. Its observations and canary
+receipts weren't re-verified, and an edited report can't be told apart (ANL-1).
