@@ -276,8 +276,8 @@ func TestGreenNotProven(t *testing.T) {
 			droppedGNP.Rows[i].GreenNotProven = false
 		}
 	}
-	if validCardCoverage(droppedGNP) {
-		t.Error("accepted dropped GreenNotProven on a 0-conclusive green category")
+	if !validCardCoverage(droppedGNP) {
+		t.Error("rejected historical coverage without the optional display flag")
 	}
 	wx := WorkloadExposure{
 		Schema:            "sandprobe.workload-exposure/1",

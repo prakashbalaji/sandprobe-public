@@ -145,7 +145,7 @@ func validCardCoverage(card Card) bool {
 		}
 		conclusive := len(c.Proven) + len(c.Findings)
 		usable := conclusive + len(c.Unproven)
-		if c.Conclusive != conclusive || c.UsableResults != usable || c.Complete != (conclusive == c.Total) || row.GreenNotProven != (row.Green && conclusive == 0) {
+		if c.Conclusive != conclusive || c.UsableResults != usable || c.Complete != (conclusive == c.Total) || row.GreenNotProven && !(row.Green && conclusive == 0) {
 			return false
 		}
 		want.Checks += c.Total

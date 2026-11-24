@@ -115,6 +115,9 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   page, the terminal and workload exposure tables label it "Green · not proven" (`GREEN · NOT PROVEN`, dashed, with
   `◌` in the terminal) rather than plain "Green"; it still counts toward the score. An invalid run (GRD-5) has no score. A full score therefore means
   no finding above Info and nothing unknown in the categories it counts, and is still bounded by GRD-4 and SBX-10.
+  Old workload-exposure/1 rows may omit this display flag: validate their coverage first and derive the
+  rendered flag from that coverage. A supplied true flag that contradicts coverage is rejected; omitted/false
+  flags never suppress the rendered not-proven warning or become additional proof (SCR-5).
 - **SCR-5 Exposure and measurement coverage are separate.** Preserve SCR-2's RC
   score, but attach deterministic catalog-wide coverage to every valid scorecard.
   Partition each category's checks into proven pass/absence, findings (including
