@@ -75,14 +75,14 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.org, "org", os.Getenv("SANDPROBE_SPRITES_ORG"), "the Sprites org for the throwaway sprite")
 	fs.StringVar(&r.canary, "canary", os.Getenv("SANDPROBE_CANARY"), "an operator canary's state file (deploy/canary.sh), used only when named; the hosted canary otherwise (HCN-5)")
 	fs.StringVar(&r.outDir, "out", "sandprobe-reports", "where the JSON and web reports go")
-	fs.StringVar(&r.min, "min", "", "exit 6 when the grade is below this letter")
+	fs.StringVar(&r.min, "min", "", "exit 6 when the score is below 0..6, or below full (every applicable category green)")
 	fs.StringVar(&r.theme, "theme", "graphite", "the web report's palette: graphite or mission")
 	fs.BoolVar(&r.allowLocalProxy, "allow-local-proxy", false, "docker, aws-nitro, and exec or a recipe with -provider-endpoints EGR-3: let EGR-3 use a proxy on the box's own loopback (UX-4); providers that exclude EGR-3 ignore or refuse it")
 	fs.StringVar(&r.setup, "setup", "", "sprites: your sandbox's setup script, run once in the new sprite before the checkpoint (SPR-1)")
 	fs.StringVar(&r.as, "as", "", "docker and exec: the agent's user in the box (docker default: the image's own user, else root)")
 	fs.StringVar(&r.scratch, "scratch", "", "exec: an absolute directory in the box for the probe's scratch (default /tmp)")
 	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "a public canary you run, https://control.<domain>, instead of the hosted one (HCN-5)")
-	fs.BoolVar(&r.noCanary, "no-canary", false, "exec: run without a canary; the exfiltration checks aren't tested, so the run can't grade above C (HCN-5)")
+	fs.BoolVar(&r.noCanary, "no-canary", false, "exec and recipes: run without a canary; Exfiltration isn't tested, so the run stays incomplete (HCN-5)")
 	fs.StringVar(&r.providerEndpoints, "provider-endpoints", "", "exec and recipes: turn on named checks that contact your provider's own endpoints (SEC-4, EGR-3, AMP-6, AMP-7), attesting your provider's terms allow each on your own account (PRV-15)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
 	fs.BoolVar(&r.requireHTTPMarker, "require-http-marker-v1", false, "canary check only: require signed TCP/80 HTTP marker capability")
@@ -505,8 +505,8 @@ func plan(o opts, r runFlags, args []string) error {
 }
 
 func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
-	if r.min != "" && (len(r.min) != 1 || !strings.Contains(letters, strings.ToUpper(r.min))) {
-		return 0, fail("usage", "-min takes a letter, A to F", "-min C", exitUsage)
+	if _, _, ok := parseMin(r.min); !ok {
+		return 0, fail("usage", "-min takes a score from 0 to 6, or full", "-min 6", exitUsage)
 	}
 	if len(args) == 1 && args[0] == "exec" {
 		return runExec(o, r, false, stderr)
@@ -579,36 +579,34 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	if err != nil {
 		return 0, fail("usage", err.Error(), "make", exitUsage)
 	}
-	step := func(f string, a ...any) {
-		if !o.json() {
-			fmt.Fprintf(stderr, "· "+f+"\n", a...)
-		}
-	}
+	lv := newLive(o, stderr, "sprites", livePhasesFor("sprites", false, false))
+	defer lv.close(false)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	c, public, err := r.openCanary(ctx, choice, step) // HCN-5: proven, and its slot reserved, before the sprite exists
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the sprite exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
 	start := time.Now()
-	step("creating a sprite in %s", org)
+	lv.phase("box", "creating a sprite in %s", org)
 	s, err := host.CreateSprite(ctx, spritesHome(), org)
 	var run *host.Run
 	cleanup, cleaned := "the sprite was destroyed, the provider confirming it gone", true
 	teardown := func() {
 		tctx, tcancel := context.WithTimeout(context.Background(), 3*time.Minute) // even after Ctrl-C
 		defer tcancel()
-		step("destroying sprite %s", s.Name)
+		lv.phase("delete", "destroying sprite %s", s.Name)
 		var terr error
 		if run != nil {
 			terr = host.Teardown(tctx, run)
 		} else {
 			terr = s.Destroy(tctx)
 		}
+		lv.close(terr == nil)
 		if terr != nil { // the report gets a fixed sentence; the error, which can carry CLI output, stays on this terminal
 			cleanup, cleaned = fmt.Sprintf("NOT confirmed deleted: delete sprite %s (%s) in org %s by hand", s.Name, s.SpriteID, org), false
 			fmt.Fprintf(stderr, "sandprobe: %s\n  %v\n", cleanup, terr)
@@ -618,21 +616,24 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 		teardown()
 		return 0, fail("provider_error", err.Error(), "sprite list -o "+org, failExit(cleaned))
 	}
-	step("sprite %s (%s); uploading the probe", s.Name, s.SpriteID)
+	lv.phase("box", "sprite %s (%s); uploading the probe", s.Name, s.SpriteID)
 	err = s.Upload(ctx, bin)
 	if err == nil && setup != nil {
-		step("running your setup script %s (sha256 %s)", filepath.Base(r.setup), setupSum[:12])
+		lv.phase("box", "running your setup script %s (sha256 %s)", filepath.Base(r.setup), setupSum[:12])
 		if err = s.Setup(ctx, setup); err == nil && s.Launcher != "" {
-			step("your setup left the agent's launcher: the probe runs through %s", s.Launcher)
+			lv.phase("box", "your setup left the agent's launcher: the probe runs through %s", s.Launcher)
 		}
 	}
 	if err == nil {
-		step("taking a checkpoint")
+		lv.phase("box", "taking a checkpoint")
 		err = s.Checkpoint(ctx)
 	}
 	if err == nil {
-		step("running the probe as the agent, then the reset and recheck")
+		lv.phase("probe", "running the probe as the agent, then the reset and recheck")
 		run, err = host.Execute(ctx, s, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
+		if err == nil && lv.inPlace {
+			lv.phase("reset", "checkpoint restored and markers rechecked")
+		}
 	}
 	teardown()
 	if err != nil {
@@ -676,15 +677,11 @@ func finish(o opts, r runFlags, d report.Doc, cleaned bool) (int, error) {
 	if o.json() {
 		o.emit(d)
 	} else {
-		letter := d.Grade.Letter
-		if !d.Grade.Valid {
-			letter = "none (invalid run)"
-		} else if !d.Grade.Complete {
-			letter += fmt.Sprintf(" (incomplete: %d unknown)", len(d.Grade.Unknown))
+		caps := detectTermCaps(o.stdout, shouldInteract(o))
+		fmt.Fprint(o.stdout, renderResult(d, base, cleaned, caps))
+		if caps.tty {
+			interactResult(o, d, base, cleaned, caps)
 		}
-		printCard(o, report.Score(d), d.Statement)
-		fmt.Fprintf(o.stdout, "\nAppendix: grade %s; %d critical, %d high, %d medium findings; every detail in %s.html\nCleanup: %s\n",
-			letter, d.Grade.Counts["critical"], d.Grade.Counts["high"], d.Grade.Counts["medium"], base, d.Cleanup.Outcome)
 	}
 	return exitFor(d, cleaned, r.min), nil
 }
@@ -694,7 +691,7 @@ func exitFor(d report.Doc, cleaned bool, min string) int {
 	switch {
 	case !cleaned:
 		return exitCleanup
-	case d.Grade.Valid && below(d.Grade.Letter, min):
+	case d.Grade.Valid && belowMin(report.Score(d), min):
 		return exitBelowMin
 	case !d.Grade.Valid || !d.Grade.Complete:
 		return exitPartial

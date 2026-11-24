@@ -46,14 +46,14 @@ Confidential mode denies `exec` and stdin, so it isn't supported.
 ### Exit 5: incomplete is expected
 
 A run on the `isolated` or `network-isolated` pod is expected to finish incomplete, and exit 5. Incomplete means some
-checks ended unknown: the probe couldn't settle them either way, and the report gives each one's reason. The grade
-then carries the count, such as `C (incomplete: 3 unknown)`, and is never A or B (GRD-2). The run still finished: its
+checks ended unknown: the probe couldn't settle them either way, and the report gives each one's reason. Both the
+terminal summary and the web report print `Incomplete: N checks unknown` beside the score. The run still finished: its
 pod was confirmed deleted, since a pod that isn't makes the run exit 7 instead, and its reports were written.
 
 In a script, treat 5 as "ran, with unknowns", and confirm it from the JSON report (`-o json`): `grade.valid` is true,
-`grade.complete` is false, and `grade.unknown` lists the checks. Two other cases exit 5, with no letter: an invalid
+`grade.complete` is false, and `grade.unknown` lists the checks. Two other cases exit 5: an invalid
 run, whose `grade.valid` is false and whose `grade.invalid` says why, and a run that stopped on an error once its pod
-was deleted, which prints the error instead of a report. A grade below `-min` exits 6, which outranks 5. The README
+was deleted, which prints the error instead of a report. A valid run whose score is below `-min` (`0`–`6` or `full`) exits 6, which outranks 5. The README
 lists every exit code under [What it checks](../../README.md#what-it-checks), and SPEC.md's OUT-4 is the rule.
 
 ### Cost

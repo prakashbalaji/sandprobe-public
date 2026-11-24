@@ -253,24 +253,21 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 		}
 		return exitApproval, nil
 	}
-	step := func(f string, a ...any) {
-		if !o.json() {
-			fmt.Fprintf(stderr, "· "+f+"\n", a...)
-		}
-	}
+	lv := newLive(o, stderr, "exec", livePhasesFor("exec", choice.none, false))
+	defer lv.close(false)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, execRunTimeout)
 	defer cancel()
 	start := time.Now()
 
-	c, public, err := r.openCanary(ctx, choice, step)
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary"))
 	if err != nil {
 		return 0, err
 	}
 	var run *host.Run
 	err = func() error {
-		step("asking the box which probe it runs")
+		lv.phase("preflight", "asking the box which probe it runs")
 		arch, err := box.Arch(ctx)
 		if err != nil {
 			return err
@@ -280,17 +277,21 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 			return err
 		}
 		box.Binary = bin
-		step("checking who your command runs as, before anything else")
+		lv.phase("preflight", "checking who your command runs as, before anything else")
 		w, err := box.Preflight(ctx, r.as)
 		if err != nil {
 			return err
 		}
-		step("running the probe as uid %d through your command", w.UIDs[1])
+		lv.phase("probe", "running the probe as uid %d through your command", w.UIDs[1])
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(host.ExecExclusions(), attested),
 			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none, BlockDevicePaths: r.blockDevicePaths})
 		return err
 	}()
+	if lv.inPlace {
+		lv.phase("cleanup", "removing scratch directory %s", box.Scratch)
+	}
 	cleanup, cleaned := execTeardown(box, box.Scratch, public, stderr)
+	lv.close(cleaned)
 	if err != nil {
 		return 0, fail("provider_error", err.Error(), "see the message; the cleanup is above", failExit(cleaned))
 	}

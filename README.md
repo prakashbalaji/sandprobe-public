@@ -159,7 +159,7 @@ lists each one with your attestation before anything runs, and the report record
   - To use a canary you run yourself, name it: `-canary-url <url> -canary-pin <pin>` for a public canary, or
     `-canary <state file>` for one deployed with `deploy/canary.sh`. Sandprobe never picks one up on its own.
 - **No canary traffic, with `-no-canary`** (`run exec` and recipes): the probe sends no test traffic to any canary,
-  and no canary is contacted. Exfiltration is then reported as not tested, and the run can't grade above C. Checks you
+  and no canary is contacted. Exfiltration is then reported as not tested, and the run finishes incomplete (exit 5). Checks you
   turn on with `-provider-endpoints` that don't need a canary still make the connections the plan names: SEC-4's
   requests to the cloud metadata addresses and AMP-7's TLS handshake with the Kubernetes API. EGR-3 doesn't run, since
   it needs a canary, and AMP-6 only checks for a vsock device and connects to nothing. Your own command, or the
@@ -193,8 +193,8 @@ report says what was proven, what is only an indicator, and what wasn't tested.
 | Persistence | PER-1 to PER-5 | writable startup, PATH, schedule and access files; storage that survives the provider's reset |
 | Amplifiers | AMP-1 to AMP-8 | passwordless sudo, root or capabilities, setuid and file capabilities, control sockets, local daemons, vsock, the Kubernetes API, kernel settings |
 
-The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence)
-and a letter grade, A to F. A category is green only when something in it was tested, nothing in it was left unknown,
+The report leads with a score out of six (Secrets, Exfiltration, Containment, Privilege, Cloud access, Persistence).
+A category is green only when something in it was tested, nothing in it was left unknown,
 and nothing above Info was found; when none of its checks is conclusive, it reads "Green · not proven".
 
 Cloud access asks whether the agent can use your cloud identity: your own cloud roles, your own cloud's metadata
@@ -208,7 +208,7 @@ skipped, missing, scoped out, unknown or unproven. They answer different questio
 every check was conclusive. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its structure
 only: it can't re-verify the run or tell an edited report apart, and each says so.
 
-Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 below `-min`, 7 a box not
+Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 score below `-min` (`0`–`6` or `full`), 7 a box not
 confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.
 
 Research harnesses, such as the managed Nitro and Daytona coding evaluations, live in
