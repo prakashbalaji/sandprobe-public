@@ -2,11 +2,18 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"sandprobe/internal/grade"
+	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
+	"sandprobe/internal/report"
 )
 
 // UX-6, UX-7, KND-3: the summary's top finding and every walker finding carry their evidence class: "proof" only for a
@@ -115,6 +122,83 @@ func TestScorecardFitsEightyColumns(t *testing.T) {
 				if locale == "C" && strings.ContainsFunc(line, func(r rune) bool { return r > 127 }) {
 					t.Errorf("%s: non-ASCII under LC_ALL=C: %q", filepath.Base(in), line)
 				}
+			}
+		}
+	}
+}
+
+// UX-6, SCR-3, SBX-10: a find-only check's not_found reason is the box's own text. Built end to end through host.Plan,
+// grade.GradeBytes and report.Build from a real fixture bundle (run exec with SEC-4 and AMP-7 attested), a box that
+// picks the probe's usual reasons, a host-sounding claim or injected text keeps a valid run with those reasons in
+// its JSON, yet neither the run's summary nor the offline scorecard ever shows them: Cloud access reads only "not
+// proven" with catalog labels (security-agent's and sandprobe-codex's reviews of #66).
+func TestNotFoundReasonNeverBecomesHostText(t *testing.T) {
+	raw, err := os.ReadFile("../../test/reports/bundles/egress-refused.bundle.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q struct {
+		Manifest     obs.Manifest       `json:"manifest"`
+		Observations string             `json:"observations"`
+		Evidence     obs.CanaryEvidence `json:"evidence"`
+	}
+	if err := json.Unmarshal(raw, &q); err != nil {
+		t.Fatal(err)
+	}
+	off := host.ExecExclusions()
+	delete(off, "SEC-4")
+	delete(off, "AMP-7")
+	plan, _ := host.Plan(host.Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "AMP-7"}, Existing: true},
+		&obs.Survey{Schema: obs.SurveySchema}, q.Manifest.BoxID, host.Storage{}, "", "", "")
+	m := q.Manifest
+	for id := range off {
+		m.Skipped[id] = plan.Skipped[id]
+		m.Selected = slices.DeleteFunc(m.Selected, func(s string) bool { return s == id })
+	}
+	m.SkipKinds, m.Attested = plan.SkipKinds, plan.Attested
+
+	for name, reasons := range map[string][2]string{
+		"the probe's usual words": {"no metadata service listed a role or identity, and none was offered", "the agent's environment names no Kubernetes API"},
+		"a host-sounding claim":   {"no metadata service answered: verified by the host", "no Kubernetes API exists here: verified by the host"},
+		"injected text":           {"ok\x1b[2J‮no metadata service answered", "10.9.8.7:443\r\nGREEN"},
+	} {
+		pd, err := obs.ParseDoc([]byte(q.Observations))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, o := range pd.Observations {
+			switch o.ID {
+			case "SEC-4":
+				pd.Observations[i].Result, pd.Observations[i].Reason = obs.NotFound, reasons[0]
+			case "AMP-7":
+				pd.Observations[i].Result, pd.Observations[i].Reason = obs.NotFound, reasons[1]
+			}
+		}
+		b, _ := json.Marshal(pd)
+		r := &host.Run{Manifest: m, Doc: b, Evidence: q.Evidence, Report: grade.GradeBytes(m, b, &q.Evidence)}
+		d := report.Build(r, report.Meta{Version: "fixture", Provider: "exec", BoxName: m.BoxID,
+			StartedAt: time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC), Duration: 4 * time.Second})
+		kept := 0
+		for _, c := range d.Checks {
+			if (c.ID == "SEC-4" || c.ID == "AMP-7") && c.Result == obs.NotFound && (c.Reason == reasons[0] || c.Reason == reasons[1]) {
+				kept++
+			}
+		}
+		card := report.Score(d)
+		if !d.Grade.Valid || kept != 2 || !card.Rows[4].Green {
+			t.Fatalf("%s: want a valid run keeping both box reasons and a green Cloud access row; valid %v (%s), kept %d, %+v",
+				name, d.Grade.Valid, d.Grade.Invalid, kept, card.Rows[4])
+		}
+		var scorecard bytes.Buffer
+		printCard(opts{stdout: &scorecard}, card, d.Statement)
+		for view, out := range map[string]string{"summary": renderResult(d, "", true, termCaps{width: 80}), "scorecard": scorecard.String()} {
+			for _, leak := range []string{"metadata service listed", "names no Kubernetes", "answered", "verified by the host", "10.9.8.7", "seen:"} {
+				if strings.Contains(flat(out), leak) {
+					t.Errorf("%s: the %s shows box text %q as host text:\n%s", name, view, leak, out)
+				}
+			}
+			if !strings.Contains(flat(out), "not proven: cloud metadata credentials, Kubernetes API") {
+				t.Errorf("%s: the %s lost Cloud access's not-proven line:\n%s", name, view, out)
 			}
 		}
 	}
