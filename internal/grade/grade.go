@@ -84,6 +84,10 @@ func Grade(m obs.Manifest, d *obs.Doc, c *obs.CanaryEvidence) Report {
 		case !ok:
 			oc = unknown("not observed: the probe returned nothing for this check")
 		case o.Result == obs.ScopedOut:
+			if len(m.Targets[ck.ID]) > 0 {
+				oc = unknown("scoped out, but the host declared targets that must be measured (EVD-13)")
+				break
+			}
 			if n, t := o.Proof.Discovered[ck.ScopeOut], len(o.Proof.Targets); n != 0 || t != 0 {
 				oc = unknown(fmt.Sprintf("scoped out, but %s found %d and %d targets were listed", ck.ScopeOut, n, t))
 				break
@@ -200,6 +204,9 @@ func validate(m obs.Manifest, d *obs.Doc) error {
 func ManifestSound(m obs.Manifest) error { return manifestSound(m) }
 
 func manifestSound(m obs.Manifest) error {
+	if err := catalog.ValidateBlockDevicePaths(m.Targets["AMP-8.blk"]); err != nil {
+		return err
+	}
 	if err := obs.ValidateCanaryTCP80Protocol(m); err != nil {
 		return err
 	}

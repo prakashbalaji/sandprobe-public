@@ -9,8 +9,39 @@ import (
 	"syscall"
 	"testing"
 
+	"sandprobe/internal/catalog"
+	"sandprobe/internal/obs"
+
 	"golang.org/x/sys/unix"
 )
+
+func TestDeclaredBlockDevices(t *testing.T) {
+	ck, _ := catalog.Get("AMP-8.blk")
+	defer func(f func() uint64) { agentCaps = f }(agentCaps)
+	agentCaps = func() uint64 { return 0 }
+	e := &env{in: Input{Targets: map[string][]string{}, Discover: map[string][]string{ck.ID: {"block_devices"}}}, root: root, tw: &twins{}}
+	if got := assessBlockDevices(e, ck, nil); got.Result != obs.ScopedOut {
+		t.Fatal("empty discovery without a declaration", got)
+	}
+	dir := t.TempDir()
+	regular := filepath.Join(dir, "regular")
+	if err := os.WriteFile(regular, []byte("owned fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{regular, filepath.Join(dir, "missing"), "relative"} {
+		e.in.Targets[ck.ID] = []string{path}
+		if got := assessBlockDevices(e, ck, nil); got.Result != obs.Unknown {
+			t.Fatalf("unmeasurable declared path became a negative: %+v", got)
+		}
+	}
+	// Root-only contract fixture: synthetic 0:0, not an attached disk; metadata only.
+	block := syntheticBlockNode(t, dir, "custom-block")
+	e.in.Targets[ck.ID] = []string{block}
+	got := assessBlockDevices(e, ck, nil)
+	if got.Result != obs.Finding || got.Variant != "readable_block_device" || got.Proof == nil || len(got.Proof.Targets) != 1 || got.Proof.Targets[0].Name != block || got.Proof.Targets[0].Rule != "" || got.Proof.Discovered["block_devices"] != 0 {
+		t.Fatalf("declared block lost its measurement with empty discovery: %+v", got)
+	}
+}
 
 func TestBlockPermissionRejectsOtherTypesAndMissingPaths(t *testing.T) {
 	dir := t.TempDir()

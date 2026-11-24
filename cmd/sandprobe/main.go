@@ -108,6 +108,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	r.providerEndpointsSet = given["provider-endpoints"]
 	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
 	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
+	if given["block-device-path"] && !execRun {
+		return reportErr(o, stderr, fail("usage", "-block-device-path applies only to run exec and plan exec", "sandprobe plan exec -block-device-path /dev/workload/data -- <command>", exitUsage))
+	}
 	if passthrough != nil && !docker && !execRun {
 		return reportErr(o, stderr, fail("usage", "what follows -- goes only to run docker (its docker run options) or run exec (your command)", "sandprobe run exec -y -- docker exec -i mybox sh", exitUsage))
 	}
@@ -244,6 +247,8 @@ SANDPROBE_CANARY* variable aside. run docker always starts its own canary and ta
 run exec and recipes also take -no-canary: no test traffic goes to any canary, so Exfiltration isn't tested.
 Attested SEC-4 metadata requests and AMP-7's Kubernetes API handshake still happen, and the plan names them;
 EGR-3 doesn't run (HCN-5).
+run exec also takes repeatable -block-device-path <absolute path> for an existing custom device mount;
+AMP-8.blk checks its type and read permission through metadata, never device I/O.
 run exec and recipes keep SEC-4, EGR-3, AMP-6 and AMP-7 off, since they contact your provider's own endpoints;
 -provider-endpoints <IDs> turns named ones on, each one you attest your provider's terms allow on your account (PRV-15).
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.

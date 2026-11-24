@@ -173,6 +173,9 @@ func hasFinding(r Report, id string) (Finding, bool) {
 
 func TestInvalidRuns(t *testing.T) {
 	cases := map[string]mutation{
+		"invalid declared block-device path": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			m.Targets["AMP-8.blk"] = []string{"relative"}
+		},
 		"duplicate check": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
 			d.Observations = append(d.Observations, *at(d, "SEC-2"))
 		},
@@ -520,6 +523,24 @@ func TestGrades(t *testing.T) {
 			o.Result, o.Reason = obs.ScopedOut, "no block devices"
 			o.Proof = &obs.Proof{Mechanism: "read_perm", Discovered: map[string]int{"block_devices": 1}}
 		}, "C", nil},
+		{"scoped out despite declared block device: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			m.Targets["AMP-8.blk"] = []string{"/dev/workload/disk"}
+			o := at(d, "AMP-8.blk")
+			o.Result, o.Reason = obs.ScopedOut, "no block devices"
+			o.Proof = &obs.Proof{Mechanism: "read_perm", Discovered: map[string]int{"block_devices": 0}}
+		}, "C", func(t *testing.T, r Report) {
+			if outcome(r, "AMP-8.blk").Result != obs.Unknown {
+				t.Fatal("declared target silently scoped out")
+			}
+		}},
+		{"declared block device omitted from pass: unknown", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			m.Targets["AMP-8.blk"] = []string{"/dev/workload/disk"}
+		}, "C", nil},
+		{"declared block device measured alongside discovery: pass", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
+			m.Targets["AMP-8.blk"] = []string{"/dev/workload/disk"}
+			o := at(d, "AMP-8.blk")
+			o.Proof.Targets = append(o.Proof.Targets, obs.Target{Name: "/dev/workload/disk", State: "refused", Errno: "EACCES"})
+		}, "A", nil},
 
 		// identity decides AMP-2 and AMP-3, reported or not
 		{"running as root is F with AMP-2 omitted", func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { asRoot(d) }, "F", func(t *testing.T, r Report) {

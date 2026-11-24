@@ -200,6 +200,9 @@ func closeCanary(public *host.HTTPSCanary, stderr io.Writer) {
 }
 
 func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
+	if err := catalog.ValidateBlockDevicePaths(r.blockDevicePaths); err != nil {
+		return 0, fail("usage", err.Error(), "use an existing absolute sandbox device path", exitUsage)
+	}
 	if len(r.dockerOpts) == 0 {
 		return 0, fail("usage", "run exec needs your command after --: one that starts sh in the box with stdin attached", "sandprobe run exec -y -- docker exec -i mybox sh", exitUsage)
 	}
@@ -220,6 +223,9 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 	}
 	allowLocal := r.allowLocalProxy && slices.Contains(attested, "EGR-3") // SBX-1 (e): only once EGR-3 is on
 	p := execPlan(box, r.as, choice, attested, allowLocal)
+	for _, path := range r.blockDevicePaths {
+		p.OpensReadOnly = append(p.OpensReadOnly, "block-device metadata only (never opened for I/O): "+path)
+	}
 	if planOnly {
 		if o.json() {
 			o.emit(p)
@@ -281,7 +287,7 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 		}
 		step("running the probe as uid %d through your command", w.UIDs[1])
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(host.ExecExclusions(), attested),
-			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none})
+			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none, BlockDevicePaths: r.blockDevicePaths})
 		return err
 	}()
 	cleanup, cleaned := execTeardown(box, box.Scratch, public, stderr)

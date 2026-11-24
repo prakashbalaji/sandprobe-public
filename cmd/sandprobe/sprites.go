@@ -26,6 +26,7 @@ import (
 )
 
 type runFlags struct {
+	blockDevicePaths                           []string // EVD-13: exec-only declared metadata targets.
 	exedevKeyFile, exedevState                 string
 	boatKeyFile                                string
 	daytonaKeyFile, daytonaPython              string
@@ -51,6 +52,10 @@ type runFlags struct {
 }
 
 func (r *runFlags) register(fs *flag.FlagSet) {
+	fs.Func("block-device-path", "exec only: an existing sandbox block-device path (repeatable, metadata-only)", func(p string) error {
+		r.blockDevicePaths = append(r.blockDevicePaths, p)
+		return nil
+	})
 	fs.StringVar(&r.exedevKeyFile, "exedev-key-file", os.Getenv("SANDPROBE_EXEDEV_KEY_FILE"), "exe.dev owner-only expiring tag-scoped token file")
 	fs.StringVar(&r.exedevState, "exedev-state", "", "exe.dev cleanup journal; never adopt by VM name")
 	fs.StringVar(&r.boatKeyFile, "boat-key-file", os.Getenv("SANDPROBE_BOAT_KEY_FILE"), "Boat owner-only API key file")

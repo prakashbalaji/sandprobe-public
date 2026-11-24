@@ -1037,6 +1037,13 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Re-resolving the reported path after the permission call must identify the same pinned block-device inode;
   observed removal, replacement or retargeting makes the measurement unknown. This does not broaden discovery:
   the existing `/sys/class/block` to `/dev/<name>` mapping still misses custom or nested device-node paths.
+- **EVD-13 Declared block-device paths.** A host may freeze up to 32 distinct, canonical absolute Linux
+  paths (at most 4095 printable ASCII bytes each) as AMP-8.blk targets before execution. `run exec` exposes
+  this through repeatable `-block-device-path`; its plan lists every path. These supplement, never replace,
+  sysfs-name discovery. An empty discovery cannot scope out a declared target: each must receive EVD-12's
+  typed, pinned metadata-only permission measurement. Missing, wrong-type or unmeasurable targets stay unknown.
+  The grader rejects scoped-out evidence when any target was declared. This adds no device, grants no permission,
+  performs no device I/O, and makes no claim of exhaustive discovery outside the declared and sysfs paths.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -2754,6 +2761,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
+| EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |
 | EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance; managed HTTP capability failure stops before paid receiver/provider creation |
 | EVD-9 | `internal/canary/http_marker_test.go`: canonical HTTP/80 + independently collected receipts, unarmed completion without proof, legacy compatibility, malformed/oversized/body/host/port rejection, bounded acknowledgement parsing and no raw response leakage |
 | EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
