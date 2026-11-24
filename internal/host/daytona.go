@@ -27,6 +27,8 @@ var daytonaRuntime string
 
 const DaytonaResidual = "Exec-mode default prebuilt Daytona CPU snapshot, private ephemeral sandbox, no app/model credentials or persistent mounts. Idle-stop is a cost backstop, not hard expiry. Guest boot evidence is self-observed; SDK runtime is pinned US proxy bound to the original ID. Cleanup accepts provider404 or original-ID destroyed/desired destroyed per SDK, and identifies any retained terminal metadata separately."
 
+var errDaytonaLocalSDK = errors.New("Daytona local SDK interpreter unavailable")
+
 var daytonaID = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
 var daytonaDir = regexp.MustCompile(`^/tmp/\.sandprobe-[A-Za-z0-9]{12}$`)
 
@@ -59,7 +61,12 @@ func (c *DaytonaClient) runSDK(ctx context.Context, in map[string]any) ([]byte, 
 	var out cappedE2BOutput
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
-	if cmd.Run() != nil {
+	if err := cmd.Run(); err != nil {
+		// EVD-7: no SDK process ran; do not attribute a local tool failure to the provider.
+		var launch *exec.Error
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) || errors.As(err, &launch) {
+			return nil, errDaytonaLocalSDK
+		}
 		var problem struct {
 			Status int    `json:"http_status"`
 			Code   string `json:"failure_code"`
@@ -161,6 +168,9 @@ func (b *DaytonaBox) call(ctx context.Context, op string, in map[string]any, out
 	call := obs.ProviderCall{At: at, Call: "Daytona " + op, OK: e == nil, ID: b.ID()}
 	if e != nil {
 		call.Error = "provider_error"
+		if errors.Is(e, errDaytonaLocalSDK) {
+			call.Error = "local_sdk_unavailable"
+		}
 	}
 	b.Calls = append(b.Calls, call)
 	return e
@@ -351,13 +361,8 @@ func (b *DaytonaBox) command(ctx context.Context, script string) ([]byte, error)
 		ID, Stdout string
 		Exit       *int `json:"exit_code"`
 	}
-	at := time.Now()
+	// EVD-7: b.call already records this SDK invocation.
 	e := b.call(ctx, "exec", in, &d)
-	call := obs.ProviderCall{At: at, Call: "Daytona exec", OK: e == nil, ID: b.ID()}
-	if e != nil {
-		call.Error = "provider_error"
-	}
-	b.Calls = append(b.Calls, call)
 	if e != nil {
 		return nil, e
 	}
