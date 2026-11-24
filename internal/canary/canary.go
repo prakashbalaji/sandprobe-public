@@ -58,20 +58,28 @@ type Request struct {
 	Challenge    string `json:"challenge,omitempty"`     // public: the host's fresh 32 bytes, hex, signed with the answer (HCN-1)
 }
 
+// Maintenance is HCN-8's private aggregate, never included in public answers.
+type Maintenance struct {
+	Draining     bool `json:"draining"`
+	ActiveRuns   int  `json:"active_runs"`
+	Reservations int  `json:"reservations"`
+}
+
 // Answer is the canary's reply, always with its pin. A query's answer is complete only when OK, under the run's pin,
 // for the run asked about; Overloaded means no network negative may rest on it.
 type Answer struct {
-	Protocols  []string `json:"protocols,omitempty"` // EVD-10: only protocols responses; legacy answer bytes stay unchanged.
-	Pin        string   `json:"pin"`
-	OK         bool     `json:"ok"`
-	Error      string   `json:"error,omitempty"`
-	Run        string   `json:"run,omitempty"`
-	Overloaded bool     `json:"overloaded,omitempty"`
-	Counts     []Count  `json:"counts,omitempty"`
-	Key        string   `json:"key"`                  // the canary's public key (base64 DER SubjectPublicKeyInfo), whose SHA-256 is the pin
-	Generation string   `json:"generation,omitempty"` // public arm and query: the run's random generation (HCN-2)
-	Addr       string   `json:"addr,omitempty"`       // public: the receipt address boxes must reach, signed (HCN-1)
-	Domain     string   `json:"domain,omitempty"`     // public: the canary's domain, signed (HCN-1)
+	Maintenance *Maintenance `json:"maintenance,omitempty"`
+	Protocols   []string     `json:"protocols,omitempty"` // EVD-10: only protocols responses; legacy answer bytes stay unchanged.
+	Pin         string       `json:"pin"`
+	OK          bool         `json:"ok"`
+	Error       string       `json:"error,omitempty"`
+	Run         string       `json:"run,omitempty"`
+	Overloaded  bool         `json:"overloaded,omitempty"`
+	Counts      []Count      `json:"counts,omitempty"`
+	Key         string       `json:"key"`                  // the canary's public key (base64 DER SubjectPublicKeyInfo), whose SHA-256 is the pin
+	Generation  string       `json:"generation,omitempty"` // public arm and query: the run's random generation (HCN-2)
+	Addr        string       `json:"addr,omitempty"`       // public: the receipt address boxes must reach, signed (HCN-1)
+	Domain      string       `json:"domain,omitempty"`     // public: the canary's domain, signed (HCN-1)
 }
 
 // Key is the canary's public key, as an answer over the control channel gave it, checked against the answer's pin.
@@ -158,14 +166,15 @@ type Canary struct {
 	Cert   tls.Certificate
 	Pin    string // hex SHA-256 of the certificate's SubjectPublicKeyInfo, which the probe pins
 
-	mu      sync.Mutex
-	runs    map[string]*run
-	armed   map[string]*Count // every armed nonce, across runs
-	capHits uint64            // connections ever closed unread at a cap
-	open    int
-	perSrc  map[string]int
-	arms    map[string][]time.Time  // public reservations per source in the last hour, in memory only (HCN-4)
-	held    map[string]*reservation // public reservations not yet armed, by the hex SHA-256 of their secret (HCN-3)
+	draining bool // HCN-8: protected by mu; never exposed through public status.
+	mu       sync.Mutex
+	runs     map[string]*run
+	armed    map[string]*Count // every armed nonce, across runs
+	capHits  uint64            // connections ever closed unread at a cap
+	open     int
+	perSrc   map[string]int
+	arms     map[string][]time.Time  // public reservations per source in the last hour, in memory only (HCN-4)
+	held     map[string]*reservation // public reservations not yet armed, by the hex SHA-256 of their secret (HCN-3)
 
 	// The public control path (HCN-1), set before ServeTLS starts: a TLS connection whose SNI is ControlName gets
 	// ControlTLS instead of the pinned key, and once its handshake completes, Control serves it and returns when done.
@@ -286,11 +295,25 @@ func (c *Canary) Handle(q Request) Answer {
 	c.purge()
 	a := Answer{Pin: c.Pin, Run: q.Run, Key: c.key()}
 	switch q.Op {
+	case "maintenance", "drain", "resume":
+		a.Run = "" // HCN-8: the private aggregate includes no run identifier.
+		if q.Op == "drain" {
+			c.draining = true
+		}
+		if q.Op == "resume" {
+			c.draining = false
+		}
+		a.OK = true
+		a.Maintenance = &Maintenance{Draining: c.draining, ActiveRuns: len(c.runs), Reservations: len(c.held)}
 	case "protocols":
 		a.OK, a.Protocols = true, []string{HTTPMarkerV1}
 	case "status":
 		a.OK = true
 	case "arm":
+		if c.draining {
+			a.Error = "the canary is draining for maintenance"
+			break
+		}
 		if err := c.arm(q); err != nil {
 			a.Error = err.Error()
 		} else {
@@ -357,6 +380,10 @@ func (c *Canary) HandlePublic(q Request, src string) Answer {
 	case "status":
 		a.OK = true
 	case "reserve":
+		if c.draining {
+			a.Error = "the canary is draining for maintenance"
+			break
+		}
 		if err := c.reserve(q, src); err != nil {
 			a.Error = err.Error()
 		} else {

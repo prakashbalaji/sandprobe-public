@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # canary.sh runs the live canary (SBX-11) on one EC2 instance of its own. Nothing else runs there: sshd is off, so 22
 # is the canary's, and the host reaches the control socket only through SSM, never over the network boxes use.
+# Shared-service maintenance and rollback: docs/HOSTED-CANARY-DEPLOYMENT.md
 #   up      build the canary, launch a new deployment with a fixed IP and its DNS records, then verify it
 #   status  verify the running canary: service, sshd off, binary digest, pin, and that the IP serves that pin
 #   ctl     ask the canary over SSM, as the host does: ctl status | arm -run R -ttl S -wants n/proto/port,... |

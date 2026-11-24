@@ -6,6 +6,7 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 ## Unreleased
 
 - Stop HTTP-opted managed Nitro and Daytona runs before paid resources when the shared canary capability is unavailable.
+- Add private canary maintenance admission controls and a deployment/rollback runbook; shared-service updates remain explicit.
 
 - Add explicit HTTP TCP/80 measurement selection with same-pin canary capability verification. Reports using it declare `sandprobe/4`; legacy requests and grading remain unchanged.
 
