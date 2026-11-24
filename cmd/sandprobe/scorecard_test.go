@@ -79,3 +79,19 @@ func TestPrintCardEscapesStatement(t *testing.T) {
 		t.Fatalf("control characters reached the terminal: %q", got)
 	}
 }
+
+func TestPrintableEscapesUnicodeFormatControls(t *testing.T) {
+	for _, r := range []rune{0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069, 0xfeff} {
+		raw := "before" + string(r) + "after"
+		got := printable(raw)
+		if strings.ContainsRune(got, r) || !strings.Contains(got, `\u`) {
+			t.Fatalf("format control U+%04X remains active: %q", r, got)
+		}
+	}
+	if got := printable("plain café 日本語 🚀"); got != "plain café 日本語 🚀" {
+		t.Fatalf("ordinary Unicode changed: %q", got)
+	}
+	if got := printable("x\x1b\n\u2028\u2029y"); strings.ContainsAny(got, "\x1b\n\u2028\u2029") {
+		t.Fatal("existing control escaping regressed")
+	}
+}

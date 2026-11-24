@@ -5,6 +5,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- Escape Unicode format controls in saved-report terminal text so bidi and zero-width characters cannot reorder or hide displayed evidence.
+
 ## 0.3.0-rc.2 (2026-11-23)
 
 The second release candidate for 0.3.0: the web report's new layout. Checks and grading are unchanged from rc.1.
