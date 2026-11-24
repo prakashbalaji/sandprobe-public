@@ -44,6 +44,8 @@ type taskResult struct {
 	Model                      string `json:"model"`
 	Pattern                    string `json:"deployment_pattern"`
 	Stage                      string `json:"failure_stage,omitempty"`
+	FailureCategory            string `json:"failure_category,omitempty"`
+	PreparationArtifact        string `json:"preparation_artifact,omitempty"`
 }
 type cleanupResult struct {
 	ID        string `json:"box_id"`
@@ -213,22 +215,43 @@ func decodeModelResponse(raw []byte, transport error, result *taskResult) ([]byt
 	}
 	return envelope.Response, true
 }
-func workload(ctx context.Context, o options, b *host.DaytonaBox) taskResult {
+
+// EVD-8: the workload boundary also permits credential-free preparation fault tests.
+type workloadBox interface {
+	WorkloadUpload(context.Context, string, []byte) error
+	WorkloadCommand(context.Context, string) ([]byte, error)
+}
+
+func workload(ctx context.Context, o options, b workloadBox) taskResult {
 	result := taskResult{Schema: "sandprobe.agent-task/2", Workload: "synthetic-coding-v1", Model: selectedModel(o), Pattern: "host_controller_no_guest_credentials", Independent: "failed"}
 	files := map[string]string{"coding.py": "experiments/eks-agent/coding.py", "project_exec.py": "experiments/eks-agent/project_exec.py", "worker.py": "experiments/eks-agent/worker.py"}
 	for name, path := range files {
+		result.PreparationArtifact = name // source-fixed basename, never a local path
+		result.Stage = "artifact_read"
 		data, e := os.ReadFile(filepath.Join(o.root, path))
-		if e != nil || b.WorkloadUpload(ctx, name, data) != nil {
-			result.Stage = "artifact_prepare"
+		if e != nil {
+			result.FailureCategory = "local_artifact_read_failed"
+			return result
+		}
+		result.Stage = "artifact_upload"
+		if e = b.WorkloadUpload(ctx, name, data); e != nil {
+			result.FailureCategory = failureCategory(e)
 			return result
 		}
 	}
+	result.PreparationArtifact = ""
+	result.Stage = "worker_prepare_execution"
 	prepared, e := b.WorkloadCommand(ctx, "python3 -I /opt/sandprobe/worker.py prepare")
 	var preparation struct {
 		Ready bool `json:"worker_ready"`
 	}
-	if e != nil || json.Unmarshal(prepared, &preparation) != nil || !preparation.Ready {
-		result.Stage = "artifact_prepare"
+	if e != nil {
+		result.FailureCategory = failureCategory(e)
+		return result
+	}
+	result.Stage = "worker_prepare_response"
+	if json.Unmarshal(prepared, &preparation) != nil || !preparation.Ready {
+		result.FailureCategory = "worker_ready_not_reported"
 		return result
 	}
 	result.Stage = "intended_network"
@@ -319,6 +342,8 @@ func failureCategory(e error) string {
 		return "bridge_" + m[3]
 	}
 	switch e.Error() {
+	case "Daytona local SDK interpreter unavailable":
+		return "local_sdk_unavailable"
 	case "Daytona workload configuration changed":
 		return "native_configuration_mismatch"
 	case "Daytona startup stopped; no implicit resume":
