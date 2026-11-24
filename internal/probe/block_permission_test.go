@@ -53,7 +53,7 @@ func TestBlockPermissionPinsSyntheticNodeAndRejectsCharacterDevice(t *testing.T)
 	dir := t.TempDir()
 	block := syntheticBlockNode(t, dir, "block")
 	character := filepath.Join(dir, "character")
-	if err := syscall.Mknod(character, syscall.S_IFCHR|0600, 0); err != nil {
+	if err := syscall.Mknod(character, syscall.S_IFCHR|0600, 1); err != nil {
 		t.Fatal(err)
 	}
 	original := readPermAt
@@ -128,7 +128,7 @@ func TestBlockPermissionReplacementAndRetargetingStayUnknown(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "character":
-					if err := syscall.Mknod(path, syscall.S_IFCHR|0600, 0); err != nil {
+					if err := syscall.Mknod(path, syscall.S_IFCHR|0600, 1); err != nil {
 						t.Fatal(err)
 					}
 				case "block":
