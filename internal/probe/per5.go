@@ -230,8 +230,14 @@ func recheck(m obs.Placed, runID string) (string, string) {
 		return "unknown", "the marker can't be checked"
 	case st.Mode&syscall.S_IFMT != syscall.S_IFREG:
 		return "unknown", "something other than a regular file is at the marker's name; unread"
-	case st.Ino != m.Ino || st.Size != m.Size:
-		return "unknown", "a file at the marker's name isn't the placed marker; unread"
+	// TWN-3: explain which metadata guard failed without reading the file or
+	// treating filesystem behavior as proof of marker identity.
+	case st.Ino != m.Ino && st.Size != m.Size:
+		return "unknown", "the marker's inode and length differ from the placed marker; unread"
+	case st.Ino != m.Ino:
+		return "unknown", "the marker's inode differs from the placed marker; unread"
+	case st.Size != m.Size:
+		return "unknown", "the marker's length differs from the placed marker; unread"
 	}
 	rfd, err := syscall.Open(fmt.Sprintf("/proc/self/fd/%d", pfd), syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY|syscall.O_CLOEXEC, 0)
 	if err != nil {
