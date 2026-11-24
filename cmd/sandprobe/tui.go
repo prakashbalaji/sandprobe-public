@@ -134,12 +134,11 @@ func livePhasesFor(provider string, noCanary, keepSandbox bool) []livePhase {
 	var phases []livePhase
 	switch provider {
 	case "docker":
-		return []livePhase{
+		return []livePhase{ // no reset: run docker never resets its container (DKR-5)
 			{ID: "network", Label: "network"},
 			{ID: "canary", Label: "canary"},
 			{ID: "box", Label: "box"},
 			{ID: "probe", Label: "probe"},
-			{ID: "reset", Label: "reset"},
 			{ID: "delete", Label: "delete"},
 		}
 	case "exec":
@@ -565,9 +564,6 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 			prefixStyled := fmt.Sprintf("  %s%s %-5s%s  %-13s ", st.red, g.red, "RED", st.reset, printable(row.Name))
 			writeStyledPrefixWrapped(&b, prefixPlain, prefixStyled, rowIndent, detail, w, st.red, st.reset)
 		}
-		if seen := notFoundSeen(d, row.Unproven); row.Green && seen != "" {
-			writeWrapped(&b, rowIndent, rowIndent, "seen: "+seen, w, st.dim, st.reset)
-		}
 	}
 
 	// Top chain / finding + canary receipt summary + Fix first (UX-6).
@@ -679,32 +675,6 @@ func countCoverage(d report.Doc, card report.Card) (conclusive, graded, total in
 		}
 	}
 	return conclusive, graded, total
-}
-
-// notFoundSaid maps a find-only check to the probe's one fixed not_found reason that names no box string, and the
-// words the summary uses for it (UX-6). Only an exact match is shown, so no box text reaches a category row (SCR-3),
-// and nothing claims more than the probe recorded: SEC-4's reason covers a service that answered without listing a
-// role as well as no answer at all, so it never reads "no metadata service answered".
-var notFoundSaid = map[string][2]string{
-	"SEC-4": {"no metadata service listed a role or identity, and none was offered", "no metadata service listed a role or identity"},
-	"AMP-7": {"the agent's environment names no Kubernetes API", "the agent's environment names no Kubernetes API"},
-}
-
-// notFoundSeen is what a green row's not-proven checks did record, in notFoundSaid's fixed words, or "".
-func notFoundSeen(d report.Doc, unproven []string) string {
-	var seen []string
-	for _, id := range unproven {
-		said, ok := notFoundSaid[id]
-		if !ok {
-			continue
-		}
-		for _, c := range d.Checks {
-			if c.ID == id && c.Result == obs.NotFound && c.Reason == said[0] {
-				seen = append(seen, said[1])
-			}
-		}
-	}
-	return strings.Join(seen, "; ")
 }
 
 // evidenceClass is a finding's KND-3 class in words (UX-6, UX-7): "proof" only for a proven, non-potential finding;

@@ -45,8 +45,7 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   open the HTML report, `b`/`Esc` back to the summary, `q`, or `Esc` on the summary, to quit) on foreground TTYs when `CI` and `SANDPROBE_NO_KEYS` are unset, auto-exiting after 15 seconds if untouched and restoring
   terminal state on `EOF` and termination/suspension signals (UX-5, UX-7, AGT-1).
 - The run summary's top finding and each finding in the walker say whether it is `proof` or `a sign we saw, not
-  confirmed` (UX-6, UX-7). A green row with a not-proven check adds a `seen:` line when the probe recorded one of its
-  fixed reasons, such as `no metadata service listed a role or identity` (UX-6).
+  confirmed` (UX-6, UX-7).
 - `sandprobe scorecard` keeps every line within 80 columns, its coverage sentence, statement and saved-report note
   included; it honors `NO_COLOR` and `TERM=dumb`, and uses ASCII row symbols under a `C` or `POSIX` locale (UX-9).
 - Terminal output escapes Unicode `Cf` format characters (bidi overrides/isolates, ALM, zero-width characters, BOM) in

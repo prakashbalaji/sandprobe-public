@@ -164,9 +164,9 @@ func TestLivePhaseNeverTicksSkippedOrFailed(t *testing.T) {
 		{"exec success", "exec", false, []string{"p:canary", "p:preflight", "p:probe", "d:probe", "q:cleanup", "close:true"}, []phaseState{D, D, D, D}},
 		{"exec preflight fails, cleanup confirmed", "exec", false, []string{"p:canary", "p:preflight", "q:cleanup", "close:true"}, []phaseState{D, F, P, D}},
 		{"exec canary fails", "exec", false, []string{"p:canary", "close:false"}, []phaseState{F, P, P, P}},
-		{"docker success", "docker", false, []string{"p:network", "q:canary", "p:box", "p:probe", "d:reset", "p:delete", "close:true"}, []phaseState{D, D, D, D, D, D}},
-		{"docker box hangs, cleanup confirmed", "docker", false, []string{"p:network", "q:canary", "p:box", "p:delete", "close:true"}, []phaseState{D, D, F, P, P, D}},
-		{"docker probe fails, cleanup unconfirmed", "docker", false, []string{"p:network", "q:canary", "p:box", "p:probe", "p:delete", "close:false"}, []phaseState{D, D, D, F, P, F}},
+		{"docker success", "docker", false, []string{"p:network", "q:canary", "p:box", "p:probe", "d:probe", "p:delete", "close:true"}, []phaseState{D, D, D, D, D}},
+		{"docker box hangs, cleanup confirmed", "docker", false, []string{"p:network", "q:canary", "p:box", "p:delete", "close:true"}, []phaseState{D, D, F, P, D}},
+		{"docker probe fails, cleanup unconfirmed", "docker", false, []string{"p:network", "q:canary", "p:box", "p:probe", "p:delete", "close:false"}, []phaseState{D, D, D, F, F}},
 		{"sprites success", "sprites", false, []string{"p:canary", "p:box", "p:probe", "d:reset", "p:delete", "close:true"}, []phaseState{D, D, D, D, D}},
 		{"nitro probe fails, cleanup confirmed", "aws-nitro", false, []string{"p:canary", "p:box", "p:probe", "p:delete", "close:true"}, []phaseState{D, D, F, D}},
 		{"recipe create fails with no ID", "kubernetes", false, []string{"p:canary", "q:box", "close:false"}, []phaseState{D, F, P, P}},
@@ -208,7 +208,7 @@ func TestLivePhaseNeverTicksSkippedOrFailed(t *testing.T) {
 	}
 }
 
-// UX-5 end to end. On Docker a hung box start fails the run: box did not finish, probe and reset never ran, and
+// UX-5 end to end. On Docker a hung box start fails the run: box did not finish, the probe never ran, and
 // delete is ticked exactly when the run confirmed its cleanup (any exit but 7). A failing run exec command fails
 // preflight; its confirmed cleanup completes only the cleanup phase.
 func TestRunnersLiveOutcomeOnFailure(t *testing.T) {
@@ -246,7 +246,7 @@ esac
 	if code == exitCleanup {
 		deleted = phaseFailed
 	}
-	want := map[string]phaseState{"network": phaseDone, "box": phaseFailed, "probe": phasePending, "reset": phasePending, "delete": deleted}
+	want := map[string]phaseState{"network": phaseDone, "box": phaseFailed, "probe": phasePending, "delete": deleted}
 	for i, p := range got.phases {
 		if w, ok := want[p.ID]; ok && got.states[i] != w {
 			t.Errorf("docker %s: %d, want %d", p.ID, got.states[i], w)

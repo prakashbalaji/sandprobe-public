@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,46 +116,6 @@ func TestScorecardFitsEightyColumns(t *testing.T) {
 					t.Errorf("%s: non-ASCII under LC_ALL=C: %q", filepath.Base(in), line)
 				}
 			}
-		}
-	}
-}
-
-// UX-6, SCR-3: a green row's not-proven checks say what the probe recorded only when their reason is exactly the
-// probe's own fixed one; any other reason (an address, injected text) adds nothing. No line says a metadata service
-// didn't answer, since SEC-4's reason doesn't record that (alpha-test feedback).
-func TestNotFoundSeenOnlyFromExactReasons(t *testing.T) {
-	vibe := loadReportJSON(t, "../../demo/reports/vibe.json")
-	got := renderResult(vibe, "", true, termCaps{width: 80})
-	if !strings.Contains(flat(got), "seen: no metadata service listed a role or identity; the agent's environment names no Kubernetes API") ||
-		!strings.Contains(got, "not proven: cloud metadata credentials, Kubernetes API") || strings.Contains(got, "answered") {
-		t.Errorf("Cloud access row:\n%s", got)
-	}
-
-	forged := loadReportJSON(t, "../../demo/reports/vibe.json")
-	for i, c := range forged.Checks {
-		switch c.ID {
-		case "SEC-4":
-			forged.Checks[i].Reason = notFoundSaid["SEC-4"][0] + "\x1b[2J"
-		case "AMP-7":
-			forged.Checks[i].Reason = "no TCP connection to the Kubernetes API at 10.9.8.7:443"
-		}
-	}
-	if got := renderResult(forged, "", true, termCaps{width: 80}); strings.Contains(got, "seen:") || strings.Contains(got, "10.9.8.7") {
-		t.Errorf("a reason that isn't the probe's exact one reached the row:\n%s", got)
-	}
-
-	// The fixed reasons are the probe's own: a reworded probe reason fails here instead of silently hiding the line.
-	src := ""
-	for _, f := range []string{"../../internal/probe/meta.go", "../../internal/probe/amp.go"} {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		src += string(b)
-	}
-	for id, said := range notFoundSaid {
-		if !strings.Contains(src, `Result: obs.NotFound, Reason: "`+said[0]+`"}`) {
-			t.Errorf("%s: the probe has no not_found reason %q", id, said[0])
 		}
 	}
 }

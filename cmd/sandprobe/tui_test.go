@@ -397,7 +397,7 @@ func TestLivePhasesFromPlan(t *testing.T) {
 		keepSandbox bool
 		want        []string
 	}{
-		{"docker", false, false, []string{"network", "canary", "box", "probe", "reset", "delete"}},
+		{"docker", false, false, []string{"network", "canary", "box", "probe", "delete"}},
 		{"sprites", false, false, []string{"canary", "box", "probe", "reset", "delete"}},
 		{"aws-nitro", false, false, []string{"canary", "box", "probe", "delete"}},
 		{"e2b", false, false, []string{"canary", "box", "probe", "delete"}},

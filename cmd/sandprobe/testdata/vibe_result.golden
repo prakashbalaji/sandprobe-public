@@ -11,8 +11,6 @@
   ✗ RED    Privilege     Found: setuid or file-capability escalation
   ◌ GREEN · NOT PROVEN  Cloud access
                          not proven: cloud metadata credentials, Kubernetes API
-                         seen: no metadata service listed a role or identity;
-                         the agent's environment names no Kubernetes API
   ✗ RED    Persistence   Found: startup files, boot and schedule, package and
                          git config
 

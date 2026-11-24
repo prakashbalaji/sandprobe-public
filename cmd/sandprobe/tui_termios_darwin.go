@@ -32,12 +32,12 @@ func termSize(fd int) (cols, rows int) {
 	return int(ws.Col), int(ws.Row)
 }
 
+// isForegroundTTY fails closed (UX-7, AGT-1): only a terminal that names this process's own group as its foreground
+// counts. An error, such as ENOTTY for a terminal that isn't this session's controlling one, or a group of zero or
+// less, means not foreground.
 func isForegroundTTY(fd int) bool {
 	pgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
-	if err != nil || pgrp <= 0 {
-		return true
-	}
-	return pgrp == unix.Getpgrp()
+	return err == nil && pgrp > 0 && pgrp == unix.Getpgrp()
 }
 
 func pollFD(fd int, timeoutMS int) (ready, hup bool, err error) {
