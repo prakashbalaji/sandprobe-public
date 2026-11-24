@@ -5,6 +5,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- A green category with no conclusive check, such as Cloud access when SEC-4 and AMP-7 both end `not_found`, now reads "Green · not proven" rather than plain green: a dashed `GREEN · NOT PROVEN` badge in the web report and the workload exposure page, `◌ GREEN · NOT PROVEN` in the terminal, and `green_not_proven: true` in `scorecard -o json`. It still counts toward the score (SCR-2).
+
 - Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.
 
 - Retain optional, own-sandbox-bound organization network-policy context for managed Daytona runs without treating configuration as observed denial.

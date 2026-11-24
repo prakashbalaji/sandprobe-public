@@ -208,3 +208,33 @@ func TestSavedExposureCoverageWithoutNewDisplayFields(t *testing.T) {
 		t.Fatal("historical v1 exposure no longer renders:", err)
 	}
 }
+
+// SCR-2, SCR-5: a saved workload-exposure/1 card without the display flag gains the label from its validated
+// coverage when rendered, without changing the caller's card; a supplied flag that contradicts coverage is refused.
+func TestHistoricalDisplayFlagIsDerivedWithoutMutatingInput(t *testing.T) {
+	c := Score(doc(obs.NotFound, nil))
+	for i := range c.Rows {
+		c.Rows[i].GreenNotProven = false
+	}
+	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: c}
+	b, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(b), "<td>Green · not proven</td>") != 6 || strings.Contains(string(b), "<td>Green</td>") {
+		t.Fatal("historical rows did not gain the derived not-proven label")
+	}
+	for _, r := range x.Rows {
+		if r.GreenNotProven {
+			t.Fatal("rendering changed the caller's saved card")
+		}
+	}
+	x.Card = Score(doc(obs.Pass, nil))
+	if b, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, x); err != nil || strings.Contains(string(b), "Green · not proven") || strings.Count(string(b), "<td>Green</td>") != 6 {
+		t.Fatalf("proven rows: %v", err)
+	}
+	x.Rows[0].GreenNotProven = true
+	if validWorkloadExposure(x) {
+		t.Fatal("accepted a supplied flag that contradicts coverage")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"unicode"
+	"unicode/utf8"
 
 	"sandprobe/internal/analysis"
 	"sandprobe/internal/report"
@@ -96,11 +97,26 @@ func printable(s string) string {
 	return b.String()
 }
 
-// printCard writes the headline: the score, then one line per category, green, red or not applicable (SCR-2).
+// asciiLocale says the terminal's locale is C or POSIX (UX-9): the first of LC_ALL, LC_CTYPE and LANG that is set.
+func asciiLocale() bool {
+	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return strings.EqualFold(v, "C") || strings.EqualFold(v, "POSIX")
+		}
+	}
+	return false
+}
+
+// printCard writes the headline: the score, then one line per category, green, green not proven, red or not
+// applicable (SCR-2).
 func printCard(o opts, c report.Card, statement string) {
-	green, red, reset := "", "", ""
+	green, unproven, red, reset := "", "", "", ""
 	if f, ok := o.stdout.(*os.File); ok && isTerminal(f) {
-		green, red, reset = "\x1b[1;32m", "\x1b[1;31m", "\x1b[0m"
+		green, unproven, red, reset = "\x1b[1;32m", "\x1b[32m", "\x1b[1;31m", "\x1b[0m"
+	}
+	gnpDot, gnpMark := "◌", "GREEN · NOT PROVEN"
+	if asciiLocale() {
+		gnpDot, gnpMark = "o", "GREEN . NOT PROVEN"
 	}
 	w := o.stdout
 	if !c.Valid {
@@ -116,14 +132,20 @@ func printCard(o opts, c report.Card, statement string) {
 		fmt.Fprintln(w, c.Coverage.Description())
 	}
 	for _, row := range c.Rows {
-		mark, color := "RED  ", red
+		dot, mark, color := "●", "RED  ", red
 		switch {
+		case row.Green && row.GreenNotProven: // SCR-2, UX-9: its own symbol and words, never plain GREEN
+			dot, mark, color = gnpDot, gnpMark, unproven
 		case row.Green:
 			mark, color = "GREEN", green
 		case row.NotApplicable: // SCR-2: never green, and out of the score
 			mark, color = "N/A  ", ""
 		}
-		fmt.Fprintf(w, "  %s● %s%s  %-13s %s\n", color, mark, reset, row.Name, row.Question)
+		if utf8.RuneCountInString(fmt.Sprintf("  %s %s  %-13s %s", dot, mark, row.Name, row.Question)) <= 80 {
+			fmt.Fprintf(w, "  %s%s %s%s  %-13s %s\n", color, dot, mark, reset, row.Name, row.Question)
+		} else { // UX-9: within 80 columns, the question moves under the row, where its other lines start
+			fmt.Fprintf(w, "  %s%s %s%s  %s\n  %-22s %s\n", color, dot, mark, reset, row.Name, "", row.Question)
+		}
 		if row.Why != "" { // a not-applicable reason is the report's own skip reason: escaped like its other text
 			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), reset)
 		}

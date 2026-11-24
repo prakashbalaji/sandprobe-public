@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 )
 
@@ -93,5 +96,95 @@ func TestPrintableEscapesUnicodeFormatControls(t *testing.T) {
 	}
 	if got := printable("x\x1b\n\u2028\u2029y"); strings.ContainsAny(got, "\x1b\n\u2028\u2029") {
 		t.Fatal("existing control escaping regressed")
+	}
+}
+
+// SCR-2, UX-9: scorecard on saved sandprobe/1 and sandprobe/2 reports labels a green row with no conclusive check
+// "◌ GREEN · NOT PROVEN" (ASCII under a C locale) and flags it in -o json; proven green rows are unchanged; every
+// category row fits 80 columns.
+func TestScorecardGreenNotProven(t *testing.T) {
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+	optInSEC4 := host.ExecExclusions()
+	delete(optInSEC4, "SEC-4") // run exec -provider-endpoints SEC-4: AMP-7 stays an opt_in skip
+	v2 := skipSaved(t, "exec", host.Options{Excluded: optInSEC4, ExcludedKind: obs.SkipOptIn})
+	if b, _ := os.ReadFile(v2); !bytes.Contains(b, []byte(`"schema":"sandprobe/2"`)) {
+		t.Fatal("the run exec report doesn't declare sandprobe/2")
+	}
+	const cloud = "  ◌ GREEN · NOT PROVEN  Cloud access  Can it use your cloud identity?\n"
+	for name, tc := range map[string]struct {
+		path   string
+		proven []string
+	}{
+		"sandprobe/1 demo vibe":                {"../../demo/reports/vibe.json", nil},
+		"sandprobe/1 egress-refused":           {"../../test/reports/egress-refused.json", []string{"Exfiltration", "Containment"}},
+		"sandprobe/2 run exec, SEC-4 opted in": {v2, []string{"Exfiltration", "Containment"}},
+	} {
+		var out, errs bytes.Buffer
+		if code := run([]string{"scorecard", tc.path}, &out, &errs); code != exitGraded {
+			t.Fatalf("%s: exit %d, %s", name, code, errs.String())
+		}
+		s := out.String()
+		if !strings.Contains(s, cloud) || strings.Contains(s, "● GREEN  Cloud access") {
+			t.Errorf("%s: no not-proven Cloud access row in:\n%s", name, s)
+		}
+		for _, p := range tc.proven {
+			if !strings.Contains(s, "  ● GREEN  "+p+" ") {
+				t.Errorf("%s: proven %s isn't plain GREEN in:\n%s", name, p, s)
+			}
+		}
+		out.Reset()
+		if code := run([]string{"scorecard", tc.path, "-o", "json"}, &out, &errs); code != exitGraded {
+			t.Fatalf("%s: json exit %d", name, code)
+		}
+		var c report.Card
+		if err := json.Unmarshal(out.Bytes(), &c); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range c.Rows {
+			if r.GreenNotProven != (r.Name == "Cloud access") || r.GreenNotProven && !r.Green {
+				t.Errorf("%s: -o json %s: %+v", name, r.Name, r)
+			}
+		}
+		if !bytes.Contains(out.Bytes(), []byte(`"green_not_proven": true`)) {
+			t.Errorf("%s: -o json has no green_not_proven field", name)
+		}
+	}
+
+	t.Setenv("LC_ALL", "C")
+	var out, errs bytes.Buffer
+	run([]string{"scorecard", "../../demo/reports/vibe.json"}, &out, &errs)
+	if s := out.String(); !strings.Contains(s, "  o GREEN . NOT PROVEN  Cloud access  Can it use your cloud identity?\n") || strings.Contains(s, "◌") {
+		t.Errorf("C locale: no ASCII not-proven row in:\n%s", s)
+	}
+
+	t.Setenv("LC_ALL", "")
+	d := report.Doc{Grade: report.Grade{Valid: true}}
+	for _, category := range report.Categories {
+		for _, id := range category.Checks {
+			d.Checks = append(d.Checks, report.Check{ID: id, Result: "not_found"})
+		}
+	}
+	out.Reset()
+	printCard(opts{stdout: &out}, report.Score(d), "")
+	s := out.String()
+	if strings.Count(s, "  ◌ GREEN · NOT PROVEN  ") != 6 || !strings.Contains(s, "Score 6/6") {
+		t.Fatalf("every row not proven:\n%s", s)
+	}
+	if !strings.Contains(s, "  ◌ GREEN · NOT PROVEN  Persistence\n"+strings.Repeat(" ", 25)+"Can it leave something for the next session?\n") {
+		t.Errorf("the long question didn't move under its row:\n%s", s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(line, "  ◌ ") || strings.HasPrefix(line, strings.Repeat(" ", 25)+"Can it") {
+			if n := utf8.RuneCountInString(line); n > 80 {
+				t.Errorf("%d columns: %q", n, line)
+			}
+		}
+	}
+	out.Reset()
+	printCard(opts{stdout: &out}, report.Score(report.Doc{}), "")
+	if strings.Contains(out.String(), "NOT PROVEN") {
+		t.Error("an invalid run shows the not-proven label")
 	}
 }

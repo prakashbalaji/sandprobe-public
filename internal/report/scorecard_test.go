@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"sandprobe/internal/catalog"
+	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 )
 
@@ -226,5 +227,194 @@ func TestScoreNoCanary(t *testing.T) {
 	d.Run.NoCanary = true
 	if r := row(t, Score(d), "Exfiltration"); r.Green || !strings.HasPrefix(r.Why, "Couldn't prove") {
 		t.Errorf("an unknown the canary doesn't explain: %+v", r)
+	}
+}
+
+// SCR-2: a green category with no conclusive check (Conclusive == 0) carries GreenNotProven, still counts toward the
+// score, and reads "GREEN · NOT PROVEN", dashed, on the page; a green row with any conclusive check, an Info finding
+// included, stays plain GREEN; a supplied flag that contradicts coverage, sits on a red row or comes without coverage
+// is refused, and a dropped one is still valid.
+func TestGreenNotProven(t *testing.T) {
+	read := func(path string) Doc {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var d Doc
+		if err := json.Unmarshal(b, &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	vibe := read("../../demo/reports/vibe.json")
+	vc := Score(vibe)
+	if vc.Score != 1 || vc.Of != 6 {
+		t.Fatalf("vibe score: want 1/6, got %d/%d", vc.Score, vc.Of)
+	}
+	cloud := row(t, vc, "Cloud access")
+	if !cloud.Green || !cloud.GreenNotProven || cloud.Coverage == nil || cloud.Coverage.Conclusive != 0 || cloud.Coverage.Total != 2 {
+		t.Fatalf("vibe Cloud access: want green and not proven at 0/2 conclusive, got %+v (coverage %+v)", cloud, cloud.Coverage)
+	}
+	for _, r := range vc.Rows {
+		if r.Name != "Cloud access" && r.GreenNotProven {
+			t.Errorf("vibe %s: a red row carries the flag", r.Name)
+		}
+	}
+	if b, _ := json.Marshal(vc); strings.Count(string(b), `"green_not_proven":true`) != 1 {
+		t.Errorf("the card's JSON: %s", b)
+	}
+	for _, theme := range []string{"graphite", "mission"} {
+		page, err := HTML(vibe, theme)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := string(page)
+		if strings.Count(p, `<li class="cat green gnp"`) != 1 || strings.Count(p, `<span class="verdict">GREEN · NOT PROVEN</span>`) != 1 ||
+			!strings.Contains(p, ".cats .green.gnp .dot { background: none; border: 1.5px dashed var(--green); }") ||
+			!strings.Contains(p, ".cat.green.gnp .verdict { border-style: dashed; }") {
+			t.Errorf("%s: the page has no dashed GREEN · NOT PROVEN badge for Cloud access", theme)
+		}
+	}
+	page, err := HTML(read("../../demo/reports/hardened.json"), "graphite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := string(page); strings.Count(p, `<li class="cat green"`) != 5 || strings.Count(p, `<li class="cat green gnp"`) != 1 ||
+		strings.Count(p, `<span class="verdict">GREEN</span>`) != 5 {
+		t.Error("hardened: want five proven GREEN rows and Cloud access not proven")
+	}
+
+	// Every row green on not_found alone: all six flagged, and all six still counted.
+	if c := Score(doc(obs.NotFound, nil)); c.Score != 6 || c.Of != 6 {
+		t.Errorf("not proven left the score: %d/%d", c.Score, c.Of)
+	} else {
+		for _, r := range c.Rows {
+			if !r.Green || !r.GreenNotProven {
+				t.Errorf("all not_found: %s %+v", r.Name, r)
+			}
+		}
+	}
+	scoped := map[string]Check{}
+	for _, id := range Categories[5].Checks {
+		scoped[id] = Check{Result: obs.ScopedOut}
+	}
+	if r := row(t, Score(doc(obs.Pass, scoped)), "Persistence"); !r.Green || !r.GreenNotProven || r.NotProven != "" {
+		t.Errorf("only scoped_out: want green and not proven, got %+v", r)
+	}
+	// A pass beside a not_found is conclusive: plain GREEN with its "not proven" line.
+	if r := row(t, Score(doc(obs.Pass, map[string]Check{"EGR-1": {Result: obs.NotFound}})), "Exfiltration"); !r.Green || r.GreenNotProven || r.NotProven != "not proven: DNS" {
+		t.Errorf("a pass beside a not_found: want plain green, got %+v", r)
+	}
+	// An Info finding is a completed observation (SCR-5): plain GREEN with its "not proven" line, never the label.
+	info := map[string]Check{}
+	for _, id := range Categories[0].Checks {
+		info[id] = Check{Result: obs.NotFound}
+	}
+	info["SEC-3"] = Check{Result: obs.Finding, Severity: "info"}
+	if r := row(t, Score(doc(obs.Pass, info)), "Secrets"); !r.Green || r.GreenNotProven || r.Coverage.Conclusive != 1 || r.NotProven == "" {
+		t.Errorf("an Info finding beside not_found: want plain green, got %+v (coverage %+v)", r, r.Coverage)
+	}
+
+	forged := Score(doc(obs.Pass, nil))
+	forged.Rows[0].GreenNotProven = true
+	if validCardCoverage(forged) {
+		t.Error("accepted the flag on a category with conclusive passes")
+	}
+	dropped := Score(vibe)
+	dropped.Rows[4].GreenNotProven = false
+	if !validCardCoverage(dropped) {
+		t.Error("refused coverage without the optional display flag")
+	}
+	exposure := func(c Card) WorkloadExposure {
+		return WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: c}
+	}
+	if !validWorkloadExposure(exposure(Score(vibe))) {
+		t.Fatal("refused an honest not-proven workload exposure")
+	}
+	red := Score(vibe)
+	red.Rows[0].GreenNotProven = true // Secrets is red in vibe.json
+	if validWorkloadExposure(exposure(red)) {
+		t.Error("accepted the flag on a red row")
+	}
+	bare := Score(vibe)
+	bare.Coverage = nil
+	for i := range bare.Rows {
+		bare.Rows[i].Coverage = nil
+	}
+	if validWorkloadExposure(exposure(bare)) {
+		t.Error("accepted the flag on a card without coverage")
+	}
+	bare.Rows[4].GreenNotProven = false
+	if !validWorkloadExposure(exposure(bare)) {
+		t.Error("refused a historical card without coverage or the flag")
+	}
+}
+
+// SCR-2 and AGENTS.md rule 1: the label only ever weakens a green. An unknown keeps a row red; not applicable, opt-in
+// and plain not-tested rows and an invalid run never carry the flag or the label.
+func TestGreenNotProvenNeverStrengthens(t *testing.T) {
+	flagged := func(c Card) bool {
+		for _, r := range c.Rows {
+			if r.GreenNotProven {
+				return true
+			}
+		}
+		return false
+	}
+	for name, d := range map[string]Doc{
+		"AMP-7 unknown": doc(obs.Pass, map[string]Check{"SEC-4": {Result: obs.NotFound}, "AMP-7": {Result: obs.Unknown}}),
+		"AMP-7 in the grade's unknown": func() Doc {
+			d := doc(obs.Pass, map[string]Check{"SEC-4": {Result: obs.NotFound}, "AMP-7": {Result: obs.NotFound}})
+			d.Grade.Unknown = []string{"AMP-7"}
+			return d
+		}(),
+	} {
+		if r := row(t, Score(d), "Cloud access"); r.Green || r.GreenNotProven || !strings.HasPrefix(r.Why, "Couldn't prove") {
+			t.Errorf("%s: a 0-conclusive row with an unknown: want red, got %+v", name, r)
+		}
+	}
+	for provider, excluded := range natives {
+		d := replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipProviderTerms})
+		c := Score(d)
+		if r := row(t, c, "Cloud access"); !r.NotApplicable || r.Green || r.GreenNotProven {
+			t.Errorf("%s: not applicable Cloud access %+v", provider, r)
+		}
+		page, err := HTML(d, "graphite")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := string(page); flagged(c) || strings.Contains(p, "gnp\"") || strings.Contains(p, "NOT PROVEN</span>") {
+			t.Errorf("%s: a not-proven label with no 0-conclusive green row", provider)
+		}
+	}
+	for provider, excluded := range map[string]map[string]string{"exec": host.ExecExclusions(), "kubernetes": {
+		"SEC-4": "recipe", "EGR-3": "recipe", "AMP-6": "recipe", "AMP-7": "recipe"}} {
+		c := Score(replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipOptIn}))
+		if r := row(t, c, "Cloud access"); r.Green || r.GreenNotProven || !strings.HasPrefix(r.Why, "Not tested: opt in") || flagged(c) {
+			t.Errorf("%s: opt-in Cloud access %+v", provider, r)
+		}
+	}
+	if c := Score(doc(obs.Skipped, nil)); flagged(c) || c.Score != 0 {
+		t.Errorf("nothing tested: %d/%d, flagged %v", c.Score, c.Of, flagged(c))
+	}
+	b, err := os.ReadFile("../../demo/reports/vibe.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var invalid Doc
+	if err := json.Unmarshal(b, &invalid); err != nil {
+		t.Fatal(err)
+	}
+	invalid.Grade.Valid, invalid.Grade.Invalid = false, "an edited report"
+	c := Score(invalid)
+	if c.Valid || len(c.Rows) != 0 {
+		t.Errorf("an invalid run has rows: %+v", c)
+	}
+	page, err := HTML(invalid, "graphite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j, _ := json.Marshal(c); strings.Contains(string(j), "green_not_proven") || strings.Contains(string(page), "NOT PROVEN</span>") {
+		t.Error("an invalid run carries the not-proven label")
 	}
 }
