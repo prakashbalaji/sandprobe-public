@@ -11,6 +11,17 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   container that stops early says what stopped and how, with a fix that runs as pasted (DKR-3); a read-only root gets
   Sandprobe's own scratch tmpfs (DKR-4); and the plan says PER-5 marks nothing and resets nothing on `run docker`
   (DKR-5). Pass `--entrypoint` to run a process of your own; the vibe demo now does.
+
+- Add `sandprobe feedback bug|feature|idea`, so agents and people can file feedback as a public issue on
+  summationai/sandprobe, only with the person's explicit yes to the exact issue. A preview shows the title, body and
+  labels, says the issue is public, names the gh account, and prints a code that hashes exactly what would be
+  posted. The person types `yes`, or the agent runs again with `-confirm <code>` after their yes; any change voids
+  the code. There is no `-y`. Without gh, a confirmed run prints a prefilled form link. It sends only your text, a
+  fixed environment block and, with `-report`, a summary of fixed values from a saved report. It refuses credentials
+  at any length and on any line, including inside YAML and JSON, and home-directory paths. A new feature-request
+  form backs the link. The YAML parser `go.yaml.in/yaml/v3`, the YAML organization's maintained module, is the one
+  new dependency (FBK-1 to FBK-7).
+
 - A green category with no conclusive check, such as Cloud access when SEC-4 and AMP-7 both end `not_found`, now reads "Green · not proven" rather than plain green: a dashed `GREEN · NOT PROVEN` badge in the web report and the workload exposure page, `◌ GREEN · NOT PROVEN` in the terminal, and `green_not_proven: true` in `scorecard -o json`. It still counts toward the score (SCR-2).
 
 - Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.
