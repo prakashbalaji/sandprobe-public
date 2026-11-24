@@ -81,6 +81,12 @@ type Options struct {
 	Attested []string
 	// Existing is an existing box (PRV-1): it gets non-mutating checks only, so AMP-6 makes no vsock connect.
 	Existing bool
+	// OwnInit is DKR-2: the adapter read from the provider's own record of the box, never from the box, that PID 1 is
+	// Sandprobe's idle process, so SEC-2 and SEC-5 skip exactly that PID.
+	OwnInit bool
+	// Scratch is DKR-4: the absolute path of a tmpfs the adapter mounted for the probe's scratch on a read-only root.
+	// It is never a storage root PER-5 may mark.
+	Scratch string
 }
 
 // excludable is every check a provider's rules of engagement may skip (GRD-3, PRV-5): each would send a request to
@@ -148,6 +154,9 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 		if !excludable[id] {
 			return nil, fmt.Errorf("%s can't be excluded by a provider's rules of engagement (GRD-3)", id)
 		}
+	}
+	if sc := o.Scratch; sc != "" && (!filepath.IsAbs(sc) || filepath.Clean(sc) != sc || sc == "/" || sc == "/tmp") {
+		return nil, fmt.Errorf("the probe's scratch must be an absolute path of Sandprobe's own, never / or /tmp (DKR-4)")
 	}
 	if k := o.ExcludedKind; k != "" && k != obs.SkipProviderTerms && k != obs.SkipOptIn {
 		return nil, fmt.Errorf("%q isn't a skip kind (SCR-2)", k)
@@ -386,6 +395,11 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		}
 	}
 	runID := token("r")
+	if o.Scratch != "" { // DKR-4: Sandprobe's own scratch mount is never a storage root of the box
+		own := *s
+		own.Roots = slices.DeleteFunc(slices.Clone(s.Roots), func(r obs.Root) bool { return r.Path == o.Scratch })
+		s = &own
+	}
 	marks := planMarks(s, st, runID)
 	switch {
 	case st.Model == "":
@@ -469,7 +483,7 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 	}
 	in := obs.Input{CanaryTCP80Protocol: m.CanaryTCP80Protocol, RunID: m.RunID, Nonce: m.Nonce, BoxID: m.BoxID, Mode: m.Mode, Selected: probeSelected, Targets: m.Targets,
 		Discover: m.Discover, CheckNonces: m.CheckNonces, Endpoints: m.Endpoints, CanaryDomain: domain, CanaryPin: pin,
-		Proxy: m.Proxy, AllowLocal: m.AllowLocalProxy, KubeAPI: m.KubeAPI}
+		Proxy: m.Proxy, AllowLocal: m.AllowLocalProxy, KubeAPI: m.KubeAPI, OwnInit: o.OwnInit, Scratch: o.Scratch}
 	return m, in
 }
 

@@ -4,7 +4,7 @@
 // stdin and writes one observation document to stdout. It never grades. With -survey it reads nothing and writes only
 // what the host needs to plan (SBX-3, SBX-5); -mark and -recheck are PER-5's steps around the reset (TWN-3). -whoami
 // [name] is PRV-15's identity-only preflight, and -expect-uid N, before any mode, refuses at startup unless all four of
-// the probe's uids are N.
+// the probe's uids are N. -idle is run docker's own entrypoint, which only waits (DKR-1).
 package main
 
 import (
@@ -65,6 +65,8 @@ func main() {
 			fail(errors.New("cannot write quick output"))
 		}
 		return
+	case "-idle": // DKR-1: the container's entrypoint, which reads, writes and starts nothing, and never returns
+		probe.Idle()
 	case "-survey":
 		out = probe.Survey()
 	case "-receiver":
@@ -149,7 +151,7 @@ func parseMode(args []string) (string, error) {
 	}
 	if len(args) == 1 {
 		switch args[0] {
-		case "-survey", "-mark", "-recheck", "-receiver":
+		case "-survey", "-mark", "-recheck", "-receiver", "-idle":
 			return args[0], nil
 		}
 	}

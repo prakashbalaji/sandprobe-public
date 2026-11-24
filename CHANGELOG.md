@@ -5,6 +5,11 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- `run docker` starts the container with Sandprobe's own idle process as its entrypoint, so an image whose entrypoint
+  exits without a task or a terminal runs as it is, and SEC-2 and SEC-5 don't count that process (DKR-1, DKR-2). A
+  container that stops early says what stopped and how, with a fix that runs as pasted (DKR-3); a read-only root gets
+  Sandprobe's own scratch tmpfs (DKR-4); and the plan says PER-5 marks nothing and resets nothing on `run docker`
+  (DKR-5). Pass `--entrypoint` to run a process of your own; the vibe demo now does.
 - A green category with no conclusive check, such as Cloud access when SEC-4 and AMP-7 both end `not_found`, now reads "Green · not proven" rather than plain green: a dashed `GREEN · NOT PROVEN` badge in the web report and the workload exposure page, `◌ GREEN · NOT PROVEN` in the terminal, and `green_not_proven: true` in `scorecard -o json`. It still counts toward the score (SCR-2).
 
 - Require pinned block-device type and stable path identity for AMP-8.blk permission evidence; unsupported metadata permission calls remain unknown.

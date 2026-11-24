@@ -205,24 +205,28 @@ func sec1(e *env, ck *catalog.Check) obs.Observation {
 
 // SEC-2 and SEC-5: every other process's environ or mem, opened and never read.
 func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
-	var paths []string
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return unknownObs("can't list /proc: " + err.Error())
 	}
-	self := os.Getpid()
+	var listed []string
 	for _, d := range entries {
-		pid, err := strconv.Atoi(d.Name())
-		if err != nil || pid == self || e.tw.children[pid] {
-			continue
-		}
-		paths = append(paths, "/proc/"+d.Name()+"/"+file)
+		listed = append(listed, d.Name())
+	}
+	pids, skippedInit := otherPIDs(listed, os.Getpid(), e.tw.children, e.in.OwnInit)
+	var paths []string
+	for _, pid := range pids {
+		paths = append(paths, "/proc/"+strconv.Itoa(pid)+"/"+file)
 	}
 	if len(paths) == 0 {
 		if why := reachPast(); why != "" {
 			return unknownObs(why)
 		}
-		return obs.Observation{Result: obs.ScopedOut, Reason: "no other process is visible to the probe (a PID namespace, or hidepid)",
+		why := "no other process is visible to the probe (a PID namespace, or hidepid)"
+		if skippedInit {
+			why = "no other process is visible to the probe but Sandprobe's own idle process, PID 1, which the host named (DKR-2)"
+		}
+		return obs.Observation{Result: obs.ScopedOut, Reason: why,
 			Proof: &obs.Proof{Mechanism: ck.Mechanism, Root: e.root, Discovered: map[string]int{"proc_pids": 0}}}
 	}
 	ts, counts, err := e.sweep(ck.ID, map[string][]string{"proc_pids": paths}, procCheck)
@@ -232,6 +236,23 @@ func secProc(e *env, ck *catalog.Check, file string) obs.Observation {
 	return e.judge(ck, ts, counts, e.tw.procOK[file], e.tw.procRefused[file], func(found []obs.Target) (string, string) {
 		return "readable", "the agent can open " + names(found) + " (nothing was read)"
 	})
+}
+
+// otherPIDs is every process SEC-2 and SEC-5 count, from /proc's entry names: never the probe itself or its twins,
+// and PID 1 only when the host named it Sandprobe's own idle process (DKR-2). Nothing about a process is read to
+// decide, so one that copies the idle process's binary, arguments or environment is still counted at its own PID.
+func otherPIDs(names []string, self int, twins map[int]bool, ownInit bool) (pids []int, skippedInit bool) {
+	for _, n := range names {
+		pid, err := strconv.Atoi(n)
+		switch {
+		case err != nil || pid <= 0 || strconv.Itoa(pid) != n || pid == self || twins[pid]:
+		case pid == 1 && ownInit:
+			skippedInit = true
+		default:
+			pids = append(pids, pid)
+		}
+	}
+	return pids, skippedInit
 }
 
 // SEC-3: credential files, each read-checked on a pinned inode.

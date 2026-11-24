@@ -26,12 +26,12 @@ func TestHostInputFraming(t *testing.T) {
 	}
 }
 func TestProbeArguments(t *testing.T) {
-	for _, args := range [][]string{{"-survey", "extra"}, {"unknown"}, {"", "extra"}} {
+	for _, args := range [][]string{{"-survey", "extra"}, {"unknown"}, {"", "extra"}, {"-idle", "extra"}} {
 		if _, err := parseMode(args); err == nil {
 			t.Fatal("extra arguments accepted")
 		}
 	}
-	for _, args := range [][]string{nil, {"-survey"}, {"-mark"}, {"-recheck"}, {"-receiver"}, {"-quick"}, {"-quick", "/tmp"}} {
+	for _, args := range [][]string{nil, {"-survey"}, {"-mark"}, {"-recheck"}, {"-receiver"}, {"-quick"}, {"-quick", "/tmp"}, {"-idle"}} {
 		if _, err := parseMode(args); err != nil {
 			t.Fatal(err)
 		}
@@ -98,4 +98,40 @@ func TestExpectAndWhoAmIArguments(t *testing.T) {
 			t.Errorf("%q accepted", args)
 		}
 	}
+}
+
+// DKR-1: -idle, run as a box's entrypoint, writes nothing and stays up until it is killed.
+func TestIdleStaysUp(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestIdleHelper$")
+	cmd.Env = append(os.Environ(), "SANDPROBE_IDLE_HELPER=1")
+	var out strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("-idle returned: %v %q", err, out.String())
+	case <-time.After(time.Second):
+	}
+	cmd.Process.Kill()
+	<-done
+	if out.Len() != 0 {
+		t.Errorf("-idle wrote %q", out.String())
+	}
+}
+
+// TestIdleHelper is the process TestIdleStaysUp starts: the probe's main with -idle.
+func TestIdleHelper(t *testing.T) {
+	if os.Getenv("SANDPROBE_IDLE_HELPER") == "" {
+		t.Skip("run by TestIdleStaysUp")
+	}
+	os.Args = []string{"sandprobe-probe", "-idle"}
+	main()
 }
