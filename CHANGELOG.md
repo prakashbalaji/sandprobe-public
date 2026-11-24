@@ -5,6 +5,16 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+### Web report
+
+- The HTML report takes the site's look: a near-black page, hairline panels, and Geist, named but never loaded (UX-8,
+  OUT-2). The sandbox score is now the largest thing on the page, with one line saying what it means, and the page
+  shows no letter grade; its title carries the score instead. An incomplete run says so beside the score ("Incomplete:
+  6 checks unknown"), and an invalid run says it has no score, with the reason. "What to fix" lists every test once:
+  failures by severity, each chain's sentence first in its own, then the unknowns, then the rest folded away. Each of
+  the six categories links to its tests. The JSON report, the terminal output, `-min` and the exit codes keep the
+  grade (SCR-3). ([#45](https://github.com/summationai/sandprobe/pull/45))
+
 ## 0.3.0-rc.1 (2026-11-23)
 
 The first release candidate for 0.3.0. Provider statuses are still being validated.
