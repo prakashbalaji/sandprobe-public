@@ -165,6 +165,11 @@ lists each one with your attestation before anything runs, and the report record
   it needs a canary, and AMP-6 only checks for a vsock device and connects to nothing. Your own command, or the
   provider's API, still reaches the box.
 - **Your reports stay with you.** Sandprobe uploads no report and has no telemetry.
+- **Feedback, only when you approve the exact issue.** `sandprobe feedback` first asks your own `gh`, read-only,
+  which account is signed in to GitHub and whether it may label issues. Only after your yes to that exact preview,
+  typed or given as its `-confirm` code, does it post the issue to
+  [summationai/sandprobe](https://github.com/summationai/sandprobe/issues) through gh, or print a link you open
+  yourself. It sends nothing else.
 - **Your provider's own API**, when Sandprobe creates or reaches a box for you, with your own credentials.
 
 ## How it works
@@ -214,6 +219,51 @@ confirmed deleted. `-min` gates only the green-category count (not finding sever
 Research harnesses, such as the managed Nitro and Daytona coding evaluations, live in
 [experiments/](experiments/README.md). They aren't part of the product. Their run records stay local and must not be
 committed here.
+
+## Send feedback
+
+Found a bug, or want something? Sandprobe files it as a public issue on
+[summationai/sandprobe](https://github.com/summationai/sandprobe/issues), and only with your explicit yes to the exact
+issue. First, preview it:
+
+```sh
+sandprobe feedback bug -title "run docker waits 30s while Docker starts" -body-file notes.md
+```
+
+The preview says the issue is PUBLIC and names the GitHub account it would be filed as, through your own signed-in
+[`gh`](https://cli.github.com). It prints the exact title, label and body, sends nothing, and ends with a
+confirmation code. In a terminal it asks you to type `yes`. Otherwise you run the same command again with that code:
+
+```sh
+sandprobe feedback bug -title "run docker waits 30s while Docker starts" -body-file notes.md -confirm 3f9a1c0b7d2e
+```
+
+The code is a hash of exactly what would be posted: the title, body, labels, account and repository. If anything
+changes after the preview, the code no longer matches and nothing is filed. There is no `-y`. Without gh, a confirmed
+run prints a link that opens GitHub's form already filled in, for you to submit. A preview never prints that link,
+since opening it sends the draft to GitHub. `-o json` gives agents the preview, the code and the result as JSON.
+`feature` and `idea` work the same way, and `-provider <name>` and `-report <report.json>` add context.
+
+**For agents:** show your person the exact title and body, say the issue is public, name the account, and ask
+("May I file this public issue as @login?"). Run again with `-confirm <code>` only after a clear yes in the
+conversation, without changing anything in between. Never answer the terminal prompt yourself, and never file on your
+own judgement.
+
+It sends your title and text, the Sandprobe and Go versions, your OS and CPU, and `-provider` when you name one. The
+title starts with the kind; the label comes from the form on the link, or from gh when your account can label issues.
+`-report` adds only a summary of a saved report: the score, whether the run was valid and complete, and each check's
+ID with its result. It never sends the report's paths, names, evidence or receipts. It refuses to send anything that
+looks like a credential, at any length and on any line: cloud, GitHub, Anthropic, OpenAI and Slack keys and tokens,
+private keys, JWTs, Authorization headers and Bearer or Basic values, URLs with a password, and any field or flag
+named like a credential (`token:`, `password=`, `"refresh_token":`, `--token`), on its line or the next, or anywhere
+in a YAML or JSON body or code block, unless its value is a placeholder such as `<token>` or `$TOKEN`. It also refuses
+long hex or base64 strings and home-directory paths, and names the line to fix (FBK-1 to FBK-7 in SPEC.md). When in
+doubt it refuses: rewrite the line, preview again, and ask again.
+
+A check that passed when it shouldn't have is a
+[false pass](https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml), with its own form. A
+vulnerability in Sandprobe goes privately, as [SECURITY.md](SECURITY.md) says. A suspected flaw in a provider never
+goes in an issue: stop, delete the boxes, and report it privately to the provider.
 
 ## Contributing
 

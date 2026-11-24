@@ -1,0 +1,38 @@
+name: Feature request or idea
+description: Something Sandprobe should do, or an idea for it.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Something broken goes in a [bug report](https://github.com/summationai/sandprobe/issues/new?template=bug-report.yml), and a check that passed when it shouldn't have in a [false pass](https://github.com/summationai/sandprobe/issues/new?template=false-pass.yml). A security problem goes privately, as [SECURITY.md](https://github.com/summationai/sandprobe/blob/main/SECURITY.md) says.
+
+        `sandprobe feedback feature` and `sandprobe feedback idea` fill this form in for you.
+
+        **Remove every secret value, credential, token, account ID and private host name** from what you paste.
+  - type: textarea
+    id: details
+    attributes:
+      label: What you'd like, and why
+      description: What Sandprobe should do, or the idea, and what it would let you or your agents do.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sandprobe version
+      description: The output of `sandprobe version`, if you use it.
+      placeholder: sandprobe 0.3.0
+  - type: input
+    id: platform
+    attributes:
+      label: Where you ran it
+      description: Your OS and CPU, and the provider or `run` mode, if it's about one.
+      placeholder: macOS arm64, run docker
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed every secret value, credential, token and private name from this request.
+          required: true

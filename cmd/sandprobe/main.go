@@ -84,6 +84,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitGraded
 	}
 	cmd, rest := args[0], args[1:]
+	if cmd == "feedback" { // FBK-1: its own flags
+		return feedback(rest, os.Stdin, feedbackTTY(), stdout, stderr)
+	}
 	var passthrough []string // PRV-14: docker run options, after "--", passed through unchanged
 	for i, a := range rest {
 		if a == "--" {
@@ -239,6 +242,9 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
   sandprobe assess <report.json> canary-egress-deny-v1  retrospective six-route assessment (offline)
   sandprobe compare <a> <b>        compare saved findings/coverage (offline)
   sandprobe explain <check>        what a check does, what a finding means, and its fix
+  sandprobe feedback bug|feature|idea -title <one line> -body-file <file or -> [-report <report.json>]
+                                   preview a public issue for summationai/sandprobe and get its code; then, only with
+                                   your person's yes, the same command with -confirm <code> files exactly that (FBK-5)
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
 -min <0..6|full> to exit 6 below a green-category count (category count only, not severity or proof coverage;
