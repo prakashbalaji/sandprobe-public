@@ -1,0 +1,15 @@
+
+Got worse: none
+No longer tested: none
+Got better:
+  ● Exfiltration › Can it send data over HTTPS to a server we control?
+  ● Exfiltration › Can it connect out on port 22 (SSH)?
+  ● Exfiltration › Can it connect out on port 80 (HTTP)?
+  ● Exfiltration › Can it connect out on port 8080?
+No longer found, but not proven:
+  ● Exfiltration › Can a DNS lookup carry data to a server we control?
+  ● Exfiltration › Can it send UDP packets out on port 53?
+Score: 2/6 → 3/6
+This compares the two reports only; it doesn't vouch for either box.
+From a saved report: structurally checked only. Its observations and canary
+receipts weren't re-verified, and an edited report can't be told apart (ANL-1).

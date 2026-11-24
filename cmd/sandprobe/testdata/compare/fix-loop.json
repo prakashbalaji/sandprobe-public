@@ -1,0 +1,43 @@
+{
+  "schema": "sandprobe.compare/1",
+  "verification": "structural_only_unauthenticated",
+  "new_or_worse_findings": [],
+  "coverage_loss": [],
+  "got_better": [
+    "SEC-1",
+    "SEC-2",
+    "SEC-3",
+    "SEC-5",
+    "EGR-2",
+    "EGR-5.22",
+    "EGR-5.80",
+    "EGR-5.8080",
+    "PER-1",
+    "PER-3",
+    "PER-4",
+    "AMP-3",
+    "AMP-4"
+  ],
+  "no_longer_applicable": [],
+  "no_longer_found_not_proven": [
+    "EGR-1",
+    "EGR-5.53u"
+  ],
+  "score_before": {
+    "score": 1,
+    "of": 6
+  },
+  "score_after": {
+    "score": 6,
+    "of": 6
+  },
+  "context_changes": [
+    "identity"
+  ],
+  "incomplete": false,
+  "no_observed_change": false,
+  "limits": [
+    "Unrecorded image, policy and workload differences remain unknown.",
+    "Comparison covers exported fields only; ephemeral canary IPs ignored, ports/routes retained; no equivalent-security or attestation claim."
+  ]
+}

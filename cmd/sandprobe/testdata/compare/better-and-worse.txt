@@ -1,0 +1,14 @@
+
+Got worse:
+  ● Secrets › Can the agent open credential files: .env, cloud and SSH keys,
+    Kubernetes tokens, /etc/shadow?
+No longer tested: none
+Got better:
+  ● Persistence › Can it change startup files such as ~/.bashrc, which run in
+    the next session?
+Score: 5/6 → 5/6
+
+Verdict: worse. A gate should fail this change.
+This compares the two reports only; it doesn't vouch for either box.
+From a saved report: structurally checked only. Its observations and canary
+receipts weren't re-verified, and an edited report can't be told apart (ANL-1).

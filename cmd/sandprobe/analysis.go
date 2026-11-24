@@ -2,6 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"slices"
+	"strings"
+
 	"sandprobe/internal/analysis"
 	"sandprobe/internal/report"
 )
@@ -56,38 +60,69 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	return exitGraded, nil
 }
 
-// printComparison is CMP-1's result in plain words, each check named by its category and question (SCR-3).
+// printComparison is CMP-1's and CMP-2's result in plain words, each check named by its category and question (SCR-3),
+// every line within UX-9's 80 columns, in ASCII under a C or POSIX locale.
 func printComparison(o opts, c analysis.Comparison) {
+	// An item reads "Secrets › question": never "Secrets: ", which reads as a credential key (FBK-4).
+	bullet, sep, arrow := "●", glyphsFor(false).sep, "→"
+	if asciiLocale() {
+		bullet, sep, arrow = "*", glyphsFor(true).sep, "->"
+	}
+	say := func(text string) { printWrapped(o.stdout, "", text, "", "") }
 	list := func(title string, ids []string) {
 		if len(ids) == 0 {
-			fmt.Fprintf(o.stdout, "%s: none\n", title)
+			say(title + ": none")
 			return
 		}
-		fmt.Fprintf(o.stdout, "%s:\n", title)
+		say(title + ":")
 		for _, id := range ids {
+			text := fmt.Sprintf("%q", id)
 			if cat, ok := report.CategoryOf(id); ok {
-				fmt.Fprintf(o.stdout, "  ● %s: %s\n", cat.Name, cat.Ask[id])
-			} else {
-				fmt.Fprintf(o.stdout, "  ● %q\n", id)
+				text = cat.Name + " " + sep + " " + cat.Ask[id]
 			}
+			var b strings.Builder
+			writeWrapped(&b, "  "+bullet+" ", "    ", text, maxTUIWidth, "", "")
+			io.WriteString(o.stdout, b.String())
 		}
 	}
 	fmt.Fprintln(o.stdout)
 	list("Got worse", c.NewOrWorse)
 	list("No longer tested", c.CoverageLoss)
+	list("Got better", c.GotBetter)
+	if len(c.NoLongerApplies) > 0 { // KND-1: never called better
+		list("No longer applies (nothing left for it to check)", c.NoLongerApplies)
+	}
+	if len(c.NotProven) > 0 { // KND-2: never called better
+		list("No longer found, but not proven", c.NotProven)
+	}
+	switch b, a := c.ScoreBefore, c.ScoreAfter; {
+	case b != nil && a != nil:
+		say(fmt.Sprintf("Score: %d/%d %s %d/%d", b.Score, b.Of, arrow, a.Score, a.Of))
+	case b == nil && a == nil:
+		say("No score: both reports' runs are invalid, so neither has one (GRD-5).")
+	case b == nil:
+		say("No score: the before report's run is invalid, so it has none (GRD-5).")
+	default:
+		say("No score: the after report's run is invalid, so it has none (GRD-5).")
+	}
 	if len(c.ContextChanges) > 0 {
-		fmt.Fprintf(o.stdout, "Setup differs, so the two aren't a like-for-like pair: %q\n", c.ContextChanges)
+		say(fmt.Sprintf("Setup differs, so the two aren't a like-for-like pair: %q", c.ContextChanges))
+	}
+	if slices.Contains(c.ContextChanges, "identity") {
+		say("The agent's identity differs: its user, group, capabilities or privilege settings. That's expected when the fix was to change the agent's user or drop its privileges, but the two reports still measured different identities.")
 	}
 	worse := len(c.NewOrWorse) > 0 || len(c.CoverageLoss) > 0
 	switch {
 	case worse:
-		fmt.Fprintln(o.stdout, "\nVerdict: worse. A gate should fail this change.")
+		fmt.Fprintln(o.stdout)
+		say("Verdict: worse. A gate should fail this change.")
 	case c.NoObservedChange && !c.Incomplete:
-		fmt.Fprintln(o.stdout, "\nVerdict: no change in what was tested.")
+		fmt.Fprintln(o.stdout)
+		say("Verdict: no change in what was tested.")
 	}
 	if c.Incomplete { // CMP-1: exit 5 outranks 6; a gate fails on any nonzero exit
-		fmt.Fprintln(o.stdout, "Some checks couldn't be proven in at least one report, so an all-clear here wouldn't count either.")
+		say("Some checks couldn't be proven in at least one report, so an all-clear here wouldn't count either.")
 	}
-	fmt.Fprintln(o.stdout, "This compares the two reports only; it doesn't vouch for either box.")
-	fmt.Fprintln(o.stdout, report.SavedNote)
+	say("This compares the two reports only; it doesn't vouch for either box.")
+	say(report.SavedNote)
 }

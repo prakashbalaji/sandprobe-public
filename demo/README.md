@@ -55,7 +55,7 @@ sandprobe run docker sandprobe-demo/regressed -as agent -y -out regressed -- \
 sandprobe compare hardened/*.json regressed/*.json
 ```
 
-`compare` says "Got worse: Secrets: Can the agent open credential files…?" and exits 6. In CI, that
+`compare` says "Got worse: Secrets › Can the agent open credential files…?" and exits 6. In CI, that
 fails the build, so the box can't quietly get worse.
 
 `demo/reports/` holds all three reports, pre-generated, in case Docker misbehaves on the day.

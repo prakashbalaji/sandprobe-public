@@ -3,6 +3,18 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that
+  was a finding or unknown and now passes with proof or is verified absent; separate lists, never counted as better,
+  for checks that no longer apply (nothing left for them to check) and for findings that are only no longer found;
+  and the score of each report, such as `Score: 1/6 → 6/6`. When the agent's identity changed, it still warns that
+  the pair isn't like-for-like and adds that this is expected when the fix was to change the agent's user. Each check
+  reads `Secrets › <question>`, the words wrap within 80 columns, and a C or POSIX locale gets ASCII. `-o json` adds
+  `got_better`, `no_longer_applicable`, `no_longer_found_not_proven`, `score_before` and `score_after` under
+  `sandprobe.compare/1`. Exit codes don't change: a complete, matched pair with anything worse still exits 6, and an
+  incomplete or unmatched pair still exits 5 (CMP-2).
+
 ## 0.3.0 (2026-11-24)
 
 - `run docker` starts the container with Sandprobe's own idle process as its entrypoint and the image's health check

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"sandprobe/internal/catalog"
@@ -209,5 +210,69 @@ func TestFrozenUploadEndpointSavedConsistency(t *testing.T) {
 	d.Manifest.Targets["EGR-6"] = []string{"github.com=169.254.169.254"}
 	if err := Validate(d); err == nil {
 		t.Fatal("saved export accepted infrastructure target")
+	}
+}
+
+// CMP-2: what got better, what is only no longer found, and each report's score. None of it touches CMP-1's lists.
+func TestCompareBetter(t *testing.T) {
+	set := func(d *report.Doc, id, result, severity string) {
+		for i := range d.Checks {
+			if d.Checks[i].ID == id {
+				d.Checks[i].Result, d.Checks[i].Severity = result, severity
+			}
+		}
+	}
+	for _, tc := range []struct {
+		before, beforeSev, after, afterSev      string
+		better, applies, notProven, loss, worse bool
+	}{
+		{obs.Finding, "high", obs.Pass, "", true, false, false, false, false},
+		{obs.Finding, "high", obs.Absent, "", true, false, false, false, false},
+		{obs.Finding, "info", obs.Pass, "", true, false, false, false, false},
+		{obs.Unknown, "", obs.Pass, "", true, false, false, false, false},
+		{obs.Finding, "high", obs.ScopedOut, "", false, true, false, false, false},
+		{obs.Unknown, "", obs.ScopedOut, "", false, true, false, false, false},
+		{obs.Finding, "high", obs.NotFound, "", false, false, true, false, false},
+		{obs.Finding, "high", obs.Unknown, "", false, false, true, true, false},
+		{obs.Unknown, "", obs.NotFound, "", false, false, false, false, false},
+		{obs.Finding, "high", obs.Finding, "low", false, false, false, false, false},
+		{obs.Pass, "", obs.Pass, "", false, false, false, false, false},
+		{obs.Pass, "", obs.ScopedOut, "", false, false, false, false, false},
+		{obs.Pass, "", obs.Finding, "high", false, false, false, false, true},
+	} {
+		a, b := baseline(t), baseline(t)
+		set(a, "SEC-2", tc.before, tc.beforeSev)
+		set(b, "SEC-2", tc.after, tc.afterSev)
+		c := Compare(a, b)
+		has := func(ids []string) bool { return len(ids) == 1 && ids[0] == "SEC-2" }
+		if has(c.GotBetter) != tc.better || has(c.NoLongerApplies) != tc.applies || has(c.NotProven) != tc.notProven ||
+			has(c.CoverageLoss) != tc.loss || has(c.NewOrWorse) != tc.worse {
+			t.Errorf("%s/%s to %s/%s: better %q, no longer applies %q, not proven %q, loss %q, worse %q", tc.before, tc.beforeSev,
+				tc.after, tc.afterSev, c.GotBetter, c.NoLongerApplies, c.NotProven, c.CoverageLoss, c.NewOrWorse)
+		}
+		if len(c.GotBetter)+len(c.NoLongerApplies)+len(c.NotProven) > 1 {
+			t.Errorf("%s to %s: a check listed twice", tc.before, tc.after)
+		}
+	}
+
+	// Better never hides worse: the same pair with one check better and another worse keeps both.
+	a, b := baseline(t), baseline(t)
+	set(a, "PER-1", obs.Finding, "low")
+	set(b, "SEC-3", obs.Finding, "high")
+	if c := Compare(a, b); !slices.Equal(c.GotBetter, []string{"PER-1"}) || !slices.Equal(c.NewOrWorse, []string{"SEC-3"}) {
+		t.Fatalf("better %q, worse %q", c.GotBetter, c.NewOrWorse)
+	}
+
+	// Each score is SCR-2's, as the scorecard shows it; an invalid run has none, and its pair lists nothing.
+	c := Compare(baseline(t), baseline(t))
+	if want := report.Score(*baseline(t)); c.ScoreBefore == nil || *c.ScoreBefore != (Score{want.Score, want.Of}) || c.ScoreAfter == nil {
+		t.Fatalf("score %v, want %d/%d", c.ScoreBefore, want.Score, want.Of)
+	}
+	a, b = baseline(t), baseline(t)
+	set(a, "PER-1", obs.Finding, "low")
+	a.Grade.Valid = false
+	c = Compare(a, b)
+	if c.ScoreBefore != nil || c.ScoreAfter == nil || c.GotBetter == nil || len(c.GotBetter) != 0 || c.NoLongerApplies == nil || c.NotProven == nil || !c.Incomplete {
+		t.Fatalf("invalid before: %+v", c)
 	}
 }
