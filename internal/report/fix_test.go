@@ -382,7 +382,7 @@ func TestHTMLExecutedCountsExcludeScopeOnlyResults(t *testing.T) {
 	}
 	d.Checks = kept
 	before := Score(d)
-	for _, theme := range []string{"graphite", "paper"} {
+	for _, theme := range []string{"graphite", "mission"} {
 		b, err := HTML(d, theme)
 		if err != nil {
 			t.Fatal(err)
