@@ -351,6 +351,8 @@ nothing) exit 0 ;;
 failed) printf 'SP-START-%s\n\nSP-END-%s 96\n' "$tok" "$tok" ;;
 exited) printf 'SP-START-%s\n\nSP-END-%s 2\n' "$tok" "$tok" ;;
 sleep) printf 'SP-START-%s\n' "$tok"; exec sleep 30 ;;
+killed) printf 'SP-START-%s\nhalf a document' "$tok"; kill -9 $$ ;;
+whole-then-fail) printf 'SP-START-%s\nRUN\nSP-END-%s 0\n' "$tok" "$tok"; exit 3 ;;
 esac
 `)
 }
@@ -366,7 +368,13 @@ func TestExecWrapperFallback(t *testing.T) {
 		cancel     bool
 	}{
 		{"ok", "", false}, {"nothing", "never framed", false}, {"failed", "couldn't become Sandprobe's wrapper", false},
-		{"exited", "the probe exited 2", false}, {"sleep", "the command failed", false}, {"sleep", "the command failed", true},
+		{"exited", "the probe exited 2", false},
+		// LNC-2: started, never ended: unframed, with only a fixed label for how the command ended
+		{"killed", "the probe's run started but its frame never ended (the command failed): nothing was graded", false},
+		{"sleep", "the probe's run started but its frame never ended (cut off at its limit): nothing was graded", false},
+		{"sleep", "the probe's run started but its frame never ended (cancelled): nothing was graded", true},
+		// PRV-15: a whole frame from a command that then failed counts for nothing
+		{"whole-then-fail", "the command failed", false},
 	} {
 		b := execBox(t, []string{"sh"}, fakeWrapper(tc.mode))
 		ctx, cancel := context.WithCancel(context.Background())
@@ -381,8 +389,11 @@ func TestExecWrapperFallback(t *testing.T) {
 		switch {
 		case tc.want == "" && (err != nil || string(out) != "RUN:-expect-uid "+strconv.Itoa(os.Getuid())+" |{\"in\":1}"):
 			t.Errorf("%s: %q %v", tc.mode, out, err)
-		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
-			t.Errorf("%s (cancel %v): want %q, got %v", tc.mode, tc.cancel, tc.want, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want) ||
+			out != nil && tc.mode != "exited" && tc.mode != "failed" && tc.mode != "nothing"):
+			t.Errorf("%s (cancel %v): want %q and nothing to grade, got %q %v", tc.mode, tc.cancel, tc.want, out, err)
+		case tc.mode == "killed" && strings.Contains(err.Error(), "signal"):
+			t.Errorf("killed: the command's own text leaked: %v", err)
 		}
 		if _, err := os.Stat(b.Scratch); !os.IsNotExist(err) {
 			t.Errorf("%s: the scratch %s is left: %v", tc.mode, b.Scratch, err)

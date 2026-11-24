@@ -145,6 +145,7 @@ func (b *ExecBox) invoke(ctx context.Context, args []string, stdin []byte) ([]by
 	b.pending = true
 	stdout, runErr := b.run(ctx, b.script(tok, args, stdin))
 	out, status, framed := unframe(stdout, tok)
+	started := bytes.Contains(stdout, []byte("SP-START-"+tok+"\n"))
 	if framed && status == 97 { // the path was there before this invocation: not ours, so nothing to remove
 		b.pending = false
 	} else if err := b.confirmGone(ctx); err == nil {
@@ -157,6 +158,9 @@ func (b *ExecBox) invoke(ctx context.Context, args []string, stdin []byte) ([]by
 		return nil, errors.New("the box couldn't decode the probe: it needs a working base64")
 	case framed && status == 96:
 		return nil, errors.New("the box's shell couldn't become Sandprobe's wrapper, or the wrapper couldn't start the probe: nothing was graded (LNC-1, LNC-2)")
+	case started && !framed: // LNC-2: a run that started and never ended is unframed, however the command ended
+		return nil, errors.New("the probe's run started but its frame never ended (" + howEnded(ctx, runErr) +
+			"): nothing was graded (LNC-2)")
 	case runErr != nil: // whatever the output framed, a command that failed doesn't count as a probe run
 		return nil, fmt.Errorf("the command failed: %w", runErr)
 	case !framed:
@@ -165,6 +169,19 @@ func (b *ExecBox) invoke(ctx context.Context, args []string, stdin []byte) ([]by
 		return out, fmt.Errorf("the probe exited %d", status)
 	}
 	return out, nil
+}
+
+// howEnded is a fixed label for how the person's command ended, never its own text (LNC-2).
+func howEnded(ctx context.Context, runErr error) string {
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled) || errors.Is(runErr, context.Canceled):
+		return "cancelled"
+	case errors.Is(runErr, context.DeadlineExceeded):
+		return "cut off at its limit"
+	case runErr != nil:
+		return "the command failed"
+	}
+	return "the command exited"
 }
 
 // script is one invocation: everything literal but the probe and its input, which travel base64 in heredocs whose
@@ -308,6 +325,9 @@ func (b *ExecBox) run(ctx context.Context, script []byte) ([]byte, error) {
 	out := &capped{max: obs.MaxDoc + 64<<10}
 	cmd.Stdout, cmd.Stderr = out, &capped{max: 4 << 10}
 	err := cmd.Run()
+	if err != nil && ctx.Err() != nil { // the limit or a cancel killed it: say which (LNC-2's fixed label)
+		err = fmt.Errorf("%w (%w)", err, ctx.Err())
+	}
 	return out.Bytes(), err
 }
 
