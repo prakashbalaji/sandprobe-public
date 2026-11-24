@@ -179,24 +179,24 @@ func TestScorePage(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := string(page)
-	s, w, a, l := strings.Index(p, "Sandbox score"), strings.Index(p, ">What we tested<"), strings.Index(p, ">Technical appendix<"),
-		strings.Index(p, "Letter grade")
-	if s < 0 || w < s || a < w || l < a || !strings.Contains(p, "<b>5</b><span>/6</span>") {
-		t.Errorf("want the score, what we tested, then the technical appendix with the letter: %d %d %d %d", s, w, a, l)
+	doc := p[strings.Index(p, `<main class="doc">`):] // the contents rail names the sections too
+	h, s, w, a := strings.Index(doc, `id="summary"`), strings.Index(doc, "Sandbox score"), strings.Index(doc, ">What to fix<"),
+		strings.Index(doc, ">Technical appendix<")
+	if h < 0 || s < h || w < s || a < w || !strings.Contains(p, "<b>5</b><span>/6</span>") {
+		t.Errorf("want the header, the score, what to fix, then the technical appendix: %d %d %d %d", h, s, w, a)
 	}
-	for _, cat := range Categories { // every test sits under its category, asked in plain words
+	for _, cat := range Categories { // every test is asked in plain words, beside its category
 		for _, id := range cat.Checks {
-			if !strings.Contains(p, `id="`+id+`"><td class="sev">`) || !strings.Contains(p, template.HTMLEscapeString(cat.Ask[id])) {
-				t.Errorf("%s isn't asked in plain words under %s", id, cat.Name)
+			if r := rowOf(p, id); !strings.Contains(r, template.HTMLEscapeString(cat.Ask[id])) || !strings.Contains(r, `<span class="ctag">`+cat.Name+`</span>`) {
+				t.Errorf("%s isn't asked in plain words beside %s", id, cat.Name)
 			}
 		}
 	}
-	// failures above the fold, passes folded away, and how many tests ran
-	sec := p[strings.Index(p, "Can it read keys and tokens?</span>"):]
-	sec = sec[:strings.Index(sec, "</section>")]
-	fail, fold, pass := strings.Index(sec, `id="SEC-3"`), strings.Index(sec, `<details class="more">`), strings.Index(sec, `id="SEC-1"`)
-	if fail < 0 || fold < fail || pass < fold || !strings.Contains(sec, "4/4 tests run") || !strings.Contains(sec, "Show 3 passed") {
-		t.Errorf("Secrets: want the failure, then the fold, then the passes, and 4/4 run: %d %d %d", fail, fold, pass)
+	// the failure in its severity above the fold, the passes folded away, and how many of a row's tests ran
+	high, fold, pass := strings.Index(p, `id="sev-high"`), strings.Index(p, `<details class="more">`), strings.Index(p, `id="SEC-1"`)
+	if high < 0 || fold < high || !strings.Contains(p[high:fold], `id="SEC-3"`) || pass < fold || !strings.Contains(p, "4/4 tests run") ||
+		!strings.Contains(p, "Show 27 passed") {
+		t.Errorf("want SEC-3 under High, then the fold with the passes, and 4/4 run: %d %d %d", high, fold, pass)
 	}
 	d.Grade.Valid = false
 	page, _ = HTML(d, "modern")

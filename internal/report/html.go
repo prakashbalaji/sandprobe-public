@@ -32,33 +32,50 @@ type group struct {
 }
 
 type view struct {
-	Nonce, Theme, Provider, Box, When, Grade, GradeClass, Lead, Statement, Boundary, Invalid string
-	Complete, Valid                                                                          bool
-	Crit, High, Med, Low, Passed, Unknown, NotProvenN                                        int
-	Map                                                                                      template.HTML
-	Findings, Unknowns, NotProven                                                            []card
-	Passes                                                                                   []group
-	Skipped, Identity, Hosts, Markers, Reset, Calls, Attested                                [][2]string
-	ScopedOut, NotTested, Notes                                                              []string
-	Cleanup, Residual, Saved                                                                 string
-	Data                                                                                     Doc
-	Card                                                                                     Card // SCR-3: the headline
-	Sections                                                                                 []section
-	Chains                                                                                   []chain
+	Nonce, Theme, Provider, Box, When, Lead, Statement, Boundary, Invalid string // SCR-3: no letter grade
+	Complete, Valid                                                       bool
+	Passed, Unknown, NotProvenN                                           int
+	Map                                                                   template.HTML
+	Findings, Unknowns, NotProven                                         []card
+	Passes                                                                []group
+	Skipped, Identity, Hosts, Markers, Reset, Calls, Attested             [][2]string
+	ScopedOut, NotTested, Notes                                           []string
+	Cleanup, Residual, Saved                                              string
+	Data                                                                  Doc
+	Card                                                                  Card // SCR-3: the headline
+	Cats                                                                  []catView
+	Chains                                                                []chain
+	Groups                                                                []sevGroup // SCR-3: What to fix
+	Rest                                                                  []test     // SCR-3: passed, or not proven
+	RestLabel, Version                                                    string
+	Strip                                                                 []stat
 }
 
-// section is one category's table in "What we tested" (SCR-3): failures and unknowns on top, the rest folded away.
-type section struct {
-	Num, Name, Question, RestLabel string
-	Green, NotApplicable           bool
-	Run, Total                     int
-	Top, Rest                      []test
+// catView is one of the six rows (SCR-2) with "x/y tests run" and a link to each of its tests (SCR-3).
+type catView struct {
+	Row
+	Num        string
+	Run, Total int
+	Tests      []test
+}
+
+// sevGroup is one group of What to fix (SCR-3): a severity's failures, a chain's sentence first, or the unknowns.
+type sevGroup struct {
+	Key, Name, Word string
+	Rows            []test
+}
+
+// stat is one cell of the strip beside the score, counted from the rows the page shows (SCR-3).
+type stat struct {
+	N            int
+	Label, Class string
 }
 
 type test struct {
-	ID, Ask, Result, Class, Detail, Fix, Sev string
-	Attested                                 string // PRV-15: the person's attestation, beside the check
-	order                                    int
+	ID, Ask, Result, Class, Detail, Fix, Sev, Cat, Would string
+	Attested                                             string   // PRV-15: the person's attestation, beside the check
+	Parts                                                []string // a chain's checks, each linked to its row
+	order                                                int
 }
 
 type chain struct{ Sev, Text string }
@@ -118,6 +135,9 @@ func worst(id string) string {
 var sevOrder = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 var restOrder = map[string]int{"Pass": 0, "Info": 1, "N/A": 2, "No finding": 3, "Not run": 4}
 
+// failGroups are What to fix's severities, worst first (SCR-3).
+var failGroups = [][2]string{{"critical", "Critical"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"}}
+
 // via names a canary route in words.
 func via(c catalog.Canary) string {
 	switch {
@@ -129,54 +149,116 @@ func via(c catalog.Canary) string {
 	return fmt.Sprintf("%s port %d", strings.ToUpper(c.Proto), c.Port)
 }
 
-// sections builds "What we tested" in the headline's order: one table per category.
-func sections(d Doc, c Card) []section {
+// fixList builds SCR-3's page below the score: the six rows, each with its tests, then What to fix, where every test
+// appears exactly once. Failures group by severity, each chain's sentence first in its own; unknowns follow on their
+// own, never folded in with the passes; the rest fold away. A failure whose severity isn't one of the four (only an
+// edited report has one) still shows, in a group of its own, so no test is ever dropped.
+func fixList(d Doc, c Card) (cats []catView, groups []sevGroup, rest []test, restLabel string) {
 	got := map[string]Check{}
 	for _, ck := range d.Checks {
 		got[ck.ID] = ck
 	}
-	var out []section
+	bySev := map[string][]test{}
+	for _, f := range d.Findings {
+		if t, ok := chainText[f.ID]; ok {
+			text := t[0]
+			if f.Potential {
+				text = t[1]
+			}
+			bySev[f.Severity] = append(bySev[f.Severity], test{ID: f.ID, Ask: text, Result: "Fail", Class: "red", Fix: f.Fix,
+				Sev: f.Severity, Cat: "Chain", Parts: f.Checks})
+		}
+	}
+	var unknown []test
+	counts := map[string]int{}
 	for i, cat := range Categories {
-		sec := section{Num: fmt.Sprintf("%d", i+1), Name: cat.Name, Question: cat.Question, Green: c.Rows[i].Green,
-			NotApplicable: c.Rows[i].NotApplicable, Total: len(cat.Checks)}
-		counts := map[string]int{}
+		cv := catView{Row: c.Rows[i], Num: fmt.Sprintf("%d", i+1), Total: len(cat.Checks)}
 		for _, id := range cat.Checks {
 			ck, ok := got[id]
-			t := test{ID: id, Ask: cat.Ask[id], Sev: worst(id), Attested: ck.Attestation}
+			t := test{ID: id, Ask: cat.Ask[id], Sev: worst(id), Attested: ck.Attestation, Cat: cat.Name}
 			var top bool
 			t.Result, t.Class, t.Detail, top = answer(ck, ok)
 			if t.Result != "Not run" {
-				sec.Run++
+				cv.Run++
 			}
-			if t.Result == "Fail" {
-				t.Fix, t.Sev = ck.Fix, ck.Severity
+			if t.Sev != "" { // for a test that didn't fail, what a failure would have been
+				t.Would = "would be " + t.Sev
 			}
-			if top {
+			switch {
+			case t.Result == "Fail":
+				t.Fix, t.Sev, t.Would = ck.Fix, ck.Severity, ""
+				bySev[t.Sev] = append(bySev[t.Sev], t)
+			case top: // what couldn't be told, worst first
 				t.order = sevOrder[t.Sev]
-				if t.Result == "Unknown" {
-					t.order += 10 // failures first, then what couldn't be told
-				}
-				sec.Top = append(sec.Top, t)
-			} else {
+				unknown = append(unknown, t)
+			default:
 				t.order = restOrder[t.Result]
 				counts[t.Result]++
-				sec.Rest = append(sec.Rest, t)
+				rest = append(rest, t)
 			}
+			cv.Tests = append(cv.Tests, t)
 		}
-		sort.SliceStable(sec.Top, func(a, b int) bool { return sec.Top[a].order < sec.Top[b].order })
-		sort.SliceStable(sec.Rest, func(a, b int) bool { return sec.Rest[a].order < sec.Rest[b].order })
-		var parts []string
-		for _, r := range []string{"Pass", "Info", "N/A", "No finding", "Not run"} {
-			if n := counts[r]; n > 0 {
-				word := map[string]string{"Pass": "passed", "Info": "informational", "N/A": "with nothing to test",
-					"No finding": "with no finding", "Not run": "not run"}[r]
-				parts = append(parts, fmt.Sprintf("%d %s", n, word))
-			}
-		}
-		sec.RestLabel = "Show " + strings.Join(parts, ", ")
-		out = append(out, sec)
+		cats = append(cats, cv)
 	}
-	return out
+	for _, g := range failGroups {
+		if rows := bySev[g[0]]; len(rows) > 0 {
+			groups = append(groups, sevGroup{Key: g[0], Name: g[1], Word: "failing", Rows: rows})
+		}
+		delete(bySev, g[0])
+	}
+	var odd []string
+	for sev := range bySev {
+		odd = append(odd, sev)
+	}
+	sort.Strings(odd)
+	var unrated []test
+	for _, sev := range odd {
+		unrated = append(unrated, bySev[sev]...)
+	}
+	if len(unrated) > 0 {
+		groups = append(groups, sevGroup{Key: "unrated", Name: "Unrated", Word: "failing, with no known severity", Rows: unrated})
+	}
+	if len(unknown) > 0 {
+		sort.SliceStable(unknown, func(a, b int) bool { return unknown[a].order < unknown[b].order })
+		groups = append(groups, sevGroup{Key: "unknown", Name: "Unknown", Word: "couldn't be told either way, never a pass", Rows: unknown})
+	}
+	sort.SliceStable(rest, func(a, b int) bool { return rest[a].order < rest[b].order })
+	var parts []string
+	for _, r := range []string{"Pass", "Info", "N/A", "No finding", "Not run"} {
+		if n := counts[r]; n > 0 {
+			word := map[string]string{"Pass": "passed", "Info": "informational", "N/A": "with nothing to test",
+				"No finding": "with no finding", "Not run": "not run"}[r]
+			parts = append(parts, fmt.Sprintf("%d %s", n, word))
+		}
+	}
+	return cats, groups, rest, "Show " + strings.Join(parts, ", ")
+}
+
+// strip is SCR-3's line beside the score: each failing severity, the passes and the unknowns, counted from the rows.
+func strip(groups []sevGroup, rest []test) []stat {
+	var out []stat
+	unknown := 0
+	for _, g := range groups {
+		if g.Key == "unknown" {
+			unknown = len(g.Rows)
+			continue
+		}
+		out = append(out, stat{N: len(g.Rows), Label: strings.ToLower(g.Name) + " failing", Class: "red"})
+	}
+	if len(out) == 0 {
+		out = append(out, stat{Label: "failing"})
+	}
+	passed := stat{Label: "passed"}
+	for _, t := range rest {
+		if t.Result == "Pass" {
+			passed.N, passed.Class = passed.N+1, "green"
+		}
+	}
+	gap := stat{N: unknown, Label: "unknown"}
+	if unknown > 0 { // dashed, never green, and only when there is one to see
+		gap.Class = "unk"
+	}
+	return append(out, passed, gap)
 }
 
 var catName = map[string]string{"SEC": "Secrets", "EGR": "Ways out", "PER": "Persistence", "AMP": "Amplifiers"}
@@ -211,25 +293,12 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 	}
 	when, _ := time.Parse(time.RFC3339, d.Run.StartedAt)
 	v := view{Nonce: base64.RawURLEncoding.EncodeToString(nonce), Theme: theme, Provider: d.Run.Provider, Box: d.Run.Box.Name,
-		When: when.Local().Format("Jan 2, 2006 3:04 PM MST"), Grade: d.Grade.Letter, Lead: d.Lead, Statement: d.Statement,
+		When: when.Local().Format("Jan 2, 2006 3:04 PM MST"), Lead: d.Lead, Statement: d.Statement,
 		Boundary: d.Boundary, Invalid: d.Grade.Invalid, Complete: d.Grade.Complete, Valid: d.Grade.Valid,
-		Crit: d.Grade.Counts["critical"], High: d.Grade.Counts["high"], Med: d.Grade.Counts["medium"], Low: d.Grade.Counts["low"],
 		Unknown: len(d.Grade.Unknown), ScopedOut: d.Limits.ScopedOut, NotTested: d.Limits.NotTested, Notes: d.Grade.Notes,
 		Cleanup: d.Cleanup.Outcome, Residual: d.Cleanup.Residual, Saved: saved, Data: d, Card: Score(d)}
 	if v.Box == "" {
 		v.Box = d.Run.Box.ProviderID
-	}
-	switch { // UX-8: an invalid or incomplete grade without a finding reads as unknown, never as a pass or a failure
-	case !d.Grade.Valid:
-		v.Grade, v.GradeClass = "?", "unk"
-	case v.Crit+v.High > 0:
-		v.GradeClass = "crit"
-	case v.Med > 0:
-		v.GradeClass = "med"
-	case !d.Grade.Complete:
-		v.GradeClass = "unk"
-	default:
-		v.GradeClass = "pass"
 	}
 	for _, f := range d.Findings {
 		c := card{ID: f.ID, Title: f.Title, SevLabel: strings.ToUpper(f.Severity), SevClass: sevClass(f.Severity), Gets: f.Gets,
@@ -337,9 +406,10 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 		}
 		v.Calls = append(v.Calls, [2]string{c.Call, c.At.Local().Format("3:04:05 PM") + " · " + state})
 	}
-	v.Map = mapSVG(d)
+	v.Map, v.Version = mapSVG(d), d.Probe.Version
 	if v.Card.Valid {
-		v.Sections = sections(d, v.Card)
+		v.Cats, v.Groups, v.Rest, v.RestLabel = fixList(d, v.Card)
+		v.Strip = strip(v.Groups, v.Rest)
 		for _, f := range d.Findings {
 			if t, ok := chainText[f.ID]; ok {
 				text := t[0]
