@@ -210,6 +210,9 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		if err == nil {
 			run, err = host.Execute(ctx, pod, c, host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy, BoundaryContract: contract})
 		}
+		if err == nil {
+			lv.done("probe", "")
+		}
 	}
 	teardown()
 	if err != nil {

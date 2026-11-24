@@ -22,7 +22,7 @@ func TestPrintCardShowsCoverageWithoutChangingExposureScore(t *testing.T) {
 	var out bytes.Buffer
 	printCard(opts{stdout: &out}, report.Score(d), "")
 	for _, text := range []string{"Score 5/6", "5/6 categories have usable results", "skipped: SEC-4, AMP-7"} {
-		if !strings.Contains(out.String(), text) {
+		if !strings.Contains(flat(out.String()), text) {
 			t.Fatal("missing coverage", text)
 		}
 	}

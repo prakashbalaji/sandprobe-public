@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,7 +39,8 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 		o.emit(card)
 	} else {
 		printCard(o, card, d.Statement)
-		fmt.Fprintf(o.stdout, "\n%s\n", report.SavedNote)
+		fmt.Fprintln(o.stdout)
+		printWrapped(o.stdout, "", report.SavedNote, "", "")
 	}
 	if !d.Grade.Valid || !d.Grade.Complete {
 		return exitPartial, nil
@@ -116,13 +118,16 @@ func asciiLocale() bool {
 // applicable (SCR-2).
 func printCard(o opts, c report.Card, statement string) {
 	green, unproven, red, reset := "", "", "", ""
-	if f, ok := o.stdout.(*os.File); ok && isTerminal(f) {
+	if detectTermCaps(o.stdout, false).color { // UX-9: a terminal, and neither NO_COLOR nor TERM=dumb
 		green, unproven, red, reset = "\x1b[1;32m", "\x1b[32m", "\x1b[1;31m", "\x1b[0m"
 	}
+	redDot, greenDot, naDot := "●", "●", "●"
 	gnpDot, gnpMark := "◌", "GREEN · NOT PROVEN"
-	if asciiLocale() {
+	if asciiLocale() { // UX-9: ASCII symbols, as the run's summary uses
+		redDot, greenDot, naDot = "x", "+", "-"
 		gnpDot, gnpMark = "o", "GREEN . NOT PROVEN"
 	}
+	const indent = "                         " // 25 columns: where a row's other lines start
 	w := o.stdout
 	if !c.Valid {
 		fmt.Fprintf(w, "\nScore: none (invalid run)\n")
@@ -130,21 +135,21 @@ func printCard(o opts, c report.Card, statement string) {
 	}
 	fmt.Fprintf(w, "\nScore %d/%d\n", c.Score, c.Of)
 	for _, line := range c.NotCounted() {
-		fmt.Fprintln(w, printable(line))
+		printWrapped(w, "", printable(line), "", "")
 	}
 	fmt.Fprintln(w)
 	if c.Coverage != nil {
-		fmt.Fprintln(w, c.Coverage.Description())
+		printWrapped(w, "", printable(c.Coverage.Description()), "", "")
 	}
 	for _, row := range c.Rows {
-		dot, mark, color := "●", "RED  ", red
+		dot, mark, color := redDot, "RED  ", red
 		switch {
 		case row.Green && row.GreenNotProven: // SCR-2, UX-9: its own symbol and words, never plain GREEN
 			dot, mark, color = gnpDot, gnpMark, unproven
 		case row.Green:
-			mark, color = "GREEN", green
+			dot, mark, color = greenDot, "GREEN", green
 		case row.NotApplicable: // SCR-2: never green, and out of the score
-			mark, color = "N/A  ", ""
+			dot, mark, color = naDot, "N/A  ", ""
 		}
 		if utf8.RuneCountInString(fmt.Sprintf("  %s %s  %-13s %s", dot, mark, row.Name, row.Question)) <= 80 {
 			fmt.Fprintf(w, "  %s%s %s%s  %-13s %s\n", color, dot, mark, reset, row.Name, row.Question)
@@ -152,16 +157,24 @@ func printCard(o opts, c report.Card, statement string) {
 			fmt.Fprintf(w, "  %s%s %s%s  %s\n  %-22s %s\n", color, dot, mark, reset, row.Name, "", row.Question)
 		}
 		if row.Why != "" { // a not-applicable reason is the report's own skip reason: escaped like its other text
-			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), reset)
+			printWrapped(w, indent, printable(row.Why), color, reset)
 		}
 		if row.NotProven != "" {
-			fmt.Fprintf(w, "  %-22s %s\n", "", row.NotProven)
+			printWrapped(w, indent, printable(row.NotProven), "", "")
 		}
 		if row.Coverage != nil {
-			fmt.Fprintf(w, "  %-22s %s\n", "", printable(row.Coverage.Description()))
+			printWrapped(w, indent, printable(row.Coverage.Description()), "", "")
 		}
 	}
 	if statement != "" {
-		fmt.Fprintf(w, "\n%s\n", printable(statement))
+		fmt.Fprintln(w)
+		printWrapped(w, "", printable(statement), "", "")
 	}
+}
+
+// printWrapped writes already-escaped text within UX-9's 80 columns, each line starting at indent.
+func printWrapped(w io.Writer, indent, text, col, reset string) {
+	var b strings.Builder
+	writeWrapped(&b, indent, indent, text, maxTUIWidth, col, reset)
+	_, _ = io.WriteString(w, b.String())
 }

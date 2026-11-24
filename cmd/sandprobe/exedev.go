@@ -78,26 +78,23 @@ func runExedev(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check exe.dev token and account access", exitLogin)
 	}
-	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the VM exists
+	lv := newLive(o, stderr, "exe.dev", livePhasesFor("exe.dev", choice.none, false)) // UX-5: the plan's own phases
+	defer lv.close(false)
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the VM exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
-	step := func(s string) {
-		if !o.json() {
-			fmt.Fprintln(stderr, "· "+s)
-		}
-	}
 	started := time.Now()
-	step("creating one exe.dev CPU VM; no provider-enforced expiry")
+	lv.phase("box", "creating one exe.dev CPU VM; no provider-enforced expiry")
 	box, createErr := client.CreateExedev(ctx, exedevDir())
 	if box == nil {
 		return 0, fail("provider_error", createErr.Error(), "check private journal directory", exitPartial)
 	}
 	if box.CreationConfirmed() {
-		step("recorded exe.dev create-returned name " + box.ID())
+		lv.phase("box", "recorded exe.dev create-returned name %s", box.ID())
 	} else {
-		step("recorded create intent only; exe.dev VM identity is not confirmed")
+		lv.phase("box", "recorded create intent only; exe.dev VM identity is not confirmed")
 	}
 	cleaned := false
 	pending := true
@@ -118,18 +115,22 @@ func runExedev(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		var sum string
 		bin, sum, err = probes.Probe(box.Arch)
 		if err == nil {
-			step("uploading and verifying probe")
+			lv.phase("box", "uploading and verifying probe")
 			err = box.Upload(ctx, bin)
 		}
 		if err == nil {
-			step("running scoped Exedev baseline checks")
+			lv.phase("probe", "running scoped Exedev baseline checks")
 			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.ExedevExclusions(), ExcludedKind: obs.SkipProviderTerms})
+			if err == nil {
+				lv.done("probe", "")
+			}
 		}
 	}
-	step("deleting recorded Exedev sandbox and verifying absence")
+	lv.phase("delete", "deleting recorded Exedev sandbox and verifying absence")
 	cleanupErr := deleteExedev(box)
 	pending = false
 	cleaned = cleanupErr == nil
+	lv.close(cleaned)
 	cleanup := "exe.dev acknowledged deletion of original name " + box.ID() + "; scoped API absence confirmed (name-addressed exception PRV-13)"
 	if !cleaned {
 		cleanup = "NOT confirmed deleted; inspect private journal " + box.StatePath()

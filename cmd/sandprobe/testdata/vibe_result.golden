@@ -11,10 +11,12 @@
   ✗ RED    Privilege     Found: setuid or file-capability escalation
   ◌ GREEN · NOT PROVEN  Cloud access
                          not proven: cloud metadata credentials, Kubernetes API
+                         seen: no metadata service listed a role or identity;
+                         the agent's environment names no Kubernetes API
   ✗ RED    Persistence   Found: startup files, boot and schedule, package and
                          git config
 
-  CHAIN CHN-1 · CRITICAL
+  CHAIN CHN-1 · CRITICAL · proof
   The agent can open a credential and send data out of the box, so a hijacked
   agent could steal it.
   Canary receipts: 6 (dns/53, tcp/443, tcp/22, tcp/80, tcp/8080, udp/53)

@@ -365,9 +365,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 		}
 		lv.close(len(left) == 0)
 	}
-	if lv.inPlace {
-		lv.phase("canary", "starting local canary on %s", canaryIP)
-	}
+	lv.quiet("canary", "starting local canary on %s", canaryIP)
 	c, err = host.StartDockerCanary(ctx, network, canaryIP, dockerCanaryImage, canaryPath, "sandprobe.test")
 	if err == nil {
 		lv.phase("box", "starting a throwaway container from %s", image)
@@ -426,6 +424,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 			}
 			if err == nil {
 				residual = dockerRunResidual(r.dockerOpts, run.Input.OwnInit, healthOff)
+				lv.done("probe", "")
 			}
 		}
 	}

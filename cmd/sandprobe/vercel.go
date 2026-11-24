@@ -90,18 +90,15 @@ func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Vercel team/project access and token", exitLogin)
 	}
-	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	lv := newLive(o, stderr, "vercel", livePhasesFor("vercel", choice.none, false)) // UX-5: the plan's own phases
+	defer lv.close(false)
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the sandbox exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
-	step := func(s string) {
-		if !o.json() {
-			fmt.Fprintln(stderr, "· "+s)
-		}
-	}
 	started := time.Now()
-	step("creating one Vercel sandbox with a fifteen-minute timeout")
+	lv.phase("box", "creating one Vercel sandbox with a fifteen-minute timeout")
 	box, createErr := client.CreateVercel(ctx, configDir())
 	if box == nil {
 		return 0, fail("provider_error", createErr.Error(), "check private journal directory", exitPartial)
@@ -125,18 +122,22 @@ func runVercel(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		var sum string
 		bin, sum, err = probes.Probe(box.Arch)
 		if err == nil {
-			step("uploading and verifying probe")
+			lv.phase("box", "uploading and verifying probe")
 			err = box.Upload(ctx, bin)
 		}
 		if err == nil {
-			step("running scoped Vercel baseline checks")
+			lv.phase("probe", "running scoped Vercel baseline checks")
 			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.VercelExclusions(), ExcludedKind: obs.SkipProviderTerms})
+			if err == nil {
+				lv.done("probe", "")
+			}
 		}
 	}
-	step("deleting recorded Vercel sandbox and verifying absence")
+	lv.phase("delete", "deleting recorded Vercel sandbox and verifying absence")
 	cleanupErr := deleteVercel(box)
 	pending = false
 	cleaned = cleanupErr == nil
+	lv.close(cleaned)
 	cleanup := "Vercel sandbox deleted; provider GET confirmed 404"
 	if !cleaned {
 		cleanup = "NOT confirmed deleted; inspect private journal " + box.StatePath()

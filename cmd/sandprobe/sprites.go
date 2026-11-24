@@ -637,8 +637,8 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	if err == nil {
 		lv.phase("probe", "running the probe as the agent, then the reset and recheck")
 		run, err = host.Execute(ctx, s, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
-		if err == nil && lv.inPlace {
-			lv.phase("reset", "checkpoint restored and markers rechecked")
+		if err == nil {
+			lv.done("reset", "checkpoint restored and markers rechecked")
 		}
 	}
 	teardown()

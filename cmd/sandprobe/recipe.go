@@ -194,9 +194,8 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		closeCanary(public, stderr)
 		return 0, fail("local_error", "the box couldn't be recorded before its create, so nothing was created: "+err.Error(), "check that "+configDir()+" is writable", exitUsage)
 	}
-	if lv.inPlace {
-		lv.phase("box", "creating %s through %s in %s", box.Name, name, target)
-	} else {
+	lv.quiet("box", "creating %s through %s in %s", box.Name, name, target)
+	if !lv.inPlace {
 		fmt.Fprintf(stderr, "sandprobe: creating %s through the %s recipe in %s (recorded in %s)\n", box.Name, name, target, j.path())
 	}
 	if err := box.Create(ctx); err != nil && box.BoxID == "" {
@@ -210,9 +209,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		}
 		if err != nil {
 			err = fmt.Errorf("the create returned %s, then: %w", box.BoxID, err)
-			if lv.inPlace {
-				lv.phase("delete", "deleting %s", box.BoxID)
-			}
+			lv.quiet("delete", "deleting %s", box.BoxID)
 			cleanup, cleaned := recipeCleanup(box, j, stderr)
 			lv.close(cleaned)
 			closeCanary(public, stderr)
@@ -239,11 +236,12 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		lv.phase("probe", "running the probe as uid %d through the recipe", w.UIDs[1])
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(recipeExclusions(rc), attested),
 			ExcludedKind: obs.SkipOptIn, Attested: attested, AllowLocalProxy: allowLocal, NoCanary: choice.none})
+		if err == nil {
+			lv.done("probe", "")
+		}
 		return err
 	}()
-	if lv.inPlace {
-		lv.phase("delete", "deleting %s", box.ID())
-	}
+	lv.quiet("delete", "deleting %s", box.ID())
 	cleanup, cleaned := recipeCleanup(box, j, stderr)
 	lv.close(cleaned)
 	closeCanary(public, stderr)

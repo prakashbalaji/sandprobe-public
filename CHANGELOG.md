@@ -38,10 +38,17 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   routes and `Fix first`, explicit cleanup confirmation (or a loud `CLEANUP UNCONFIRMED (exit 7)` warning), and the
   HTML report path, with no letter grade in terminal text (UX-6, SCR-3). `grade.letter` in `OUT-1` JSON is unchanged.
 - Interactive runs update plan-derived host phases (`network`, `canary`, `box`, `probe`, `reset` where applicable, and
-  `delete`/`cleanup`/`retain`) in place on TTY `stderr`, and offer single-key post-run actions (`Enter`/`j`/`k` to walk
-  findings and unknowns, `e` to explain a check, `c` to copy a fix, `o` to open the HTML report, `q`/`Esc` to quit) on
-  foreground TTYs when `CI` and `SANDPROBE_NO_KEYS` are unset, auto-exiting after 15 seconds if untouched and restoring
+  `delete`/`cleanup`/`retain`) in place on TTY `stderr` for every provider, the native adapters (E2B, Vercel, Daytona,
+  Cloudflare, Boat, exe.dev, Baseten) included. A phase is ticked only when it finished: one cut short reads `did not
+  finish`, one never started `not run`, and an unconfirmed cleanup `not confirmed` (UX-5). Runs offer single-key
+  post-run actions (`Enter`/`j`/`k` to walk findings and unknowns, `e` to explain a check, `c` to copy a fix, `o` to
+  open the HTML report, `b`/`Esc` back to the summary, `q`, or `Esc` on the summary, to quit) on foreground TTYs when `CI` and `SANDPROBE_NO_KEYS` are unset, auto-exiting after 15 seconds if untouched and restoring
   terminal state on `EOF` and termination/suspension signals (UX-5, UX-7, AGT-1).
+- The run summary's top finding and each finding in the walker say whether it is `proof` or `a sign we saw, not
+  confirmed` (UX-6, UX-7). A green row with a not-proven check adds a `seen:` line when the probe recorded one of its
+  fixed reasons, such as `no metadata service listed a role or identity` (UX-6).
+- `sandprobe scorecard` keeps every line within 80 columns, its coverage sentence, statement and saved-report note
+  included; it honors `NO_COLOR` and `TERM=dumb`, and uses ASCII row symbols under a `C` or `POSIX` locale (UX-9).
 - Terminal output escapes Unicode `Cf` format characters (bidi overrides/isolates, ALM, zero-width characters, BOM) in
   addition to control characters and line separators, accounts for wide East Asian and emoji display widths when
   wrapping to 80 columns, and honors `NO_COLOR`, `TERM=dumb`, ASCII `C`/`POSIX` locales and

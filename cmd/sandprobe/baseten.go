@@ -118,21 +118,18 @@ func runBaseten(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Baseten team access and API key", exitLogin)
 	}
-	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the sandbox exists
+	lv := newLive(o, stderr, "baseten", livePhasesFor("baseten", choice.none, r.keepSandbox)) // UX-5: the plan's own phases
+	defer lv.close(false)
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the sandbox exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
-	step := func(s string) {
-		if !o.json() {
-			fmt.Fprintln(stderr, "· "+s)
-		}
-	}
 	started := time.Now()
 	if r.keepSandbox {
-		step("creating one Baseten inspection sandbox with one-hour delete expiry")
+		lv.phase("box", "creating one Baseten inspection sandbox with one-hour delete expiry")
 	} else {
-		step("creating one Baseten sandbox with 15-minute delete expiry")
+		lv.phase("box", "creating one Baseten sandbox with 15-minute delete expiry")
 	}
 	var box *host.BasetenBox
 	var createErr error
@@ -163,15 +160,24 @@ func runBaseten(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		var sum string
 		bin, sum, err = probes.Probe(box.Arch)
 		if err == nil {
-			step("uploading and verifying the probe")
+			lv.phase("box", "uploading and verifying the probe")
 			err = box.Upload(ctx, bin)
 		}
 		if err == nil {
-			step("running canary-only Baseten checks")
+			lv.phase("probe", "running canary-only Baseten checks")
 			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BasetenExclusions(), ExcludedKind: obs.SkipProviderTerms})
+			if err == nil {
+				lv.done("probe", "")
+			}
 		}
 	}
+	if r.keepSandbox {
+		lv.quiet("retain", "retaining the sandbox for inspection if the run finished; deleting it otherwise")
+	} else {
+		lv.quiet("delete", "deleting the sandbox and verifying it is gone")
+	}
 	cleanup, retention, cleaned, err := completeBasetenLifecycle(ctx, box, run, err, r.keepSandbox)
+	lv.close(cleaned && (retention != nil) == r.keepSandbox) // UX-5: retain ticks only when it really retained
 	pending = false
 	if retention != nil || !cleaned {
 		fmt.Fprintln(stderr, "sandprobe: "+cleanup)

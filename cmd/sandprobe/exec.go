@@ -177,15 +177,6 @@ func (r *runFlags) openCanary(ctx context.Context, choice canaryChoice, step fun
 	return ssm, nil, nil
 }
 
-// progress is a run's step line on stderr; with -o json, stderr carries errors only.
-func progress(o opts, stderr io.Writer) func(string, ...any) {
-	return func(f string, a ...any) {
-		if !o.json() {
-			fmt.Fprintf(stderr, "· "+f+"\n", a...)
-		}
-	}
-}
-
 // closeCanary gives back a public canary's slots (HCN-3) under its own budget, even after Ctrl-C or a run that used
 // all of its own. A slot it can't confirm released lapses on its lifetime, and the person is told.
 func closeCanary(public *host.HTTPSCanary, stderr io.Writer) {
@@ -285,11 +276,12 @@ func runExec(o opts, r runFlags, planOnly bool, stderr io.Writer) (int, error) {
 		lv.phase("probe", "running the probe as uid %d through your command", w.UIDs[1])
 		run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: lift(host.ExecExclusions(), attested),
 			ExcludedKind: obs.SkipOptIn, Attested: attested, Existing: true, AllowLocalProxy: allowLocal, NoCanary: choice.none, BlockDevicePaths: r.blockDevicePaths})
+		if err == nil {
+			lv.done("probe", "")
+		}
 		return err
 	}()
-	if lv.inPlace {
-		lv.phase("cleanup", "removing scratch directory %s", box.Scratch)
-	}
+	lv.quiet("cleanup", "removing scratch directory %s", box.Scratch)
 	cleanup, cleaned := execTeardown(box, box.Scratch, public, stderr)
 	lv.close(cleaned)
 	if err != nil {

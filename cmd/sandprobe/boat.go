@@ -76,24 +76,21 @@ func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if err = client.Available(ctx); err != nil {
 		return 0, fail("not_logged_in", err.Error(), "check Boat team/project access and token", exitLogin)
 	}
-	c, public, err := r.openCanary(ctx, choice, progress(o, stderr)) // HCN-5: proven, and its slot reserved, before the VM exists
+	lv := newLive(o, stderr, "boat", livePhasesFor("boat", choice.none, false)) // UX-5: the plan's own phases
+	defer lv.close(false)
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the VM exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
-	step := func(s string) {
-		if !o.json() {
-			fmt.Fprintln(stderr, "· "+s)
-		}
-	}
 	started := time.Now()
-	step("creating one Boat sandbox with a fifteen-minute timeout")
+	lv.phase("box", "creating one Boat sandbox with a fifteen-minute timeout")
 	box, createErr := client.CreateBoat(ctx, configDir())
 	if box == nil {
 		return 0, fail("provider_error", createErr.Error(), "check private journal directory", exitPartial)
 	}
 	if box.ID() != "" {
-		step("recorded Boat sandbox " + box.ID())
+		lv.phase("box", "recorded Boat sandbox %s", box.ID())
 	}
 	cleaned := false
 	pending := true
@@ -114,18 +111,22 @@ func runBoat(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		var sum string
 		bin, sum, err = probes.Probe(box.Arch)
 		if err == nil {
-			step("uploading and verifying probe")
+			lv.phase("box", "uploading and verifying probe")
 			err = box.Upload(ctx, bin)
 		}
 		if err == nil {
-			step("running scoped Boat baseline checks")
+			lv.phase("probe", "running scoped Boat baseline checks")
 			run, err = host.Execute(ctx, box, c, host.Options{Mode: "exec", ProbeSHA256: sum, Excluded: host.BoatExclusions(), ExcludedKind: obs.SkipProviderTerms})
+			if err == nil {
+				lv.done("probe", "")
+			}
 		}
 	}
-	step("deleting recorded Boat sandbox and verifying absence")
+	lv.phase("delete", "deleting recorded Boat sandbox and verifying absence")
 	cleanupErr := deleteBoat(box)
 	pending = false
 	cleaned = cleanupErr == nil
+	lv.close(cleaned)
 	cleanup := "Boat deletion operation " + box.DeletionOperation() + " completed for original sandbox " + box.ID() + "; GET confirmed 404"
 	if !cleaned {
 		cleanup = "NOT confirmed deleted; inspect private journal " + box.StatePath()

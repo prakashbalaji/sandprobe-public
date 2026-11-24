@@ -44,7 +44,7 @@ func detectTermCaps(stdout io.Writer, interactiveTTY bool) termCaps {
 	dumb := strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
 	noColor := os.Getenv("NO_COLOR") != "" || dumb
 	reduced := os.Getenv("SANDPROBE_REDUCED_MOTION") != "" || dumb
-	ascii := isASCIILocale()
+	ascii := asciiLocale()
 
 	isOutTTY := false
 	width := maxTUIWidth
@@ -64,18 +64,6 @@ func detectTermCaps(stdout io.Writer, interactiveTTY bool) termCaps {
 		reducedMotion: reduced,
 		width:         width,
 	}
-}
-
-func isASCIILocale() bool {
-	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
-		v := strings.TrimSpace(os.Getenv(k))
-		if v == "" {
-			continue
-		}
-		u := strings.ToUpper(v)
-		return u == "C" || u == "POSIX" || u == "C.ASCII" || u == "ASCII"
-	}
-	return false
 }
 
 type tuiGlyphs struct {
@@ -188,6 +176,21 @@ func livePhasesFor(provider string, noCanary, keepSandbox bool) []livePhase {
 	}
 }
 
+// phaseState is one live phase's outcome (UX-5). Only a phase that itself finished is ever ticked: one that failed
+// or was cut short reads "did not finish" (or "not confirmed" for the cleanup phase), and one that never started
+// reads "not run" (AGENTS rule 1 applies to the live view too).
+type phaseState uint8
+
+const (
+	phasePending phaseState = iota
+	phaseActive
+	phaseDone
+	phaseFailed
+)
+
+// isCleanupPhase is the run's last phase, which runs whatever happened before it (UX-5).
+func isCleanupPhase(id string) bool { return id == "delete" || id == "cleanup" || id == "retain" }
+
 // liveTracker renders UX-5's live phase block on an interactive TTY stderr, or plain append-only lines otherwise.
 type liveTracker struct {
 	mu       sync.Mutex
@@ -197,6 +200,7 @@ type liveTracker struct {
 	caps     termCaps
 	provider string
 	phases   []livePhase
+	states   []phaseState
 	current  int
 	details  map[string]string
 	started  time.Time
@@ -206,15 +210,22 @@ type liveTracker struct {
 	closed   bool
 }
 
+// onNewLive lets a test see every tracker a runner creates; nil outside tests.
+var onNewLive func(*liveTracker)
+
 func newLive(o opts, stderr io.Writer, provider string, phases []livePhase) *liveTracker {
 	lv := &liveTracker{
 		w:        stderr,
 		silent:   o.json() || stderr == nil,
 		provider: provider,
 		phases:   phases,
+		states:   make([]phaseState, len(phases)),
 		current:  -1,
 		details:  map[string]string{},
 		started:  time.Now(),
+	}
+	if onNewLive != nil {
+		defer onNewLive(lv)
 	}
 	if lv.silent {
 		return lv
@@ -232,7 +243,7 @@ func newLive(o opts, stderr io.Writer, provider string, phases []livePhase) *liv
 		lv.caps = termCaps{
 			tty:           true,
 			color:         os.Getenv("NO_COLOR") == "",
-			ascii:         isASCIILocale(),
+			ascii:         asciiLocale(),
 			reducedMotion: os.Getenv("SANDPROBE_REDUCED_MOTION") != "",
 			width:         cols,
 		}
@@ -264,38 +275,91 @@ func (lv *liveTracker) loop() {
 	}
 }
 
-func (lv *liveTracker) phase(id, format string, a ...any) {
+// phase starts or updates a phase and prints its step line (UX-5).
+func (lv *liveTracker) phase(id, format string, a ...any) { lv.step(id, true, false, format, a...) }
+
+// quiet starts or updates a phase like phase, but only the in-place view shows it: no append-only line.
+func (lv *liveTracker) quiet(id, format string, a ...any) { lv.step(id, false, false, format, a...) }
+
+// done marks a phase finished, with a new detail unless format is empty; it prints no append-only line.
+func (lv *liveTracker) done(id, format string, a ...any) { lv.step(id, false, true, format, a...) }
+
+func (lv *liveTracker) step(id string, print, finished bool, format string, a ...any) {
 	msg := printable(fmt.Sprintf(format, a...))
 	lv.mu.Lock()
 	defer lv.mu.Unlock()
 	if lv.silent || lv.closed {
 		return
 	}
-	idx := -1
+	if idx := lv.index(id); idx >= 0 {
+		lv.startLocked(idx)
+		if finished {
+			lv.states[idx] = phaseDone
+		}
+		if format != "" {
+			lv.details[id] = msg
+		}
+	}
+	switch {
+	case lv.inPlace:
+		lv.redrawLocked()
+	case print:
+		fmt.Fprintf(lv.w, "%s %s\n", glyphsFor(lv.caps.ascii).bullet, msg)
+	}
+}
+
+func (lv *liveTracker) index(id string) int {
 	for i, p := range lv.phases {
 		if p.ID == id {
-			idx = i
-			break
+			return i
 		}
 	}
-	if idx >= 0 {
-		if idx > lv.current {
-			lv.current = idx
-		}
-		lv.details[id] = msg
-	}
-	if !lv.inPlace {
-		g := glyphsFor(lv.caps.ascii)
-		fmt.Fprintf(lv.w, "%s %s\n", g.bullet, msg)
+	return -1
+}
+
+// startLocked makes phase idx the active one. Adapters start a later work phase only once the one before it
+// finished, so moving forward to one finishes the phase before it; reaching the cleanup phase, which runs whatever
+// happened, finishes nothing, so a phase still active then did not finish (UX-5).
+func (lv *liveTracker) startLocked(idx int) {
+	if idx == lv.current {
 		return
 	}
-	lv.redrawLocked()
+	if cur := lv.current; cur >= 0 && lv.states[cur] == phaseActive {
+		if idx > cur && !isCleanupPhase(lv.phases[idx].ID) {
+			lv.states[cur] = phaseDone
+		} else {
+			lv.states[cur] = phaseFailed
+		}
+	}
+	if lv.states[idx] == phasePending {
+		lv.states[idx] = phaseActive
+	}
+	lv.current = idx
 }
 
 func (lv *liveTracker) stepFunc(id string) func(string, ...any) {
 	return func(format string, a ...any) {
 		lv.phase(id, format, a...)
 	}
+}
+
+// phaseLook is how a phase in state s draws: its symbol, color and, when it didn't finish, a fixed word (UX-9).
+func (lv *liveTracker) phaseLook(i int, g tuiGlyphs, st tuiStyle) (mark, col, word string) {
+	switch lv.states[i] {
+	case phaseDone:
+		return g.done, st.green, ""
+	case phaseActive:
+		return g.active, st.cyan, ""
+	case phaseFailed:
+		if isCleanupPhase(lv.phases[i].ID) {
+			return g.red, st.red, "not confirmed"
+		}
+		return g.red, st.red, "did not finish"
+	}
+	if lv.closed {
+		return g.na, st.dim, "not run"
+	}
+	return g.bullet, st.dim, ""
 }
 
 func (lv *liveTracker) redrawLocked() {
@@ -312,14 +376,11 @@ func (lv *liveTracker) redrawLocked() {
 	lines = append(lines, joinLR(left, elapsed, w, st.cyan, st.dim, st.reset))
 
 	for i, p := range lv.phases {
-		mark, col := g.bullet, st.dim
-		switch {
-		case i < lv.current:
-			mark, col = g.done, st.green
-		case i == lv.current:
-			mark, col = g.active, st.cyan
-		}
+		mark, col, word := lv.phaseLook(i, g, st)
 		detail := lv.details[p.ID]
+		if word != "" {
+			detail = word
+		}
 		plainPrefix := fmt.Sprintf("  %s %-10s ", mark, p.Label)
 		avail := w - displayWidth(plainPrefix)
 		if avail < 10 {
@@ -346,28 +407,40 @@ func (lv *liveTracker) redrawLocked() {
 	_, _ = io.WriteString(lv.w, out.String())
 }
 
-func (lv *liveTracker) close(finishAll bool) {
+// close ends the live view (UX-5). cleaned says the cleanup phase confirmed its work, and completes only that phase,
+// and only if it started; it never ticks a phase that was skipped or failed. Any other phase still active did not
+// finish. A later close is a no-op.
+func (lv *liveTracker) close(cleaned bool) {
 	lv.mu.Lock()
 	if lv.closed {
 		lv.mu.Unlock()
 		return
 	}
+	for i, p := range lv.phases {
+		if lv.states[i] == phaseActive {
+			if isCleanupPhase(p.ID) && cleaned {
+				lv.states[i] = phaseDone
+			} else {
+				lv.states[i] = phaseFailed
+			}
+		}
+	}
 	lv.closed = true
-	inPlace := lv.inPlace
-	stopCh := lv.stopCh
-	doneCh := lv.doneCh
+	inPlace, stopCh, doneCh := lv.inPlace, lv.stopCh, lv.doneCh
 	lv.mu.Unlock()
 
-	if inPlace && stopCh != nil {
+	if !inPlace {
+		return
+	}
+	if stopCh != nil {
 		close(stopCh)
 		<-doneCh
-		lv.mu.Lock()
-		if finishAll && lv.drawn > 0 {
-			lv.current = len(lv.phases)
-			lv.redrawLocked()
-		}
-		lv.mu.Unlock()
 	}
+	lv.mu.Lock()
+	if lv.drawn > 0 {
+		lv.redrawLocked()
+	}
+	lv.mu.Unlock()
 }
 
 // renderResult renders UX-6's compact score-first result within caps.width (<= 80 columns).
@@ -492,6 +565,9 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 			prefixStyled := fmt.Sprintf("  %s%s %-5s%s  %-13s ", st.red, g.red, "RED", st.reset, printable(row.Name))
 			writeStyledPrefixWrapped(&b, prefixPlain, prefixStyled, rowIndent, detail, w, st.red, st.reset)
 		}
+		if seen := notFoundSeen(d, row.Unproven); row.Green && seen != "" {
+			writeWrapped(&b, rowIndent, rowIndent, "seen: "+seen, w, st.dim, st.reset)
+		}
 	}
 
 	// Top chain / finding + canary receipt summary + Fix first (UX-6).
@@ -506,7 +582,7 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 			if top.Potential {
 				kind = "POTENTIAL CHAIN " + printable(top.ID)
 			}
-			head = kind + sep + sev
+			head = kind + sep + sev + sep + evidenceClass(top)
 			body = report.ChainSentence(top.ID, top.Potential)
 			if body == "" {
 				body = printable(top.Title)
@@ -514,7 +590,7 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 				body = printable(body)
 			}
 		} else {
-			head = "TOP FINDING " + printable(top.ID) + sep + sev
+			head = "TOP FINDING " + printable(top.ID) + sep + sev + sep + evidenceClass(top)
 			if top.Gets != "" {
 				body = "A hijacked agent " + printable(top.Gets) + "."
 			} else {
@@ -603,6 +679,41 @@ func countCoverage(d report.Doc, card report.Card) (conclusive, graded, total in
 		}
 	}
 	return conclusive, graded, total
+}
+
+// notFoundSaid maps a find-only check to the probe's one fixed not_found reason that names no box string, and the
+// words the summary uses for it (UX-6). Only an exact match is shown, so no box text reaches a category row (SCR-3),
+// and nothing claims more than the probe recorded: SEC-4's reason covers a service that answered without listing a
+// role as well as no answer at all, so it never reads "no metadata service answered".
+var notFoundSaid = map[string][2]string{
+	"SEC-4": {"no metadata service listed a role or identity, and none was offered", "no metadata service listed a role or identity"},
+	"AMP-7": {"the agent's environment names no Kubernetes API", "the agent's environment names no Kubernetes API"},
+}
+
+// notFoundSeen is what a green row's not-proven checks did record, in notFoundSaid's fixed words, or "".
+func notFoundSeen(d report.Doc, unproven []string) string {
+	var seen []string
+	for _, id := range unproven {
+		said, ok := notFoundSaid[id]
+		if !ok {
+			continue
+		}
+		for _, c := range d.Checks {
+			if c.ID == id && c.Result == obs.NotFound && c.Reason == said[0] {
+				seen = append(seen, said[1])
+			}
+		}
+	}
+	return strings.Join(seen, "; ")
+}
+
+// evidenceClass is a finding's KND-3 class in words (UX-6, UX-7): "proof" only for a proven, non-potential finding;
+// anything else, an unknown class included, reads as the weaker "a sign we saw, not confirmed".
+func evidenceClass(f report.Finding) string {
+	if f.Class == "proof" && !f.Potential {
+		return "proof"
+	}
+	return "a sign we saw, not confirmed"
 }
 
 func summarizeReceipts(rs []obs.Receipt) string {
@@ -832,6 +943,7 @@ func keyIdleDuration() time.Duration {
 type walkerItem struct {
 	ID       string
 	Severity string
+	Class    string // evidenceClass for a finding; empty for an unknown check, which has none
 	Title    string
 	Detail   string
 	Evidence string
@@ -862,6 +974,7 @@ func walkerItems(d report.Doc) []walkerItem {
 		items = append(items, walkerItem{
 			ID:       f.ID,
 			Severity: strings.ToUpper(f.Severity),
+			Class:    evidenceClass(f),
 			Title:    f.Title,
 			Detail:   detail,
 			Evidence: ev,
@@ -1121,6 +1234,9 @@ func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned 
 			col = st.amber
 		}
 		writeWrapped(&sb, "  ", "    ", head, w, col, st.reset)
+		if it.Class != "" {
+			writeWrapped(&sb, "    Class: ", "           ", it.Class, w, st.dim, st.reset)
+		}
 		if it.Detail != "" {
 			writeWrapped(&sb, "    ", "    ", printable(it.Detail), w, "", "")
 		}
@@ -1130,7 +1246,7 @@ func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned 
 		if it.Fix != "" {
 			writeWrapped(&sb, "    Fix: ", "         ", printable(it.Fix), w, "", "")
 		}
-		writeWrapped(&sb, "    ", "    ", "[j/k] next/prev  [e] explain  [c] copy fix  [o] open  [b] summary  [q] quit", w, st.dim, st.reset)
+		writeWrapped(&sb, "    ", "    ", "[j/k] next/prev  [e] explain  [c] copy fix  [o] open  [b/Esc] back  [q] quit", w, st.dim, st.reset)
 		_, _ = io.WriteString(out, sb.String())
 	}
 
@@ -1211,6 +1327,12 @@ func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned 
 				target = 0
 			}
 			_, _ = io.WriteString(out, renderExplainCard(items[target].ID, w, st))
+		case "esc": // UX-7: Esc inside a finding goes back to the summary; only on the summary does it quit
+			if idx < 0 {
+				_, _ = io.WriteString(out, "\n")
+				return
+			}
+			fallthrough
 		case "back":
 			idx = -1
 			_, _ = io.WriteString(out, renderResult(d, base, cleaned, caps))
@@ -1225,7 +1347,7 @@ func decodeKey(b []byte) string {
 	}
 	if b[0] == 0x1b {
 		if len(b) == 1 {
-			return "quit"
+			return "esc"
 		}
 		if len(b) >= 3 && b[1] == '[' {
 			switch b[2] {
