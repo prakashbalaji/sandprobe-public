@@ -987,6 +987,12 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   logging must not duplicate exec operations. No local runtime failure is a security result or cleanup proof.
   Tests: `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable`,
   `TestDaytonaCommandRecordsOneCall`.
+- **EVD-8 Workload preparation diagnostics.** Retain a fixed failure stage for local source reads,
+  artifact upload, worker execution or worker-ready parsing, plus EVD-7's bounded SDK/local failure category
+  when execution fails. An artifact name is one of the source-fixed workload basenames, never a path.
+  Do not emit file contents, guest responses, errors or credentials. Preparation failures consume no model
+  request and cannot become successful workloads or security passes. Test the real workload controller
+  boundary with credential-free upload/exec faults and malformed responses before invoking any model.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -2687,6 +2693,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
+| EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
 | EVD-7 | `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable` (missing/non-executable interpreter, fixed private-safe error), `TestDaytonaCommandRecordsOneCall` (one event, success/local/provider failure classification) |
 | EVD-6 | bounded HTTP/error label fixtures, Linux guest protocol tests and diagnostic/grading invariance |
 | SCR-4 | shared managed-completion notice/unchanged exit and JSON tests; shared score recomputation, primary workload rendering, unknown/not-proven retention, managed output and historical rendering compatibility |
