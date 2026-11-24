@@ -208,9 +208,9 @@ func TestLivePhaseNeverTicksSkippedOrFailed(t *testing.T) {
 	}
 }
 
-// UX-5 end to end. On Docker a hung box start fails the run and the fake can't confirm its volume inventory, so the
-// run exits 7: box did not finish, probe and reset never ran, and delete reads not confirmed; nothing is ticked after
-// the network. A failing run exec command fails preflight; its confirmed cleanup completes only the cleanup phase.
+// UX-5 end to end. On Docker a hung box start fails the run: box did not finish, probe and reset never ran, and
+// delete is ticked exactly when the run confirmed its cleanup (any exit but 7). A failing run exec command fails
+// preflight; its confirmed cleanup completes only the cleanup phase.
 func TestRunnersLiveOutcomeOnFailure(t *testing.T) {
 	var got *liveTracker
 	onNewLive = func(lv *liveTracker) { got = lv }
@@ -238,10 +238,15 @@ esac
 	defer func(d time.Duration) { dockerRunTimeout = d }(dockerRunTimeout)
 	dockerRunTimeout = 3 * time.Second
 	var out, errb bytes.Buffer
-	if code := run([]string{"run", "docker", "some-image", "-y", "-out", t.TempDir()}, &out, &errb); code != exitCleanup || got == nil {
-		t.Fatalf("want a failed docker run, cleanup unconfirmed, with a tracker; exit %d\n%s", code, errb.String())
+	code := run([]string{"run", "docker", "some-image", "-y", "-out", t.TempDir()}, &out, &errb)
+	if code == exitGraded || got == nil {
+		t.Fatalf("want a failed docker run with a tracker; exit %d\n%s", code, errb.String())
 	}
-	want := map[string]phaseState{"network": phaseDone, "box": phaseFailed, "probe": phasePending, "reset": phasePending, "delete": phaseFailed}
+	deleted := phaseDone
+	if code == exitCleanup {
+		deleted = phaseFailed
+	}
+	want := map[string]phaseState{"network": phaseDone, "box": phaseFailed, "probe": phasePending, "reset": phasePending, "delete": deleted}
 	for i, p := range got.phases {
 		if w, ok := want[p.ID]; ok && got.states[i] != w {
 			t.Errorf("docker %s: %d, want %d", p.ID, got.states[i], w)

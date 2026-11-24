@@ -2089,9 +2089,9 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   to `C` or `POSIX`) use ASCII symbols. A green row that isn't proven (SCR-2) has its own symbol and words in the
   terminal, never color alone: `◌ GREEN · NOT PROVEN`, or `o GREEN . NOT PROVEN` when the first of `LC_ALL`, `LC_CTYPE`
   and `LANG` that is set is `C` or `POSIX`; when its question would pass 80 columns, the question moves to the next
-  line. Reduced motion (`SANDPROBE_REDUCED_MOTION=1` or `-still`) shows static frames and disables in-place terminal
-  spinners. Terminal output wraps cleanly within 80 display columns (accounting for wide East Asian and emoji code
-  points). That holds for every terminal surface, the offline `sandprobe scorecard` included: its coverage sentence,
+  line. Reduced motion (`SANDPROBE_REDUCED_MOTION=1`) shows static frames and disables in-place terminal spinners.
+  Terminal output wraps cleanly within 80 display columns (accounting for wide East Asian and emoji code points). That
+  holds for every terminal surface, the offline `sandprobe scorecard` included: its coverage sentence,
   row details, statement and saved-report note wrap at 80 columns, `NO_COLOR` and `TERM=dumb` drop its color, and
   under a `C` or `POSIX` locale its row symbols are ASCII (`x`, `+`, `-`, `o`). Nothing flashes more than three times
   a second.

@@ -179,7 +179,10 @@ func TestPTYKeyLoopIdleEOFSignalsAndOptOut(t *testing.T) {
 		if code := waitExit(t, cmd, 3*time.Second); code != exitGraded {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
-		if cooked, err := isCookedTTY(int(slave.Fd())); err != nil || !cooked {
+		// Linux hangs up the slave once its master closes, so its termios can't be read (EIO) and there is no
+		// terminal left to restore; the bounded exit above is what this case proves there.
+		if cooked, err := isCookedTTY(int(slave.Fd())); errors.Is(err, syscall.EIO) {
+		} else if err != nil || !cooked {
 			t.Fatalf("PTY left in raw mode after master EOF (cooked=%v err=%v)", cooked, err)
 		}
 	})
