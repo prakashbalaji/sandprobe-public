@@ -28,7 +28,7 @@ import (
 func main() {
 	domain := flag.String("domain", "sandprobe.test", "the canary's domain")
 	control := flag.String("control", "/run/sandprobe-canary.sock", "the control socket")
-	op := flag.String("ctl", "", "ask the running canary: status, protocols, arm, query or disarm; print its answer as JSON and exit")
+	op := flag.String("ctl", "", "ask the running canary: status, protocols, maintenance, drain, resume, arm, query or disarm; print its answer as JSON and exit")
 	run := flag.String("run", "", "the run to arm, query or disarm")
 	ttl := flag.Int("ttl", 0, "arm: the run's lifetime in seconds")
 	wants := flag.String("wants", "", "arm: the run's nonces, as nonce/proto/port,...")
@@ -39,6 +39,7 @@ func main() {
 	publicAddr := flag.String("public-addr", "", "with -public-control: the canary's public receipt address, named in every signed answer (HCN-1)")
 	pinFile := flag.String("control-pin-file", "", "with -public-control: write the control key's pin here (public), for the deploy to read")
 	staging := flag.Bool("acme-staging", false, "with -public-control: take the certificate from Let's Encrypt's staging service (a dry run)")
+	startDrained := flag.Bool("start-drained", false, "start with new admissions disabled until private resume (HCN-8)")
 	flag.Parse()
 
 	if *makeKey != "" {
@@ -69,6 +70,9 @@ func main() {
 	c, err := canary.New(*domain)
 	if err != nil {
 		fail(err)
+	}
+	if *startDrained {
+		c.Handle(canary.Request{Op: "drain"})
 	}
 	if *public != "" { // HCN-1: a WebPKI certificate for the control name only, from Let's Encrypt over TLS-ALPN-01 on 443
 		key, err := canarycontrol.LoadKey(*controlKey)
