@@ -47,6 +47,35 @@ class RunnerTests(unittest.TestCase):
    result=json.loads(output.getvalue().splitlines()[-1])
    self.assertEqual(result['primary_assessment'],'rc_exposure_scorecard');self.assertEqual(result['exposure_scorecard']['score'],3)
    self.assertTrue(result['workload_passed']);self.assertFalse(result['complete'])
+ def test_http_capability_stops_before_receiver_and_provider_creation(self):
+  for ready in (False,True):
+   with self.subTest(ready=ready),tempfile.TemporaryDirectory() as d:
+    home=Path(d);(home/'.config/sandprobe').mkdir(parents=True)
+    helper=home/'cf';helper.write_text('fixture')
+    key=home/'key';key.write_text('synthetic-not-a-secret');key.chmod(0o600)
+    args=argparse.Namespace(cleanup_run='',model_python='/fixture/model-python',go='/fixture/go',sdk_python='/fixture/python',key_file=str(key),cf_helper=str(helper),dns_reference='fixture',canary_tcp80_protocol='http-v1')
+    calls=[]
+    def call(argv,env,timeout=90,data=None):
+     calls.append(argv)
+     if argv[0]=='/fixture/model-python':return b'{"ready":true,"client_version":"1.44.6"}'
+     if argv[:2]==['git','rev-parse']:return b'a'*40
+     if argv[:2]==['git','status']:return b''
+     if argv[0] in {'make','/fixture/go'}:return b''
+     if argv[0].endswith('/canary-preflight'):
+      self.assertEqual(argv[1:],['canary','check','-require-http-marker-v1','-o','json'])
+      self.assertEqual(timeout,35)
+      self.assertFalse(any(k.startswith('SANDPROBE_CANARY') for k in env))
+      if not ready:raise r.Failure('synthetic-sensitive-control-error')
+      return b'{}'
+     raise AssertionError('resource creation happened before capability')
+    expected='after_capability' if ready else 'shared_canary_http_capability_unverified'
+    with patch.object(Path,'home',return_value=home),patch.object(r,'aws',return_value=r.ACCOUNT.encode()),patch.object(r,'sdk',side_effect=[{'available':True},{'id':r.SNAPSHOT}]),patch.object(r,'call',side_effect=call),patch.object(r,'auth_environment',side_effect=r.Failure('after_capability')) as auth,patch.object(r,'cleanup_owned') as cleanup,patch.dict(os.environ,{'SANDPROBE_CANARY':'wrong','SANDPROBE_CANARY_URL':'wrong','SANDPROBE_CANARY_PIN':'wrong'}),contextlib.redirect_stdout(io.StringIO()):
+     with self.assertRaisesRegex(r.Failure,expected):r.main(args)
+    self.assertEqual(auth.call_count,1 if ready else 0)
+    cleanup.assert_not_called()
+    self.assertEqual(sum(c[0].endswith('/canary-preflight') for c in calls),1)
+    records=list((home/'.config/sandprobe').glob('*/canary-capability-preflight.json'))
+    self.assertEqual(len(records),1 if ready else 0)
  def test_completed_run_prints_bound_rc_score_without_waiving_incomplete_exit(self):
   self.completed_run()
  def test_persistent_profile_reaches_same_managed_workload(self):

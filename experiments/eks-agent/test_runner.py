@@ -51,6 +51,38 @@ class RunnerTests(unittest.TestCase):
                 r.preflight("mistral.ministral-3-3b-instruct","authorized","123")
             self.assertEqual(r.aws_calls,[]);self.assertEqual(j.data["resources"],{});j.close()
 
+    def test_http_capability_is_checked_before_cloud_setup(self):
+        for ready in (False, True):
+            with self.subTest(ready=ready), tempfile.TemporaryDirectory() as root:
+                j = Journal(root, "a"*16, create=True)
+                r = Runner(j, canary_tcp80_protocol="http-v1")
+                r.env.update(SANDPROBE_CANARY="wrong-operator", SANDPROBE_CANARY_URL="wrong-host", SANDPROBE_CANARY_PIN="wrong-pin")
+                calls = []
+                def call(args, **kwargs):
+                    calls.append(args)
+                    if args[:2] == ["kubectl", "version"]:
+                        return b'{"clientVersion":{"major":"1","minor":"37"}}'
+                    if args[0] in {"make", "go", "git"}:
+                        return b""
+                    if args[0].endswith("/canary-preflight"):
+                        self.assertEqual(args[1:], ["canary", "check", "-require-http-marker-v1", "-o", "json"])
+                        self.assertEqual(kwargs["timeout"], 35)
+                        self.assertFalse(any(k.startswith("SANDPROBE_CANARY") for k in kwargs["env"]))
+                        if not ready:
+                            raise Failure("synthetic-sensitive-control-error")
+                        return b"{}"
+                    if args[:3] == ["cf", "zones", "list"]:
+                        raise Failure("after_capability")
+                    raise AssertionError("cloud setup happened before capability")
+                r.ops.call = call
+                expected = "after_capability" if ready else "shared_canary_http_capability_unverified"
+                with patch("runner.shutil.which", return_value="tool"), self.assertRaisesRegex(Failure, expected):
+                    r.preflight("mistral.ministral-3-3b-instruct", "authorized", "123")
+                self.assertEqual(j.data["resources"], {})
+                self.assertEqual(j.data.get("canary_http_capability_preflight"), "verified" if ready else None)
+                self.assertEqual(sum(c[0].endswith("/canary-preflight") for c in calls), 1)
+                j.close()
+
     def test_cluster_helper_pins_server_version_despite_ambient_override(self):
         import os
         with tempfile.TemporaryDirectory() as root,patch.dict(os.environ,{"VERSION":"1.30"}):

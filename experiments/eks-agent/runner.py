@@ -215,6 +215,20 @@ class Runner:
         self.ops.call(["make", "-C", str(ROOT), "probes"], env=self.env, timeout=180)
         self.ops.call(["go", "-C", str(ROOT), "build", "-trimpath", "-o",
                        str(self.journal.folder / "standard-grade"), "./cmd/sandprobe-agent-grade"], env=self.env, timeout=180)
+        # EVD-10: fail before creating a receiver/cluster when the shared deployment is too old.
+        if self.canary_tcp80_protocol == "http-v1":
+            checker = str(self.journal.folder / "canary-preflight")
+            self.ops.call(["go", "-C", str(ROOT), "build", "-trimpath", "-o", checker,
+                           "./cmd/sandprobe"], env=self.env, timeout=180)
+            check_env = {k: v for k, v in self.env.items() if k not in
+                         {"SANDPROBE_CANARY", "SANDPROBE_CANARY_URL", "SANDPROBE_CANARY_PIN"}}
+            try:
+                self.ops.call([checker, "canary", "check", "-require-http-marker-v1", "-o", "json"],
+                              env=check_env, timeout=35)
+            except Failure:
+                raise Failure("shared_canary_http_capability_unverified") from None
+            self.journal.data["canary_http_capability_preflight"] = "verified"
+            self.journal.save()
         zones = strict(self.ops.call(["cf", "zones", "list"], env=self.env).decode(), 1 << 20)
         if (not isinstance(zones, list) or len([z for z in zones if isinstance(z, dict)
                 and z.get("name") == "ac0.dev" and isinstance(z.get("id"), str)
