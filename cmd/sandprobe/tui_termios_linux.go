@@ -1,0 +1,51 @@
+//go:build linux
+
+package main
+
+import "golang.org/x/sys/unix"
+
+func makeRaw(fd int) (func(), error) {
+	orig, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	if err != nil {
+		return nil, err
+	}
+	raw := *orig
+	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
+	raw.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
+	raw.Cflag &^= unix.CSIZE | unix.PARENB
+	raw.Cflag |= unix.CS8
+	raw.Cc[unix.VMIN] = 1
+	raw.Cc[unix.VTIME] = 0
+	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &raw); err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = unix.IoctlSetTermios(fd, unix.TCSETS, orig)
+	}, nil
+}
+
+func termSize(fd int) (cols, rows int) {
+	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+	if err != nil || ws == nil {
+		return 0, 0
+	}
+	return int(ws.Col), int(ws.Row)
+}
+
+// isForegroundTTY fails closed (UX-7, AGT-1): only a terminal that names this process's own group as its foreground
+// counts. An error, such as ENOTTY for a terminal that isn't this session's controlling one, or a group of zero or
+// less, means not foreground.
+func isForegroundTTY(fd int) bool {
+	pgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
+	return err == nil && pgrp > 0 && pgrp == unix.Getpgrp()
+}
+
+func pollFD(fd int, timeoutMS int) (ready, hup bool, err error) {
+	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	n, err := unix.Poll(pfd, timeoutMS)
+	if err != nil {
+		return false, false, err
+	}
+	rev := pfd[0].Revents
+	return n > 0 && rev&unix.POLLIN != 0, rev&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0, nil
+}

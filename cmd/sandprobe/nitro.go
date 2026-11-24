@@ -167,29 +167,28 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if _, _, err := probes.Probe("amd64"); err != nil { // stop before creating anything when the build carries no probe
 		return 0, fail("usage", err.Error(), "make", exitUsage)
 	}
-	step := func(f string, a ...any) {
-		if !o.json() {
-			fmt.Fprintf(stderr, "· "+f+"\n", a...)
-		}
-	}
+	lv := newLive(o, stderr, "aws-nitro", livePhasesFor("aws-nitro", false, false))
+	defer lv.close(false)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	c, public, err := r.openCanary(ctx, choice, step) // HCN-5: proven, and its slot reserved, before the pod exists
+	c, public, err := r.openCanary(ctx, choice, lv.stepFunc("canary")) // HCN-5: proven, and its slot reserved, before the pod exists
 	if err != nil {
 		return 0, err
 	}
 	defer closeCanary(public, stderr)
 	start := time.Now()
-	step("creating the pod (Auto Mode may start a node for it)")
+	lv.phase("box", "creating the pod (Auto Mode may start a node for it)")
 	pod, err := host.CreatePod(ctx, kc, kctx, spec)
 	cleanup, cleaned := "the pod was deleted, the API confirming it gone", true
 	teardown := func() {
 		tctx, tcancel := context.WithTimeout(context.Background(), 6*time.Minute) // even after Ctrl-C
 		defer tcancel()
-		step("deleting pod %s", pod.Name)
-		if terr := pod.Destroy(tctx); terr != nil {
+		lv.phase("delete", "deleting pod %s", pod.Name)
+		terr := pod.Destroy(tctx)
+		lv.close(terr == nil)
+		if terr != nil {
 			cleanup, cleaned = fmt.Sprintf("NOT confirmed deleted: delete pod %s (%s) by hand, or run %s down", pod.Name, pod.UID, eksFix), false
 			fmt.Fprintf(stderr, "sandprobe: %s\n  %v\n", cleanup, terr)
 		}
@@ -201,15 +200,18 @@ func runNitro(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	var run *host.Run
 	bin, sum, err := probes.Probe(pod.Arch)
 	if err == nil {
-		step("pod %s (%s) on %s; uploading the probe", pod.Name, pod.UID, pod.Arch)
+		lv.phase("box", "pod %s (%s) on %s; uploading the probe", pod.Name, pod.UID, pod.Arch)
 		err = pod.Upload(ctx, bin)
 	}
 	if err == nil {
-		step("running the probe as the agent")
+		lv.phase("probe", "running the probe as the agent")
 		var contract *obs.BoundaryContract
 		contract, err = host.ReferenceBoundary(spec, pod.ReferenceImageID)
 		if err == nil {
 			run, err = host.Execute(ctx, pod, c, host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy, BoundaryContract: contract})
+		}
+		if err == nil {
+			lv.done("probe", "")
 		}
 	}
 	teardown()

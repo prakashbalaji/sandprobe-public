@@ -26,6 +26,33 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 - Escape Unicode format controls in saved-report terminal text so bidi and zero-width characters cannot reorder or hide displayed evidence.
 
+### Terminal, score and CI gate
+
+- **Breaking (`-min`):** `-min` now takes a green-category count (`0` to `6`) or `full` (`Score == Of`, every applicable
+  category green), exiting 6 when a valid run scores below it (OUT-4). Retired letter thresholds (`-min A` to `-min F`)
+  and `-min 6` on native adapters whose score is out of 5 are refused before creation with usage exit 2. `-min` gates
+  only the green-category count: use `sandprobe compare` or validated `-o json` output to gate CI on severity increases
+  inside an already-red category or proof-coverage regressions.
+- `sandprobe run` prints a compact 80-column score summary with `SCORE x/y` (or `SCORE none` on an invalid run, with no
+  category rows or counts), coverage counts, the six exposure categories, the top chain or finding with canary receipt
+  routes and `Fix first`, explicit cleanup confirmation (or a loud `CLEANUP UNCONFIRMED (exit 7)` warning), and the
+  HTML report path, with no letter grade in terminal text (UX-6, SCR-3). `grade.letter` in `OUT-1` JSON is unchanged.
+- Interactive runs update plan-derived host phases (`network`, `canary`, `box`, `probe`, `reset` where applicable, and
+  `delete`/`cleanup`/`retain`) in place on TTY `stderr` for every provider, the native adapters (E2B, Vercel, Daytona,
+  Cloudflare, Boat, exe.dev, Baseten) included. A phase is ticked only when it finished: one cut short reads `did not
+  finish`, one never started `not run`, and an unconfirmed cleanup `not confirmed` (UX-5). Runs offer single-key
+  post-run actions (`Enter`/`j`/`k` to walk findings and unknowns, `e` to explain a check, `c` to copy a fix, `o` to
+  open the HTML report, `b`/`Esc` back to the summary, `q`, or `Esc` on the summary, to quit) on foreground TTYs when `CI` and `SANDPROBE_NO_KEYS` are unset, auto-exiting after 15 seconds if untouched and restoring
+  terminal state on `EOF` and termination/suspension signals (UX-5, UX-7, AGT-1).
+- The run summary's top finding and each finding in the walker say whether it is `proof` or `a sign we saw, not
+  confirmed` (UX-6, UX-7).
+- `sandprobe scorecard` keeps every line within 80 columns, its coverage sentence, statement and saved-report note
+  included; it honors `NO_COLOR` and `TERM=dumb`, and uses ASCII row symbols under a `C` or `POSIX` locale (UX-9).
+- Terminal output escapes Unicode `Cf` format characters (bidi overrides/isolates, ALM, zero-width characters, BOM) in
+  addition to control characters and line separators, accounts for wide East Asian and emoji display widths when
+  wrapping to 80 columns, and honors `NO_COLOR`, `TERM=dumb`, ASCII `C`/`POSIX` locales and
+  `SANDPROBE_REDUCED_MOTION=1` (UX-9).
+
 ## 0.3.0-rc.2 (2026-11-23)
 
 The second release candidate for 0.3.0: the web report's new layout. Checks and grading are unchanged from rc.1.

@@ -295,11 +295,8 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 	if err != nil {
 		return 0, fail("usage", err.Error(), "make", exitUsage)
 	}
-	step := func(f string, a ...any) {
-		if !o.json() {
-			fmt.Fprintf(stderr, "· "+f+"\n", a...)
-		}
-	}
+	lv := newLive(o, stderr, "docker", livePhasesFor("docker", false, false))
+	defer lv.close(false)
 	work, err := os.MkdirTemp("", "sandprobe-docker-")
 	if err != nil {
 		return 0, err
@@ -333,7 +330,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 	if err != nil || network == "" {
 		return 0, fail("cleanup_unconfirmed", "network creation outcome unconfirmed: attempted "+name+" on "+subnet, "inspect Docker for this attempted name; no deletion or retry without the original returned ID", exitCleanup)
 	}
-	step("network %s on %s, and a local canary", network[:12], subnet)
+	lv.phase("network", "network %s on %s, and a local canary", network[:min(12, len(network))], subnet)
 
 	var c *host.DockerCanary
 	var run *host.Run
@@ -343,7 +340,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 	teardown := func() {
 		tctx, tcancel := context.WithTimeout(context.Background(), 2*time.Minute) // even after Ctrl-C
 		defer tcancel()
-		step("deleting the container, the canary and the network, by ID")
+		lv.phase("delete", "deleting the container, the canary and the network, by ID")
 		switch {
 		case run != nil:
 			if err := host.Teardown(tctx, run); err != nil {
@@ -366,10 +363,12 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 		if !dockerGone(tctx, "network", network) {
 			left = append(left, "network "+network)
 		}
+		lv.close(len(left) == 0)
 	}
+	lv.quiet("canary", "starting local canary on %s", canaryIP)
 	c, err = host.StartDockerCanary(ctx, network, canaryIP, dockerCanaryImage, canaryPath, "sandprobe.test")
 	if err == nil {
-		step("starting a throwaway container from %s", image)
+		lv.phase("box", "starting a throwaway container from %s", image)
 		args := boxArgs(network, canaryIP, probePath, image, r.dockerOpts)
 		var out, user string
 		baseline, inventoryErr := volumes.Snapshot(ctx)
@@ -414,7 +413,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 			if readOnlyRoot(r.dockerOpts) {
 				scratch = dockerScratch
 			}
-			step("running the probe as %s", user)
+			lv.phase("probe", "running the probe as %s", user)
 			healthOff := dockerHealthOff(ctx, boxID)
 			run, err = host.Execute(ctx, &host.DockerBox{Container: boxID, User: user, ProbePath: dockerProbePath, Args: args, VolumeTracker: volumes}, c,
 				host.Options{Mode: "exec", ProbeSHA256: sum, AllowLocalProxy: r.allowLocalProxy, OwnInit: dockerOwnInit(ctx, boxID, r.dockerOpts), Scratch: scratch})
@@ -425,6 +424,7 @@ func runDocker(o opts, r runFlags, image string, planOnly bool, stderr io.Writer
 			}
 			if err == nil {
 				residual = dockerRunResidual(r.dockerOpts, run.Input.OwnInit, healthOff)
+				lv.done("probe", "")
 			}
 		}
 	}

@@ -1,6 +1,6 @@
-// sandprobe grades how well an AI agent's sandbox contains it. It creates a throwaway box on a provider, runs the
-// probe in it as the agent, asks our canary what got out, resets the box, grades the result A to F, deletes the box,
-// and writes the report as JSON and as a self-contained web page.
+// sandprobe scores how well an AI agent's sandbox contains it. It creates a throwaway box on a provider, runs the
+// probe in it as the agent, asks our canary what got out, resets the box, scores the six exposure categories, deletes
+// the box, and writes the report as JSON and as a self-contained web page.
 //
 //	sandprobe providers                  which providers are ready
 //	sandprobe plan <provider>            what a run would create, contact, mark and delete
@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 
+	"sandprobe/internal/report"
 	"sandprobe/recipes"
 )
 
@@ -216,7 +217,7 @@ func reportErr(o opts, stderr io.Writer, err error) int {
 	return ce.exit
 }
 
-const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to F.
+const usage = `sandprobe scores how well an AI agent's sandbox contains it across six categories.
 
   sandprobe providers              which providers are ready, and how to log in to the rest
   sandprobe plan <provider>        what a run would create, contact, mark and delete
@@ -240,7 +241,9 @@ const usage = `sandprobe grades how well an AI agent's sandbox contains it, A to
   sandprobe explain <check>        what a check does, what a finding means, and its fix
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
--min <letter> to exit 6 below a grade; -theme graphite|mission; -allow-local-proxy.
+-min <0..6|full> to exit 6 below a green-category count (category count only, not severity or proof coverage;
+use sandprobe compare or -o json for regression gating in CI); -theme graphite|mission; -allow-local-proxy;
+SANDPROBE_NO_KEYS=1 to skip post-run keys on an interactive terminal.
 Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names a public canary you run, and
 -canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
 SANDPROBE_CANARY* variable aside. run docker always starts its own canary and takes no canary flag.
@@ -261,9 +264,30 @@ daytona, exe.dev, kubernetes (a recipe). Exit codes: 0 graded, 2 usage, 3 needs 
 // pocCmd is the Modal proof of concept, set only in a -tags poc build (SPEC.md, the Modal section; never shipped).
 var pocCmd func(o opts, r runFlags, args []string, stderr io.Writer) (int, error)
 
-// letters orders grades, best first.
-const letters = "ABCDF"
+// parseMin parses OUT-4's -min flag: "" (unset), "0".."6" (minimum green count), or "full" (every applicable category green).
+func parseMin(s string) (want int, full bool, ok bool) {
+	if s == "" {
+		return 0, false, true
+	}
+	if strings.EqualFold(s, "full") {
+		return 0, true, true
+	}
+	if len(s) == 1 && s[0] >= '0' && s[0] <= '6' {
+		return int(s[0] - '0'), false, true
+	}
+	return 0, false, false
+}
 
-func below(letter, min string) bool {
-	return min != "" && strings.Index(letters, letter) > strings.Index(letters, strings.ToUpper(min))
+func belowMin(c report.Card, min string) bool {
+	if min == "" || !c.Valid {
+		return false
+	}
+	want, full, ok := parseMin(min)
+	if !ok {
+		return false
+	}
+	if full {
+		return c.Score < c.Of
+	}
+	return c.Score < want
 }

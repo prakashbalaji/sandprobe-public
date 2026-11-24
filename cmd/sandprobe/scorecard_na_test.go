@@ -130,7 +130,10 @@ func TestScorecardNotApplicable(t *testing.T) {
 		if code := run([]string{"scorecard", in}, &out, &errs); code != exitGraded {
 			t.Fatalf("%s: exit %d, %s", name, code, errs.String())
 		}
-		if s := out.String(); !strings.Contains(s, tc.score) || !strings.Contains(s, tc.row) {
+		// UX-9 wraps long lines at 80 columns, so content is compared with whitespace folded; a score with no
+		// not-counted line ("Score 2/6\n\n") is still matched exactly.
+		s := out.String()
+		if strings.HasSuffix(tc.score, "\n\n") && !strings.Contains(s, tc.score) || !strings.Contains(flat(s), flat(tc.score)) || !strings.Contains(flat(s), flat(tc.row)) {
 			t.Errorf("%s: want %q and %q in:\n%s", name, tc.score, tc.row, s)
 		}
 		out.Reset()
@@ -301,7 +304,7 @@ func TestOfflineRenderingsSayNotReVerified(t *testing.T) {
 		{"assess", saved, "canary-egress-deny-v1"}, {"compare", saved, saved}} {
 		var out, errs bytes.Buffer
 		run(args, &out, &errs)
-		if !strings.Contains(out.String(), report.SavedNote) {
+		if !strings.Contains(flat(out.String()), report.SavedNote) {
 			t.Errorf("%q doesn't say it wasn't re-verified:\n%s", args, out.String())
 		}
 	}
@@ -318,3 +321,7 @@ func TestOfflineRenderingsSayNotReVerified(t *testing.T) {
 		t.Errorf("the card's JSON: %s", out.String())
 	}
 }
+
+// flat folds every run of whitespace, line breaks included, to one space: text UX-9 wraps at 80 columns still
+// matches its unwrapped form.
+func flat(s string) string { return strings.Join(strings.Fields(s), " ") }

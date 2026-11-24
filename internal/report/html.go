@@ -90,6 +90,18 @@ var chainText = map[string][2]string{
 		"The agent may be able to read a Kubernetes token and reach the Kubernetes API, and act as the box's account."},
 }
 
+// ChainSentence returns the plain-English sentence for a chain ID (SCR-3, UX-6), or "" when id isn't a known chain.
+func ChainSentence(id string, potential bool) string {
+	t, ok := chainText[id]
+	if !ok {
+		return ""
+	}
+	if potential {
+		return t[1]
+	}
+	return t[0]
+}
+
 // answer is one check's result as Pass, Fail or a plainer word when it is neither, never more than the result proves
 // (AGENTS.md rule 1: a pass needs a negative proof). top says it belongs above the fold.
 func answer(ck Check, ok bool) (result, class, detail string, top bool) {
