@@ -58,6 +58,9 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 			}
 			applicable--
 		}
+		if !row.Green && row.GreenNotProven || x.Coverage == nil && row.GreenNotProven {
+			return false
+		}
 		if row.Green {
 			if len(row.Found) > 0 || len(row.Unknown) > 0 {
 				return false
