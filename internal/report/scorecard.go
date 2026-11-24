@@ -131,66 +131,41 @@ func Score(d Doc) Card {
 		unknown[id] = true
 	}
 	for _, cat := range Categories {
-		r, tested := Row{Name: cat.Name, Question: cat.Question}, 0
-		var terms, optIn []string // SCR-2: skips the host recorded a kind for
+		out := map[string]outcome{}
 		for _, id := range cat.Checks {
 			ck, ok := got[id]
 			switch {
 			case unknown[id] || ok && ck.Result == obs.Unknown:
-				tested++
-				r.Unknown = append(r.Unknown, id)
+				out[id] = outUnknown
 			case !ok: // not in this run at all: says nothing either way
+				out[id] = outMissing
 			case ck.Result == obs.Skipped: // not run here: says nothing either way, but its kind may explain why
 				switch kind := skipKind(d.Manifest, id); {
 				case kind == obs.SkipProviderTerms && policy[id] == obs.SkipProviderTerms:
-					terms = append(terms, id)
+					out[id] = outTerms
 				case kind == obs.SkipOptIn:
-					optIn = append(optIn, id)
+					out[id] = outOptIn
+				default:
+					out[id] = outSkipped
 				}
 			case ck.Result == obs.Pass || ck.Result == obs.Absent || ck.Result == obs.ScopedOut:
-				tested++
+				out[id] = outClean
 			case ck.Result == obs.NotFound:
-				tested++
-				if canRed(id) {
-					r.Unproven = append(r.Unproven, id)
-				}
+				out[id] = outNotFound
 			case ck.Result == obs.Finding && ck.Severity == "info":
-				tested++
+				out[id] = outInfo
 			case ck.Result == obs.Finding:
-				tested++
-				r.Found = append(r.Found, id)
+				out[id] = outFound
 			default: // a result the scorecard doesn't know is never clean
-				tested++
-				r.Unknown = append(r.Unknown, id)
+				out[id] = outUnknown
 			}
 		}
-		switch {
-		case len(r.Found) > 0:
-			r.Why = "Found: " + labels(cat, r.Found)
-			if len(r.Unknown) > 0 {
-				r.Why += "; couldn't prove: " + labels(cat, r.Unknown)
-			}
-		case len(r.Unknown) > 0 && d.Run.NoCanary && allNeedCanary(r.Unknown):
-			r.Why = "Not tested: run without a canary" // SCR-2, HCN-5: the host's own choice, never a box string
-		case len(r.Unknown) > 0:
-			r.Why = "Couldn't prove: " + labels(cat, r.Unknown)
-		case tested == 0 && len(terms) == len(cat.Checks): // SCR-2: the provider's own endpoints, out of the score
-			r.NotApplicable, r.Why, r.Terms = true, NotApplicableWhy(scope, declared), termsReasons(scope, terms)
-			r.Scope = scope
-			if declared {
-				r.DeclaredProvider = scope
-			}
+		r := buildRow(cat, out, scope, declared, d.Run.NoCanary)
+		if r.NotApplicable {
 			c.Of--
-		case tested == 0 && len(optIn) > 0: // SCR-2: PRV-15's or RCP-4's default, which the person may lift
-			r.Why = "Not tested: opt in with -provider-endpoints " + strings.Join(optIn, ",") + " if your provider's terms allow"
-		case tested == 0:
-			r.Why = "Not tested"
-		default:
-			r.Green = true
+		}
+		if r.Green {
 			c.Score++
-			if len(r.Unproven) > 0 {
-				r.NotProven = "not proven: " + labels(cat, r.Unproven)
-			}
 		}
 		c.Rows = append(c.Rows, r)
 	}
@@ -205,6 +180,9 @@ func skipKind(m obs.Manifest, id string) string {
 	}
 	return m.SkipKinds[id]
 }
+
+// SavedVerification is ANL-1's label on a card computed from a saved report.
+const SavedVerification = "structural_only_unauthenticated"
 
 // NotApplicableWhy is SCR-2's fixed reason for a not-applicable row, under SCR-1's narrowed Cloud access contract.
 // name is a key of this binary's PRV-row table, never a box string; a declared one (PRV-17) is said to be the
@@ -278,9 +256,13 @@ func PolicyKinds(provider string) map[string]string {
 	return kinds
 }
 
-// termsReasons is the provider's PRV-row reasons for excluding ids, from this binary's own policy, each said once.
+// termsReasons is the provider's PRV-row reasons for excluding ids, from this binary's own policy, each said once; ""
+// for a name the table lacks, so no caller ever reads a reason the table doesn't hold.
 func termsReasons(provider string, ids []string) string {
-	excluded := host.TermsExclusions[provider]()
+	excluded := host.DeclaredExclusions(provider)
+	if excluded == nil {
+		return ""
+	}
 	var out []string
 	for _, id := range ids {
 		if why := excluded[id]; !slices.Contains(out, why) {
