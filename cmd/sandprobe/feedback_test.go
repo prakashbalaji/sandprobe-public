@@ -267,6 +267,7 @@ func TestFeedbackRefusesCredentials(t *testing.T) {
 	for _, overRefused := range []string{
 		"Bearer authentication failed; token: none; the Authorization header was missing",
 		"password: <redacted>, api_key=$OPENAI_API_KEY",
+		"{\"token\": \"<redacted>\"}",
 		"```json\n{\"refresh_token\": \"$REFRESH_TOKEN\", \"cookie\": \"\"}\n```",
 	} {
 		if r := fb(t, overRefused+"\n", "bug", "-title", "a list after a key"); r.code != exitUsage {
@@ -391,6 +392,13 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 		"YAML scalar with comma":  {"tokens: <redacted>, " + v, "a credential field", 2},
 		"YAML flow sequence":      {"tokens: [<redacted>, " + v + "]", "a credential field", 2},
 		"continuation comma":      {"token:\n  <redacted>, " + v, own, 3},
+		// round 4, Codex: an unmatched backtick is data, and a word is checked exactly as read
+		"Bearer unmatched backtick":  {"sent Bearer <redacted>`" + v, "a bearer token", 2},
+		"field unmatched backtick":   {"TOKEN=<redacted>`" + v, "a credential field", 2},
+		"Bearer closing punctuation": {"sent Bearer 'true)'", "a bearer token", 2},
+		"flag closing punctuation":   {"mycli --token 'true)'", "a credential flag", 2},
+		"header closing punctuation": {"Authorization: Token 'true)'", "an Authorization header", 2},
+		"field closing punctuation":  {"token: 'true)'", "a credential field", 2},
 	}
 	for _, prefix := range []string{"xoxb", "xoxp", "xoxa", "xoxr", "xoxs", "xoxe", "xoxc", "xoxd", "xoxo", "xapp", "xwfp", "xoxe.xoxp", "xoxe.xapp"} {
 		cases["Slack "+prefix] = struct {
@@ -440,7 +448,8 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 // FBK-4: a walk that reaches a limit refuses and names it; it never passes what it didn't read.
 func TestFeedbackWalkLimits(t *testing.T) {
 	pinGH(t, "absent")
-	deepJSON := strings.Repeat("[", maxJSONDepth+1) + strings.Repeat("]", maxJSONDepth+1)
+	// Codex's round 4 body: a split colon makes it invalid YAML, so only the JSON walk can refuse its depth.
+	deepJSON := "[{\"a\"\n:\n1}," + strings.Repeat("[", maxJSONDepth) + strings.Repeat("]", maxJSONDepth) + "]"
 	var fences []string
 	for n := maxFenceDepth + 5; n >= 3; n-- {
 		fences = append(fences, strings.Repeat("`", n))
@@ -449,7 +458,7 @@ func TestFeedbackWalkLimits(t *testing.T) {
 	slices.Reverse(closers)
 	deepFences := strings.Join(fences, "\n") + "\nx\n" + strings.Join(closers, "\n")
 	for name, tc := range map[string]struct{ body, limit string }{
-		"JSON depth":   {deepJSON + "\n", "deeper"},
+		"JSON depth":   {deepJSON + "\n", fmt.Sprintf("a JSON document nested more than %d deep", maxJSONDepth)},
 		"fence depth":  {deepFences + "\n", fmt.Sprintf("fenced blocks nested more than %d deep", maxFenceDepth)},
 		"YAML aliases": {"a: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\n", ""},
 	} {
@@ -466,6 +475,27 @@ func TestFeedbackWalkLimits(t *testing.T) {
 			t.Errorf("%s: exit %d, %+v", name, r.code, d)
 		}
 	}
+	// walkJSON on its own: the root container counts, so exactly maxJSONDepth containers are read and one more refuses,
+	// whether the deepest is empty or holds a value, and the decoder's own depth error refuses too.
+	for name, tc := range map[string]struct {
+		text    string
+		refused bool
+	}{
+		"at the limit":            {strings.Repeat("[", maxJSONDepth) + strings.Repeat("]", maxJSONDepth), false},
+		"at the limit, a value":   {strings.Repeat("[", maxJSONDepth) + "1" + strings.Repeat("]", maxJSONDepth), false},
+		"one past, empty":         {strings.Repeat("[", maxJSONDepth+1) + strings.Repeat("]", maxJSONDepth+1), true},
+		"Codex's split colon":     {deepJSON, true},
+		"far past, unclosed":      {strings.Repeat("[", 3*maxJSONDepth), true},
+		"not JSON":                {"this is prose, not JSON", false},
+		"cut short, not too deep": {"[1, 2", false},
+	} {
+		var out []feedbackMatch
+		walkJSON(tc.text, 0, &out)
+		if got := len(out) > 0 && strings.Contains(out[0].Pattern, "deep"); got != tc.refused {
+			t.Errorf("walkJSON %s: refused %v, want %v: %+v", name, got, tc.refused, out)
+		}
+	}
+
 	// The JSON walk reads tokens: a key repeated later, as null, doesn't hide the first one's value.
 	var out []feedbackMatch
 	walkJSON(`{"password": "abc", "password": null}`, 0, &out)

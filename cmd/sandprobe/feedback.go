@@ -475,11 +475,12 @@ var credentialPatterns = []credentialPattern{
 }
 
 // shellWords reads the value at line[start:] the way a shell joins one: quoted parts ("..." with backslash escapes,
-// '...', and `...` when a closing backtick follows) and unquoted parts next to each other make one word, so a
+// '...', and `...`) and unquoted parts next to each other make one word, so a
 // placeholder part never excuses the rest; whitespace separates words, and in allWords so do an unquoted , and ;,
 // which never end a value (fail closed: TOKEN=<x>,y is refused). A # after whitespace ends the value, and so does a
-// backtick that closes a Markdown code span (an odd number before it on the line), or one with no closing backtick. An unclosed " or ' runs to the line's end. It returns the
-// words and where the value ends; wordOK reads each.
+// backtick that closes a Markdown code span (an odd number before it on the line); any other backtick is data, and
+// one with no closing backtick runs to the line's end, as an unclosed " or ' does. It returns the words and where the
+// value ends. Each word is checked exactly as read, nothing stripped, so `true)` is not `true`: when in doubt, refuse.
 func shellWords(line string, start, mode int) ([]string, int) {
 	var words []string
 	var w strings.Builder
@@ -510,7 +511,7 @@ func shellWords(line string, start, mode int) ([]string, int) {
 		case (c == ',' || c == ';') && mode == allWords: // a separator, never an end: each part must pass
 			end()
 			i++
-		case c == '`' && (strings.Count(line[:i], "`")%2 == 1 || !strings.Contains(line[i+1:], "`")):
+		case c == '`' && strings.Count(line[:i], "`")%2 == 1: // it closes a code span; an unmatched one is data
 			end()
 			return words, i
 		case c == '"' || c == '\'' || c == '`':
@@ -531,10 +532,6 @@ func shellWords(line string, start, mode int) ([]string, int) {
 	end()
 	return words, len(line)
 }
-
-// wordOK is ok for a word as written, or without the ) ] } , ; that JSON and YAML close a value with, so
-// `[REDACTED]` and `"<x>"}` pass, and `"<x>"]secret` doesn't.
-func wordOK(ok func(string) bool, w string) bool { return ok(w) || ok(strings.TrimRight(w, ")]},;")) }
 
 // escape is a character written as an escape a reader decodes: JSON's and YAML's \u and \U, \x, and HTML's numeric
 // references, which GitHub renders.
@@ -684,7 +681,7 @@ func valueOK(line string, bearer bool) bool {
 	words, _ := shellWords(v, 0, mode)
 	ok := func(w string) bool { return emptyOrPlaceholder(w) || (bearer && bearerWords[strings.ToLower(w)]) }
 	for _, w := range words {
-		if !wordOK(ok, w) {
+		if !ok(w) {
 			return false
 		}
 	}
@@ -711,7 +708,7 @@ var (
 // The walks' limits (FBK-4). Reaching one refuses the issue and names it.
 const (
 	maxFenceDepth = 16    // fenced blocks inside fenced blocks
-	maxJSONDepth  = 10000 // as encoding/json's own decoder allows
+	maxJSONDepth  = 10000 // containers, the root included, as encoding/json's own decoder allows
 )
 
 // scanDocuments is FBK-4's walk: text, and each fenced block in it, parsed as YAML and as JSON (YAML reads most JSON,
@@ -818,18 +815,19 @@ func walkJSON(text string, offset int, out *[]feedbackMatch) {
 		*out = append(*out, feedbackMatch{Where: "body", Line: line, Column: 1, Pattern: "a credential in a YAML or JSON document", Text: redacted})
 	}
 	errDeep := errors.New("too deep")
-	// value reads one value; cred is the line of the credential key that holds it, or 0.
+	// value reads one value; cred is the line of the credential key that holds it, or 0. depth is the number of
+	// containers this value opens or sits in: the root container is 1.
 	var value func(cred, depth int) error
 	value = func(cred, depth int) error {
-		if depth > maxJSONDepth {
-			return errDeep
-		}
 		tok, err := dec.Token()
 		if err != nil {
 			return err
 		}
 		switch t := tok.(type) {
 		case json.Delim:
+			if depth > maxJSONDepth {
+				return errDeep
+			}
 			n := 0
 			for dec.More() {
 				inner := 0
@@ -865,12 +863,21 @@ func walkJSON(text string, offset int, out *[]feedbackMatch) {
 		return nil
 	}
 	for {
-		if err := value(0, 0); err != nil {
-			if err == errDeep {
-				*out = append(*out, limitMatch(offset+1, fmt.Sprintf("a JSON document nested more than %d deep, which the checker doesn't read", maxJSONDepth)))
-			}
-			return
+		err := value(0, 1)
+		var syntax *json.SyntaxError
+		switch {
+		case err == nil:
+			continue
+		case err == io.EOF, err == io.ErrUnexpectedEOF:
+			// the end, or a document cut short: every token before it was walked
+		case err == errDeep || strings.Contains(err.Error(), "exceeded max depth"):
+			*out = append(*out, limitMatch(offset+1, fmt.Sprintf("a JSON document nested more than %d deep, which the checker doesn't read", maxJSONDepth)))
+		case errors.As(err, &syntax):
+			// not JSON from here on; the line rules read it
+		default: // anything else stopped the walk: refuse rather than pass what it didn't read
+			*out = append(*out, limitMatch(offset+1, "a JSON document the checker couldn't finish"))
 		}
+		return
 	}
 }
 
@@ -888,7 +895,7 @@ func scanLine(patterns []credentialPattern, where string, n int, line string) []
 				words, end := shellWords(line, loc[1], p.words)
 				refused := false
 				for _, w := range words {
-					refused = refused || !wordOK(p.ok, w)
+					refused = refused || !p.ok(w)
 				}
 				if !refused {
 					continue
