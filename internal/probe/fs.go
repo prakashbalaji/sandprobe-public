@@ -326,15 +326,32 @@ func socketCheck(name, path string) (t obs.Target, how string, err error) {
 	return t, "", nil
 }
 
-// permCheck is the read_perm mechanism (AMP-8 block devices): on the path as the kernel resolves it (walkPath),
-// faccessat(R_OK), never opened.
+// readPermAt is EVD-12's pinned metadata-only permission call, shared with the twins.
+// No path-based fallback: an unsupported call cannot prove a refusal on the pinned object.
+var readPermAt = func(fd int) error {
+	return unix.Faccessat2(fd, "", unix.R_OK, unix.AT_EMPTY_PATH|unix.AT_EACCESS)
+}
+
+// permCheck supplies the regular-file permission twins; AMP-8.blk additionally requires block-device type.
 func permCheck(name, path string) (obs.Target, error) {
+	return readPermission(name, path, false)
+}
+
+func blockPermCheck(name, path string) (obs.Target, error) {
+	return readPermission(name, path, true)
+}
+
+// readPermission resolves and pins metadata only. Even a block device is never opened for I/O.
+func readPermission(name, path string, block bool) (obs.Target, error) {
 	t := obs.Target{Name: name}
 	w, err := walkFor(path)
 	if err != nil {
 		return t, err
 	}
 	defer w.close()
+	if block && (w.errno != 0 || w.nodes[w.last()].ftype != syscall.S_IFBLK) {
+		return t, unknowable("%s cannot be verified as a block-device node", path)
+	}
 	switch w.errno {
 	case syscall.ENOENT, syscall.ENOTDIR:
 		return absentTarget(name, w), nil
@@ -342,7 +359,7 @@ func permCheck(name, path string) (obs.Target, error) {
 		t.State, t.Errno = "refused", "EACCES"
 		return t, nil
 	}
-	err = w.canAt(w.last(), 4 /* R_OK */)
+	err = readPermAt(w.fds[w.last()])
 	switch e := errnoOf(err); {
 	case err == nil:
 		t.State = "found"
@@ -350,6 +367,18 @@ func permCheck(name, path string) (obs.Target, error) {
 		t.State, t.Errno = "refused", errName(e)
 	default:
 		return t, err
+	}
+	if block {
+		// EVD-12: pinning protects the permission call; the reported name must still identify that node.
+		current, err := walkFor(path)
+		if err != nil {
+			return obs.Target{Name: name}, unknowable("%s block-device path could not be reverified", path)
+		}
+		defer current.close()
+		before, after := w.nodes[w.last()], current.nodes[current.last()]
+		if current.errno != 0 || after.ftype != syscall.S_IFBLK || before.dev != after.dev || before.ino != after.ino {
+			return obs.Target{Name: name}, unknowable("%s block-device path changed during permission measurement", path)
+		}
 	}
 	return t, nil
 }
