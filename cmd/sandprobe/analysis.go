@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"slices"
+
 	"sandprobe/internal/analysis"
+	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 )
 
@@ -45,7 +48,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	if o.json() {
 		o.emit(c)
 	} else {
-		printComparison(o, c)
+		printComparison(o, c, b)
 	}
 	if c.Incomplete || len(c.ContextChanges) > 0 {
 		return exitPartial, nil
@@ -56,27 +59,53 @@ func offline(o opts, args []string, compare bool) (int, error) {
 	return exitGraded, nil
 }
 
-// printComparison is CMP-1's result in plain words, each check named by its category and question (SCR-3).
-func printComparison(o opts, c analysis.Comparison) {
-	list := func(title string, ids []string) {
+// printComparison is CMP-1's and CMP-2's result in plain words, each check named by its category and question (SCR-3).
+// after is the after report, read only to say which better checks were scoped out.
+func printComparison(o opts, c analysis.Comparison, after *report.Doc) {
+	scopedOut := map[string]bool{}
+	for _, ck := range after.Checks {
+		scopedOut[ck.ID] = ck.Result == obs.ScopedOut
+	}
+	list := func(title string, ids []string, note map[string]bool) {
 		if len(ids) == 0 {
 			fmt.Fprintf(o.stdout, "%s: none\n", title)
 			return
 		}
 		fmt.Fprintf(o.stdout, "%s:\n", title)
 		for _, id := range ids {
+			suffix := ""
+			if note[id] { // CMP-2, KND-1: never called a pass
+				suffix = " (nothing left for it to apply to)"
+			}
 			if cat, ok := report.CategoryOf(id); ok {
-				fmt.Fprintf(o.stdout, "  ● %s: %s\n", cat.Name, cat.Ask[id])
+				fmt.Fprintf(o.stdout, "  ● %s: %s%s\n", cat.Name, cat.Ask[id], suffix)
 			} else {
-				fmt.Fprintf(o.stdout, "  ● %q\n", id)
+				fmt.Fprintf(o.stdout, "  ● %q%s\n", id, suffix)
 			}
 		}
 	}
 	fmt.Fprintln(o.stdout)
-	list("Got worse", c.NewOrWorse)
-	list("No longer tested", c.CoverageLoss)
+	list("Got worse", c.NewOrWorse, nil)
+	list("No longer tested", c.CoverageLoss, nil)
+	list("Got better", c.GotBetter, scopedOut)
+	if len(c.NotProven) > 0 {
+		list("No longer found, but not proven", c.NotProven, nil)
+	}
+	switch b, a := c.ScoreBefore, c.ScoreAfter; {
+	case b != nil && a != nil:
+		fmt.Fprintf(o.stdout, "Score: %d/%d → %d/%d\n", b.Score, b.Of, a.Score, a.Of)
+	case b == nil && a == nil:
+		fmt.Fprintln(o.stdout, "No score: both reports' runs are invalid, so neither has one (GRD-5).")
+	case b == nil:
+		fmt.Fprintln(o.stdout, "No score: the before report's run is invalid, so it has none (GRD-5).")
+	default:
+		fmt.Fprintln(o.stdout, "No score: the after report's run is invalid, so it has none (GRD-5).")
+	}
 	if len(c.ContextChanges) > 0 {
 		fmt.Fprintf(o.stdout, "Setup differs, so the two aren't a like-for-like pair: %q\n", c.ContextChanges)
+	}
+	if slices.Contains(c.ContextChanges, "identity") {
+		fmt.Fprintln(o.stdout, "The agent's identity differs: its user, group, capabilities or privilege settings. That's expected when the fix was to change the agent's user or drop its privileges, but the two reports still measured different identities.")
 	}
 	worse := len(c.NewOrWorse) > 0 || len(c.CoverageLoss) > 0
 	switch {
