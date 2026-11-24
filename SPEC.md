@@ -65,6 +65,11 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   This refines ANL-2's five areas without changing them: provider reach splits into Containment and Cloud access,
   and AMP-8 moves from privilege to Containment. An unmapped check fails the tests. Chains have no category; the
   checks they join already turn their own categories red.
+- **SCR-6 Executed check counts.** The HTML category's tests-run counter counts recorded checks except
+  skipped and scoped-out results. A missing row is not executed. An unknown is counted as executed/inconclusive,
+  never as a pass; not-found is executed without a negative proof. Scope discovery alone is not an executed
+  access test. These counters do not change SCR-2's score or SCR-5's proof coverage.
+  Tests: `internal/report/fix_test.go` `TestHTMLExecutedCountsExcludeScopeOnlyResults`.
 - **SCR-2 Green needs proof.** A category is green only when at least one of its checks was tested (any result but
   skipped), none is unknown, and none has a finding above Info: the bar GRD-1 sets for an A. Anything else is red, and
   its reason says which: found, couldn't prove, or not tested. When every unknown in a category comes from HCN-5's
@@ -122,7 +127,11 @@ that declare `sandprobe/2` (AGT-6); the scorecard is computed from a report's ch
   category/check usable-result and completion counts beside the score in JSON,
   terminal and HTML, including workload scorecards. A green category and a full
   score never imply complete coverage, and coverage still counts all six categories,
-  a not-applicable one's checks as skipped (SCR-2). Invalid runs claim no coverage; historical
+  a not-applicable one's checks as skipped (SCR-2). New derived display annotations must not become
+  required fields for existing `sandprobe.workload-exposure/1` records with valid coverage. Derive display
+  distinctions from validated coverage; never invent proof for a legacy record. Test:
+  `internal/report/scorecard_coverage_test.go` `TestSavedExposureCoverageWithoutNewDisplayFields`.
+  Invalid runs claim no coverage; historical
   scorecards without coverage remain readable and never gain an invented complete
   status. Derive coverage only from graded checks and grading unknowns, never a
   provider flag, supplied counter, workload pass or configuration declaration.
@@ -975,6 +984,19 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   completed exchange does not independently prove delivery, and failed exchange
   or silence never proves blocking. Malformed diagnostic fields cannot change a
   verdict or become report-controlled prose. Older records need no new fields.
+- **EVD-7 Local SDK failures are not provider evidence.** If a Daytona SDK subprocess cannot start
+  because its interpreter is missing, unresolvable or not executable, return a fixed local-runtime failure
+  and label the host call `local_sdk_unavailable`. Never echo interpreter paths, keys or raw OS errors.
+  Preserve provider/transport failures as separate generic failures. Record one SDK call per invocation;
+  logging must not duplicate exec operations. No local runtime failure is a security result or cleanup proof.
+  Tests: `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable`,
+  `TestDaytonaCommandRecordsOneCall`.
+- **EVD-8 Workload preparation diagnostics.** Retain a fixed failure stage for local source reads,
+  artifact upload, worker execution or worker-ready parsing, plus EVD-7's bounded SDK/local failure category
+  when execution fails. An artifact name is one of the source-fixed workload basenames, never a path.
+  Do not emit file contents, guest responses, errors or credentials. Preparation failures consume no model
+  request and cannot become successful workloads or security passes. Test the real workload controller
+  boundary with credential-free upload/exec faults and malformed responses before invoking any model.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -1007,11 +1029,13 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   provider support stays unknown. No cloud run is needed for this offline change.
 
 - **EVD-6 Bounded network failure classification.** Shared marker clients may retain
-  fixed labels for exact HTTP403/407 status lines, other HTTP status replies,
+  fixed labels for exact HTTP403/407 status lines and other HTTP status classes (1xx through5xx),
   connection reset, broken pipe and non-TLS record failures. Read at most256bytes;
   do not retain response text, headers, bodies, certificates or raw error strings.
   The labels identify observed protocol behavior, never provider attribution or an
-  authenticated policy denial. Preserve pinned TLS, nonce acknowledgement, kernel
+  authenticated policy denial. Keep the historical `http_other_status` label valid when loading older
+  records. A status class is diagnostic only, including2xx: it is not the nonce acknowledgement.
+  Preserve pinned TLS, nonce acknowledgement, kernel
   refusal and host receipt rules. These diagnostics cannot alter any verdict,
   complete an unknown, or create an additional request/target. Historical records
   remain unchanged. Verify real probe paths against owned local fixtures and run
@@ -1663,6 +1687,9 @@ counters, and no history across runs is shown anywhere.
   never marked. The main run corroborates
   the inventory. The mark touches only the approved paths, each only if its directory is still the one the survey
   saw; a root that is new or changed since is unknown, never marked.
+  Recheck diagnostics distinguish inode mismatch, length mismatch and both, using fixed text without file
+  contents or numeric identities. Every mismatch remains unknown and unread; diagnostics neither relax the
+  identity guard nor establish that a provider filesystem caused the mismatch (TWN-3).
   Root identity comes from the provider, never the box: mount source, filesystem type, device and mount ID are
   observations only, since another filesystem can share them and mount IDs change on every boot. Two reset models:
   - **Restore in place** (same provider ID, such as Sprites): the host issues the restore of a named checkpoint and the
@@ -2574,6 +2601,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | --- | --- |
 | REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing, and `.github/release-version_test.sh` (REL-2's version grammar: `x.y.z` publishes as a full release, `x.y.z-rc.N` as a pre-release never marked Latest, and everything else is refused, a leading `v`, another suffix, a missing part, a second line and an empty version among them); on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
+| SCR-6 | `internal/report/fix_test.go` `TestHTMLExecutedCountsExcludeScopeOnlyResults` (unknown/not-found counted; missing/skipped/scoped-out excluded, both themes) |
 | SCR-5 | synthetic six-category coverage partition and malformed/missing/unknown/scoped-out cases, unchanged RC scores, invalid/historical coverage absence, terminal/HTML/workload coverage visibility and count validation |
 | SCR-1/SCR-2/SCR-3 | `internal/report/scorecard_test.go`: every catalog check in exactly one category, green only with a tested check and no unknown or finding above Info, invalid has no score, the page leads with the score and puts the rest under Appendix, reasons never carry box strings; `cmd/sandprobe` scorecard regression; `internal/report/fix_test.go` (SCR-3's page): `TestPageOrder` (the header with the box, its provider, each chain's sentence and the run's facts, never `run.mode`; then the score, its strip and the six rows, each with "x/y tests run" and a link to each of its tests; then What to fix with the chain first in its severity, unknowns in their own unfolded group and the rest folded; then the technical appendix), `TestEveryTestOnce` (on every saved report's page, fresh and re-rendered, in both palettes, each catalog check's row appears exactly once and every link to a test lands on a row), `TestEveryTestOnceUnrated` (a failure with no known severity, which only an edited report has, still shows once and is counted), `TestCountsComeFromRows` (the strip, each group heading, the fold and the rail count the rows shown, and equal the grade's counts), `TestUnknownIsNeverAPass` (an unknown row is dashed, outside the fold and never green; an incomplete run says so beside the score, dashed; a not-proven test sits in the fold, never as a pass), `TestNoLetterGrade` (no letter grade anywhere on the page or in its title, for a valid, an incomplete and an invalid run; the title carries the score; an invalid run says plainly that it is invalid and has no score), `TestHeaderFacts` (the probe's version escaped as text, the attestation line fixed, the lead sentence without a chain), `TestInvalidHasNoCounts` (an invalid page has no strip, no group and no count) |
 | AGT-6 (field presence) | `internal/analysis/presence_test.go`: `TestNewFieldsPresentAreCanonical` (the security re-review of #8: a committed `sandprobe/1` report reads as before with the new fields absent, and is refused with `SkipKinds` as `{}` (the reviewer's reproduction) or null, `Attested` as `[]` or null, or a check's `attestation` as `""` or null; a canonical `sandprobe/2` report reads, and is refused with `Attested` as `[]` or null, an `attestation` null, `SkipKinds` as `{}` or null with nothing else new, or no new field at all) |
@@ -2673,7 +2701,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | SBX-7, SBX-8, SBX-11 | `network`; a canary that hangs; the release gate; the canary's unit tests (an unarmed nonce, or an armed one on another port, leaves no receipt and can't crowd the matching one out; each cap holds; a refused arm; an expired, disarmed or unknown run, or another pin, fails the query; a hit connection cap, or a rise in the kernel's drop counts, marks the armed run overloaded; the worst-case answer encodes under 8,000 characters, and one over 16,000 is refused; peak healthy concurrency from one address, 8 runs' attempts plus health, stays under the per-source cap); the grader's (an overloaded run passes nothing and finds nothing `not_found`, while a receipt still finds); `deploy/canary_test.sh` (teardown against fake CLIs) |
 | SBX-9, GRD, CHN, KND, TWN-1, TWN-2 | grader unit tests; `clean`, `holes`, `evidence` |
 | TWN-4 | `internal/probe/probe_test.go`, as nobody and as root: `TestWriteOwnerPower` (a file under the agent's own 0555 directory found as its owner; `CAP_FOWNER`, `CAP_CHOWN` or `CAP_SETUID` found, `CAP_FSETID` not; a kernel setting never), `TestStickySpares`, `TestJudgeWrite` (nothing found with `CAP_SYS_ADMIN` is unknown; a proof-class check is never found from a mode the agent would first change), `TestSocketCheck` (the agent's own socket at mode 0 found), `TestRefusalsHold` (its own 0000 file, or a refusal under a read power, unknown; an absence still judged as before; a process file's refusal unknown under `CAP_SYS_PTRACE` or `CAP_SETUID`); `TestModelAgainstKernel` (the model against a brute-force search of every setuid, setgroups, chmod, chown and lchown sequence, on curated cases and 12,000 seeded paths: two or three components below `/`, a directory holding an absolute or relative link with its own owner, or a link to a directory followed by `..`; a disagreement either way fails), `TestWalkPathNodes` (a directory link kept as an entry of its own directory, then followed to the real directories; refused past eight links; nothing seen past a directory the probe can't search), `TestWalkAgreesWithKernel` (a last link to `../target` after a directory link lands where the kernel's `stat` does, in the real directory, for the walk and the read pin alike; eight directory links and a last link leave the walk, the read and the write unknown), `TestDeviceChangeIsNoMountPoint` (an entry on another device, unmarked by `STATX_ATTR_MOUNT_ROOT`, still replaceable in the model), `TestRawPaths` (a home, a relative path and a path with repeated slashes and `.`, each naming `link/..`, kept as given and resolved where the kernel's `stat` lands, never at the decoy beside the link; a PATH entry of `link/..`, absolute or relative, finds the sudo the kernel reaches; `..` past a missing name unknown), `TestPathDirs` (PER-2's PATH entries as given), `TestStickyLinkReplaceable` (the agent's own link in root's sticky `/tmp`: a write through it found, and the kernel then allows the rename it rests on), `TestPinSudoStickyLink` (AMP-1 refuses the same link on sudo's chain), `TestReachPastEarlyReturns` (every early negative of a file check, a pass, an allowed absence, a `scoped_out` and AMP-1's absence, unknown under `CAP_SYS_ADMIN`, and its negative without it); `test/probe.sh` runs `TestSetuidProcfs` as nobody with `/proc/sys` writable (a kernel setting root may write leaves AMP-8.sys unknown under `CAP_SETUID`), and `TestTwinReadPower` as nobody holding `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE`, where the probe's own 0000 file must open; the grader's case for a file-read twin without its refusing side; `clean` (a read-only root over the agent's own home stays a pass); `evidence` (an owned 0555 home above root's startup files, and an owned 0000 credential file; the same home through root's directory link; `CAP_SETGID` over a group-search `/root` and group-write files, and permitted `CAP_DAC_READ_SEARCH` over a closed home and a file anyone may write, both unknown; the home reached through the agent's own link in root's sticky directory, a finding; a last `../` link after the home's directory link, a finding for the write and for the one read the kernel allows, each decided in the real directory; eight directory links and a last link, unknown; `HOME` and the first PATH entry naming `link/..`, a finding for the write and the read and AMP-1 unknown, never a pass or absent), `sudors` (the `CAP_FOWNER` agent) |
-| TWN-3, PER-5 | `reset`; `internal/probe/per5_test.go` `TestMarkUnlisted` (an unlisted root takes no marker and says why, a mode 0111 root included, as nobody and as root), `TestMarkUnreadableRoot` (a mode 0300 root marked and rechecked); `internal/grade/per5_test.go` `TestPER5GapReasons` (each gap's cause named, no identity told from a different one, the box's reasons bounded) |
+| TWN-3, PER-5 | `reset`; `internal/probe/per5_test.go` `TestRecheckIdentityDiagnostics` (inode, length and combined mismatch remain unknown and unread), `TestMarkUnlisted` (an unlisted root takes no marker and says why, a mode 0111 root included, as nobody and as root), `TestMarkUnreadableRoot` (a mode 0300 root marked and rechecked); `internal/grade/per5_test.go` `TestPER5GapReasons` (each gap's cause named, no identity told from a different one, the box's reasons bounded) |
 | AMP-2 | `internal/grade/grade_test.go` `TestAMP2CapabilitySets` (a capability only permitted, or ambient, counted at its severity and named so; an inheritable one unknown with `NoNewPrivs` 0, ignored with 1; a missing `CapPrm` or `CapInh` unknown unless uid or `CapEff` already find); the `evidence-drs` fixture (`CAP_DAC_READ_SEARCH` permitted, not effective: Critical, never a pass) |
 | AMP-3 | `internal/grade/grade_test.go` `TestAMP3NewPrivs` (with `NoNewPrivs` 0 never a pass: setuid-root files a finding; otherwise unknown, naming file capabilities and no-new-privileges, whatever the capability sets hold, empty bounding and inheritable sets and root included; an incomplete scan unknown; `NoNewPrivs` 1 a pass, setuid-root files or not); the `evidence-filecaps` fixture (uid 65534 holding nothing, `NoNewPrivs` 0, Docker's bounding set, no setuid-root file, and a `cap_dac_override+ep` file the kernel lets the agent gain `CAP_DAC_OVERRIDE` through: AMP-2 a pass and AMP-3 unknown, never both passing) and `evidence-filecaps-nnp` (the same box with `NoNewPrivs` 1: the kernel grants nothing, and both pass) |
 | AMP-1, PER-2 | `policy`, `sudors`, `deceptive`, `evidence` (a PATH entry of `link/..` whose sudo the kernel reaches: unknown, never absent); `internal/probe/reach_test.go` `TestRawPaths` (the same entry, absolute or relative); `internal/probe/amp_test.go` `TestPATHWorkingDirectory`, as nobody and as root (a writable working directory holding a file named `sudo`, with PATH empty, `::`, ending in a colon, or unset: PER-2 a finding or unknown, and AMP-1 unknown, never a pass or absent); `internal/probe/amp_test.go`, as nobody and as root: `TestPinSudo` (each allow-list refusal saying what failed, a setuid file not named sudo included), `TestWalk` (every link counted and named, a directory's included, `..` taken as the kernel takes it, refused past 8), `TestPrivileged` (root or any capability named, read with `capget`), `TestSudoList` (a stand-in run from its descriptor; a `#!` file never run; a run ended by a signal unknown); `test/probe.sh` also runs `TestSudoList` as root with a fake tree mounted over `/proc`, whose `/proc/self/fd/3` plays a sudo granting everything, and every listing must still come from the pinned stand-in |
@@ -2687,6 +2715,8 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
+| EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
+| EVD-7 | `internal/host/daytona_test.go` `TestDaytonaLocalSDKUnavailable` (missing/non-executable interpreter, fixed private-safe error), `TestDaytonaCommandRecordsOneCall` (one event, success/local/provider failure classification) |
 | EVD-6 | bounded HTTP/error label fixtures, Linux guest protocol tests and diagnostic/grading invariance |
 | SCR-4 | shared managed-completion notice/unchanged exit and JSON tests; shared score recomputation, primary workload rendering, unknown/not-proven retention, managed output and historical rendering compatibility |
 | RUN-15 | protected HOME/project/cache parity, original-home metadata guards, unchanged functional workload and managed original-ID cleanup |

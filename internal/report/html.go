@@ -190,7 +190,8 @@ func fixList(d Doc, c Card) (cats []catView, groups []sevGroup, rest []test, res
 			t := test{ID: id, Ask: cat.Ask[id], Sev: worst(id), Attested: ck.Attestation, Cat: cat.Name}
 			var top bool
 			t.Result, t.Class, t.Detail, top = answer(ck, ok)
-			if t.Result != "Not run" {
+			// SCR-6: scope discovery alone is not an executed access test.
+			if ok && ck.Result != obs.Skipped && ck.Result != obs.ScopedOut {
 				cv.Run++
 			}
 			if t.Sev != "" { // for a test that didn't fail, what a failure would have been

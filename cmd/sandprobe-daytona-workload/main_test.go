@@ -190,3 +190,53 @@ func TestSelectedModelReachesSharedController(t *testing.T) {
 		t.Fatal("unsupported model reached preparation", err)
 	}
 }
+
+type preparationFaultBox struct {
+	uploadErr, execErr error
+	response           []byte
+}
+
+func (b preparationFaultBox) WorkloadUpload(context.Context, string, []byte) error {
+	return b.uploadErr
+}
+func (b preparationFaultBox) WorkloadCommand(context.Context, string) ([]byte, error) {
+	return b.response, b.execErr
+}
+func TestWorkloadPreparationFailuresAreBounded(t *testing.T) {
+	for _, tc := range []struct {
+		name, stage, category string
+		files                 bool
+		box                   preparationFaultBox
+	}{
+		{"read", "artifact_read", "local_artifact_read_failed", false, preparationFaultBox{}},
+		{"upload", "artifact_upload", "sdk_http_403", true, preparationFaultBox{uploadErr: errors.New("Daytona upload HTTP 403")}},
+		{"local-runtime", "artifact_upload", "local_sdk_unavailable", true, preparationFaultBox{uploadErr: errors.New("Daytona local SDK interpreter unavailable")}},
+		{"exec", "worker_prepare_execution", "bridge_command_failed_or_output_limit", true, preparationFaultBox{execErr: errors.New("Daytona exec refused: command_failed_or_output_limit")}},
+		{"private-error", "worker_prepare_execution", "managed_step_failed", true, preparationFaultBox{execErr: errors.New("synthetic-sensitive-error")}},
+		{"malformed", "worker_prepare_response", "worker_ready_not_reported", true, preparationFaultBox{response: []byte("synthetic-sensitive-response")}},
+		{"not-ready", "worker_prepare_response", "worker_ready_not_reported", true, preparationFaultBox{response: []byte(`{"worker_ready":false}`)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.files {
+				dir := filepath.Join(root, "experiments/eks-agent")
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				for _, n := range []string{"coding.py", "project_exec.py", "worker.py"} {
+					if err := os.WriteFile(filepath.Join(dir, n), []byte("synthetic-source"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			r := workload(context.Background(), options{root: root}, tc.box)
+			if r.Stage != tc.stage || r.FailureCategory != tc.category || r.ModelRequests != 0 || r.Independent != "failed" {
+				t.Fatalf("preparation failure lost: %+v", r)
+			}
+			raw, _ := json.Marshal(r)
+			if strings.Contains(string(raw), "synthetic-sensitive") || strings.Contains(string(raw), root) {
+				t.Fatal("private preparation details leaked")
+			}
+		})
+	}
+}

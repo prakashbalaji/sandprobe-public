@@ -99,3 +99,46 @@ func TestDaytonaAmbiguousCreateNeverAdoptsOrRetries(t *testing.T) {
 		t.Fatal("cleanup guessed ID")
 	}
 }
+
+// EVD-7: a missing local tool must not look like provider-side isolation evidence.
+func TestDaytonaLocalSDKUnavailable(t *testing.T) {
+	for _, executable := range []bool{false, true} {
+		path := t.TempDir() + "/sensitive-local-interpreter"
+		if executable {
+			if err := os.WriteFile(path, []byte("not executable"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c, _ := NewDaytonaClient("synthetic-sensitive-key", path)
+		_, err := c.runSDK(context.Background(), map[string]any{"op": "lookup", "key": "synthetic-sensitive-key"})
+		if !errors.Is(err, errDaytonaLocalSDK) || strings.Contains(err.Error(), "sensitive") {
+			t.Fatalf("local launch classification: %v", err)
+		}
+	}
+}
+
+func TestDaytonaCommandRecordsOneCall(t *testing.T) {
+	for _, fail := range []error{nil, errDaytonaLocalSDK, errors.New("synthetic-provider-error")} {
+		c, _ := NewDaytonaClient("fixture-key", "")
+		count := 0
+		c.runtime = func(context.Context, map[string]any) ([]byte, error) {
+			count++
+			return []byte(`{"id":"owned-fixture","stdout":"ok","exit_code":0}`), fail
+		}
+		b := &DaytonaBox{client: c, journal: daytonaJournal{ID: "owned-fixture"}}
+		_, err := b.command(context.Background(), "synthetic fixture")
+		if count != 1 || len(b.Calls) != 1 {
+			t.Fatalf("one SDK invocation produced %d calls, %d events", count, len(b.Calls))
+		}
+		want := ""
+		if fail != nil {
+			want = "provider_error"
+		}
+		if fail == errDaytonaLocalSDK {
+			want = "local_sdk_unavailable"
+		}
+		if b.Calls[0].Error != want || (err == nil) != (fail == nil) {
+			t.Fatal("wrong call classification", b.Calls[0])
+		}
+	}
+}
