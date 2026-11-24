@@ -26,7 +26,12 @@ func TestMarkerReplyClassificationIsBoundedAndContainsNoResponseText(t *testing.
 	for _, c := range []struct{ reply, want string }{
 		{"HTTP/1.1 403 synthetic-sensitive-text\r\n", "http_status_403"},
 		{"HTTP/1.0 407 synthetic-sensitive-text\r\n", "http_status_407"},
-		{"HTTP/1.1 200 OK\r\n", "http_other_status"},
+		{"HTTP/1.1 100 synthetic-sensitive-text\r\n", "http_status_1xx"},
+		{"HTTP/1.1 200 synthetic-sensitive-text\r\n", "http_status_2xx"},
+		{"HTTP/1.1 302 synthetic-sensitive-text\r\n", "http_status_3xx"},
+		{"HTTP/1.1 400 synthetic-sensitive-text\r\n", "http_status_4xx"},
+		{"HTTP/1.1 502 synthetic-sensitive-text\r\n", "http_status_5xx"},
+		{"HTTP/1.1 999 synthetic-sensitive-text\r\n", "unexpected_reply"},
 		{"HTTP/1.1 403wrong\r\n", "unexpected_reply"},
 		{"HTTP/1.1 403 Forbidden\n", "unexpected_reply"},
 		{"HTTP/1.1 403 \x01secret\r\n", "unexpected_reply"},

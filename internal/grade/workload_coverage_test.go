@@ -37,7 +37,7 @@ func TestExchangeDiagnosticsCannotChangeNetworkGrade(t *testing.T) {
 	if expected.Letter != "C" {
 		t.Fatal("connected without receipt must stay unknown")
 	}
-	for _, diagnostic := range [][2]string{{"exchange", "completed"}, {"tls_handshake", "pin_mismatch"}, {"read_reply", "timeout"}, {"read_reply", "http_status_403"}, {"read_reply", "http_status_407"}, {"read_reply", "http_other_status"}, {"tls_handshake", "connection_reset"}, {"send_marker", "broken_pipe"}, {"tls_handshake", "non_tls_reply"}, {"untrusted-stage", "untrusted-secret-error"}} {
+	for _, diagnostic := range [][2]string{{"exchange", "completed"}, {"tls_handshake", "pin_mismatch"}, {"read_reply", "timeout"}, {"read_reply", "http_status_403"}, {"read_reply", "http_status_407"}, {"read_reply", "http_other_status"}, {"read_reply", "http_status_1xx"}, {"read_reply", "http_status_2xx"}, {"read_reply", "http_status_3xx"}, {"read_reply", "http_status_4xx"}, {"read_reply", "http_status_5xx"}, {"tls_handshake", "connection_reset"}, {"send_marker", "broken_pipe"}, {"tls_handshake", "non_tls_reply"}, {"untrusted-stage", "untrusted-secret-error"}} {
 		o.Attempts[0].ExchangeStage = diagnostic[0]
 		o.Attempts[0].ExchangeResult = diagnostic[1]
 		raw, _ = json.Marshal(d)

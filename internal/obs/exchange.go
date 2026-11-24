@@ -11,6 +11,8 @@ func ValidExchangeDiagnostic(stage, result string) bool {
 	switch result {
 	case "completed", "timeout", "closed", "pin_mismatch", "io_error", "unexpected_reply":
 		return true
+	case "http_status_1xx", "http_status_2xx", "http_status_3xx", "http_status_4xx", "http_status_5xx":
+		return true
 	case "http_status_403", "http_status_407", "http_other_status", "connection_reset", "broken_pipe", "non_tls_reply":
 		return true
 	}
