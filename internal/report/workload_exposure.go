@@ -17,6 +17,10 @@ type WorkloadExposure struct {
 	BoxID             string `json:"box_id"`
 	InputVerification string `json:"input_verification"`
 	Card
+	// gradedInfo is severity evidence only this binary's own grading gives, in the same process (SCR-7): the checks
+	// whose finding it graded Info. It is never serialized, so a card read from a file never carries it, and a finding
+	// on a check with both Info and higher variants (SEC-3) that the row doesn't list fails closed on such a card.
+	gradedInfo map[string]bool
 }
 
 func WorkloadExposureScore(m obs.Manifest, raw []byte, evidence *obs.CanaryEvidence) WorkloadExposure {
@@ -24,7 +28,20 @@ func WorkloadExposureScore(m obs.Manifest, raw []byte, evidence *obs.CanaryEvide
 	if evidence != nil {
 		r.Evidence = *evidence
 	}
-	return WorkloadExposure{Schema: "sandprobe.workload-exposure/1", RunID: m.RunID, BoxID: m.BoxID, InputVerification: "proof_recomputation_unauthenticated_input", Card: Score(Build(r, Meta{}))}
+	return exposureFromDoc(Build(r, Meta{}))
+}
+
+// exposureFromDoc is the workload card for a report this process just graded, with the severity evidence its own
+// grading gives (SCR-7).
+func exposureFromDoc(d Doc) WorkloadExposure {
+	info := map[string]bool{}
+	for _, c := range d.Checks {
+		if c.Result == obs.Finding && c.Severity == "info" {
+			info[c.ID] = true
+		}
+	}
+	return WorkloadExposure{Schema: "sandprobe.workload-exposure/1", RunID: d.Manifest.RunID, BoxID: d.Manifest.BoxID,
+		InputVerification: "proof_recomputation_unauthenticated_input", Card: Score(d), gradedInfo: info}
 }
 
 // WorkloadExposureHTML is opt-in; historical rendering entry points keep their
@@ -38,7 +55,7 @@ func WorkloadExposureHTML(r grade.WorkloadReport, coverage grade.EvidenceCoverag
 	}
 	rows := make([]Row, len(exposure.Rows))
 	for i, row := range exposure.Rows {
-		rows[i], _ = cardRow(i, row) // the built row, green-not-proven flag included; never the stored text
+		rows[i], _ = cardRow(i, row, exposure.gradedInfo) // the built row, green-not-proven flag included; never the stored text
 	}
 	exposure.Rows = rows
 	return workloadHTML(r, &coverage, &exposure)
@@ -89,7 +106,7 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 	}
 	green, applicable := 0, len(Categories)
 	for i, row := range x.Rows {
-		built, ok := cardRow(i, row) // the stored row must equal a row buildRow makes from its own evidence (SCR-2)
+		built, ok := cardRow(i, row, x.gradedInfo) // the stored row must equal a row buildRow makes from its own evidence (SCR-2)
 		if !ok {
 			return false
 		}

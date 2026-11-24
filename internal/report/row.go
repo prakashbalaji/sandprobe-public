@@ -84,9 +84,10 @@ func buildRow(cat Category, out map[string]outcome, scope string, declared, noCa
 // itself: the category, this binary's PRV-row table, and the row's own check lists and coverage. It checks the lists'
 // invariants first, then tries every outcome map they allow, builds each row with buildRow, and accepts the stored
 // row only when it equals one of them as a whole. It returns that built row, which is what the page renders.
-func cardRow(i int, row Row) (Row, bool) {
+// gradedInfo is the card's severity evidence from this process's own grading (SCR-7), nil for a card read from a file.
+func cardRow(i int, row Row, gradedInfo map[string]bool) (Row, bool) {
 	cat := Categories[i]
-	if !rowInvariants(cat, row) {
+	if !rowInvariants(cat, row, gradedInfo) {
 		return Row{}, false
 	}
 	key := ""
@@ -96,7 +97,7 @@ func cardRow(i int, row Row) (Row, bool) {
 			key = legacyScope(cat, row.Terms)
 		}
 	}
-	for _, out := range cardOutcomes(cat, row, key) {
+	for _, out := range cardOutcomes(cat, row, key, gradedInfo) {
 		for _, noCanary := range []bool{false, true} {
 			want := buildRow(cat, out, key, false, noCanary)
 			want.Coverage = row.Coverage
@@ -115,9 +116,9 @@ func cardRow(i int, row Row) (Row, bool) {
 // only the category's own checks, once each, in catalog order; found, unknown and unproven are disjoint; a found check
 // can be found above Info, and an unproven one is find-only; a not-applicable row lists nothing and its coverage
 // records no finding; a green row has no found or unknown check; every coverage finding a row doesn't list as found
-// is a check with an Info variant; and a card without coverage (0.2.1's form) carries no not-applicable row, scope,
+// is Info by evidence (infoUnlisted); and a card without coverage (0.2.1's form) carries no not-applicable row, scope,
 // terms or declared provider, since 0.2.1 wrote none.
-func rowInvariants(cat Category, row Row) bool {
+func rowInvariants(cat Category, row Row, gradedInfo map[string]bool) bool {
 	for _, ids := range [][]string{row.Found, row.Unknown, row.Unproven} {
 		if !inCategory(cat, ids) {
 			return false
@@ -141,7 +142,7 @@ func rowInvariants(cat Category, row Row) bool {
 	}
 	if c := row.Coverage; c != nil {
 		for _, id := range c.Findings {
-			if !slices.Contains(row.Found, id) && !hasInfo(id) {
+			if !slices.Contains(row.Found, id) && !infoUnlisted(id, gradedInfo) {
 				return false
 			}
 		}
@@ -160,7 +161,7 @@ func rowInvariants(cat Category, row Row) bool {
 // a finding is outInfo only when its check has an Info variant and the row doesn't list it, else outFound; a skipped check may be outSkipped, outOptIn when it is a
 // provider endpoint, or outTerms when key's PRV-row entry excludes it. Without coverage (0.2.1's form), the row's own
 // lists fix theirs, and the rest are all clean or all missing: the two forms that change the row.
-func cardOutcomes(cat Category, row Row, key string) []map[string]outcome {
+func cardOutcomes(cat Category, row Row, key string, gradedInfo map[string]bool) []map[string]outcome {
 	base := map[string]outcome{}
 	var open []string // skipped checks whose kind the card doesn't record
 	if c := row.Coverage; c != nil {
@@ -172,9 +173,9 @@ func cardOutcomes(cat Category, row Row, key string) []map[string]outcome {
 				base[id] = g.o
 			}
 		}
-		for _, id := range c.Findings { // Info only for a check that has an Info variant: never a green on the card's word
+		for _, id := range c.Findings { // Info only by evidence (infoUnlisted): never a green on the card's word
 			base[id] = outFound
-			if hasInfo(id) && !slices.Contains(row.Found, id) {
+			if !slices.Contains(row.Found, id) && infoUnlisted(id, gradedInfo) {
 				base[id] = outInfo
 			}
 		}
@@ -249,6 +250,13 @@ func sameRow(stored, want Row) bool {
 		stored.DeclaredProvider == want.DeclaredProvider && stored.NotProven == want.NotProven &&
 		slices.Equal(stored.Found, want.Found) && slices.Equal(stored.Unknown, want.Unknown) &&
 		slices.Equal(stored.Unproven, want.Unproven) && stored.Coverage == want.Coverage
+}
+
+// infoUnlisted says a finding the row doesn't list as found may be taken as Info (SCR-7): always for a check whose
+// findings are only ever Info (EGR-4); for a check with both Info and higher variants (SEC-3), only when this process's
+// own grading graded it Info. A card read from a file carries no such evidence, so there it fails closed.
+func infoUnlisted(id string, gradedInfo map[string]bool) bool {
+	return hasInfo(id) && (!canRed(id) || gradedInfo[id])
 }
 
 // hasInfo says a check has an Info variant, so a finding on it may be a completed observation that never turns a row

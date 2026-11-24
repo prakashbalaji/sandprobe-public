@@ -3,6 +3,15 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- The workload exposure page never trusts a saved exposure card. Sandprobe rebuilds each row with the same code that
+  scores a run, from the card's own checks and coverage, and shows only the rebuilt rows. A card it can't rebuild is
+  refused, including one marking a category not applicable where the provider excludes only some of its checks, or
+  one showing a row green over a recorded finding that may be above Info. A credential-file finding (SEC-3) can be
+  Info or High, and a saved card doesn't record which, so a saved card that leaves one off its findings is refused
+  rather than read as green (SCR-7).
+
 ## 0.3.1 (2026-11-24)
 
 - `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that

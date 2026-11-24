@@ -1,7 +1,9 @@
 package report
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"sandprobe/internal/catalog"
@@ -241,5 +243,223 @@ func TestCardRowInvariants(t *testing.T) {
 	recount(&c)
 	if !validWorkloadExposure(asCard(c)) {
 		t.Errorf("a legitimate Info finding on a green row was refused: %+v", c.Rows[1])
+	}
+}
+
+// sec3Card is a graded report where SEC-3 has a finding at severity and every other check a legal clean result, as
+// the workload card this process builds from it, with its own grading's severity evidence (SCR-7).
+func sec3Card(severity string) WorkloadExposure {
+	d := legalNotFound()
+	for i := range d.Checks {
+		if d.Checks[i].ID == "SEC-3" {
+			d.Checks[i].Result, d.Checks[i].Severity = obs.Finding, severity
+		}
+	}
+	return exposureFromDoc(d)
+}
+
+// fromFile is x as a card read back from a file: JSON keeps every field but the in-process severity evidence.
+func fromFile(t *testing.T, x WorkloadExposure) WorkloadExposure {
+	t.Helper()
+	b, err := json.Marshal(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var y WorkloadExposure
+	if err := json.Unmarshal(b, &y); err != nil {
+		t.Fatal(err)
+	}
+	return y
+}
+
+// SCR-7, sandprobe-codex's final finding on #67: SEC-3 has both Info and High variants, so a SEC-3 finding a row doesn't
+// list is Info only on this process's own grading. A genuine High SEC-3 card recast as green with one coordinated edit
+// (found and why cleared, green set, score up, coverage unchanged) is refused, in process and read from a file. An
+// honest Info SEC-3 card reads green in process and fails closed read from a file, which carries no severity
+// evidence; an Info-only check (EGR-4) needs none.
+func TestCardSEC3SeverityFailsClosed(t *testing.T) {
+	high := sec3Card("high")
+	if !validWorkloadExposure(high) || high.Rows[0].Green || !slices.Contains(high.Rows[0].Found, "SEC-3") {
+		t.Fatalf("the honest High SEC-3 card: valid %v, %+v", validWorkloadExposure(high), high.Rows[0])
+	}
+	recast := func(x WorkloadExposure) WorkloadExposure {
+		x.Card = cloneCard(x.Card)
+		r := &x.Rows[0]
+		r.Found, r.Why, r.Green = nil, "", true
+		x.Score++
+		return x
+	}
+	for name, x := range map[string]WorkloadExposure{"in process": recast(high), "read from a file": recast(fromFile(t, high))} {
+		if validWorkloadExposure(x) {
+			t.Errorf("codex's recast High SEC-3 card, %s: accepted", name)
+		}
+		if _, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, x); err == nil {
+			t.Errorf("codex's recast High SEC-3 card, %s: rendered", name)
+		}
+	}
+	info := sec3Card("info")
+	if !validWorkloadExposure(info) || !info.Rows[0].Green || !slices.Contains(info.Rows[0].Coverage.Findings, "SEC-3") {
+		t.Fatalf("the honest Info SEC-3 card in process: valid %v, %+v", validWorkloadExposure(info), info.Rows[0])
+	}
+	if _, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, info); err != nil {
+		t.Errorf("the honest Info SEC-3 card in process didn't render: %v", err)
+	}
+	if saved := fromFile(t, info); validWorkloadExposure(saved) {
+		t.Error("an Info SEC-3 card read from a file, with no severity evidence, was accepted")
+	}
+	egr4 := legalNotFound()
+	for i := range egr4.Checks {
+		if egr4.Checks[i].ID == "EGR-4" {
+			egr4.Checks[i].Result, egr4.Checks[i].Severity = obs.Finding, "info"
+		}
+	}
+	if x := fromFile(t, exposureFromDoc(egr4)); !validWorkloadExposure(x) || !x.Rows[1].Green {
+		t.Errorf("an Info-only EGR-4 finding read from a file was refused: %+v", x.Rows[1])
+	}
+}
+
+// honestRow is an oracle written apart from the validator: what any accepted row must satisfy for the page to show no
+// false pass, from its coverage and the card's severity evidence alone (SCR-2, SCR-5, SCR-7).
+func honestRow(cat Category, r Row, gradedInfo map[string]bool) string {
+	c := r.Coverage
+	if c == nil {
+		return ""
+	}
+	for _, id := range c.Findings {
+		infoByEvidence := hasInfo(id) && (!canRed(id) || gradedInfo[id])
+		if !infoByEvidence && !slices.Contains(r.Found, id) {
+			return "a finding that may be above Info isn't listed as found"
+		}
+	}
+	for _, id := range r.Found {
+		if !slices.Contains(c.Findings, id) {
+			return "a found check coverage doesn't record as a finding"
+		}
+	}
+	tested := len(c.Proven) + len(c.Findings) + len(c.Unproven) + len(c.ScopedOut) + len(c.Unknown)
+	switch {
+	case r.Green && (len(r.Found) > 0 || len(c.Unknown) > 0 || tested == 0 || r.Why != ""):
+		return "a green row with a finding, an unknown, no tested check, or a reason"
+	case r.NotApplicable:
+		entry := host.DeclaredExclusions(r.Scope)
+		if r.Scope == "" {
+			entry = host.DeclaredExclusions(legacyScope(cat, r.Terms))
+		}
+		for _, id := range cat.Checks {
+			if _, ok := entry[id]; !ok || !slices.Contains(c.Skipped, id) {
+				return "a not-applicable row whose provider doesn't exclude, or the card doesn't skip, every check"
+			}
+		}
+	case !r.Green && len(r.Found) > 0 && !strings.HasPrefix(r.Why, "Found: "):
+		return "a red row with findings whose reason doesn't say found"
+	}
+	return ""
+}
+
+// SCR-7: coordinated mutations, pairs and triples across found, why, green, not-proven, coverage and the card's
+// totals, on honest cards of every form. Every card the validator accepts satisfies honestRow on every row and has
+// totals equal to its rows; codex's recast is one of the combinations.
+func TestCardCoordinatedMutations(t *testing.T) {
+	daytona := host.Options{Mode: "exec", Excluded: host.DaytonaExclusions(), ExcludedKind: obs.SkipProviderTerms}
+	legacy := asCard(Score(replanned(t, "daytona", daytona)))
+	legacy.Card = cloneCard(legacy.Card)
+	legacy.Rows[4].Scope, legacy.Rows[4].Why = "", LegacyNotApplicable
+	fixtures := map[string]WorkloadExposure{
+		"High SEC-3 in process":       sec3Card("high"),
+		"High SEC-3 from a file":      fromFile(t, sec3Card("high")),
+		"Info SEC-3 in process":       sec3Card("info"),
+		"native Daytona":              asCard(Score(replanned(t, "daytona", daytona))),
+		"run exec opt-in":             asCard(Score(replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, Existing: true}))),
+		"run exec without a canary":   asCard(Score(replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, Existing: true, NoCanary: true}))),
+		"0.3.0 legacy not applicable": legacy,
+	}
+	tried, accepted := 0, 0
+	for fname, f := range fixtures {
+		if !validWorkloadExposure(f) {
+			t.Fatalf("%s: the honest card was refused", fname)
+		}
+		for i, cat := range Categories {
+			base := f.Rows[i]
+			if base.Coverage == nil {
+				continue
+			}
+			var founds [][]string // as is, cleared, and one finding added or removed
+			founds = append(founds, base.Found, nil)
+			for _, id := range append(slices.Clone(base.Coverage.Findings), base.Coverage.Proven...) {
+				if slices.Contains(base.Found, id) {
+					founds = append(founds, slices.DeleteFunc(slices.Clone(base.Found), func(s string) bool { return s == id }))
+				} else {
+					n := append(slices.Clone(base.Found), id)
+					slices.SortFunc(n, func(a, b string) int { return slices.Index(cat.Checks, a) - slices.Index(cat.Checks, b) })
+					founds = append(founds, n)
+				}
+			}
+			moves := []string{""} // as is, or one check moved between proven and findings
+			moves = append(moves, base.Coverage.Proven...)
+			moves = append(moves, base.Coverage.Findings...)
+			for _, found := range founds {
+				whys := []string{base.Why, "", "Not tested"}
+				if len(found) > 0 {
+					whys = append(whys, "Found: "+labels(cat, found))
+				}
+				for _, why := range whys {
+					for _, green := range []bool{base.Green, !base.Green} {
+						for _, notProven := range []string{base.NotProven, ""} {
+							for _, move := range moves {
+								for _, recounted := range []bool{true, false} {
+									x := f
+									x.Card = cloneCard(f.Card)
+									r := &x.Rows[i]
+									r.Found, r.Why, r.Green, r.NotProven = slices.Clone(found), why, green, notProven
+									if !green {
+										r.GreenNotProven = false
+									}
+									if move != "" {
+										v := r.Coverage
+										order := func(a, b string) int { return slices.Index(cat.Checks, a) - slices.Index(cat.Checks, b) }
+										if slices.Contains(v.Proven, move) {
+											v.Proven = slices.DeleteFunc(v.Proven, func(s string) bool { return s == move })
+											v.Findings = append(v.Findings, move)
+											slices.SortFunc(v.Findings, order)
+										} else {
+											v.Findings = slices.DeleteFunc(v.Findings, func(s string) bool { return s == move })
+											v.Proven = append(v.Proven, move)
+											slices.SortFunc(v.Proven, order)
+										}
+									}
+									if recounted {
+										recount(&x.Card)
+									}
+									tried++
+									if !validWorkloadExposure(x) {
+										continue
+									}
+									accepted++
+									green, applicable := 0, len(Categories)
+									for j, row := range x.Rows {
+										if why := honestRow(Categories[j], row, x.gradedInfo); why != "" {
+											t.Errorf("%s, row %s: accepted %s: %+v", fname, row.Name, why, row)
+										}
+										if row.Green {
+											green++
+										}
+										if row.NotApplicable {
+											applicable--
+										}
+									}
+									if x.Score != green || x.Of != applicable {
+										t.Errorf("%s: accepted totals %d/%d against rows %d/%d", fname, x.Score, x.Of, green, applicable)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	t.Logf("tried %d coordinated mutations; %d accepted, every one honest by the oracle", tried, accepted)
+	if tried < 10000 {
+		t.Fatalf("only %d mutations: the enumeration shrank", tried)
 	}
 }
