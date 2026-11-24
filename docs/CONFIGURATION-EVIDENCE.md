@@ -27,3 +27,24 @@ same sandbox before/after workload. New adapters must satisfy the same proof rul
 Documentation, requested settings and guest self-observation alone do not substitute
 for those readbacks. Neither change requires probing provider/host/other-tenant
 surfaces. Historical records and grades remain unchanged.
+
+## Organization network-policy context
+
+EVD-11 adds a separate private `organization-network-policy.json` artifact to the
+managed Daytona evaluation. It reads the native organization's
+`sandbox_limited_network_egress` configuration bit using only the organization ID
+freshly bound to the run's original sandbox. The pinned SDK calls the explicit-ID
+organization endpoint; it never lists organizations or infers one from a default
+API-key context. The artifact omits the organization ID and raw provider errors.
+
+The artifact schema is `sandprobe.organization-network-policy/1`. An `observed`
+result carries an actual true/false value; missing fields, permission failures,
+identity mismatch or malformed data produce `unknown` with a fixed reason and no
+boolean. The scope is `organization_default`, and `enforcement_observed` is always
+false. Collection failures do not interrupt the workload.
+
+This is extra configuration context, not a complete effective policy or tier
+readback. It proves neither that any particular destination was denied nor that a
+TLS reset came from the firewall. It changes no probe result, exposure score or
+benchmark requirement. Daytona documents organization restrictions and sandbox
+network settings separately in its [network-limits guide](https://www.daytona.io/docs/en/network-limits/).

@@ -66,6 +66,27 @@ def bound(client,req):
     if m['id']!=req['id'] or m['labels'].get('sandprobe_run')!=req['nonce'] or m['born']!=req['born'] or m['organization']!=req['organization'] or m['public'] or m['auto_delete']!=0 or m['auto_stop']!=15 or m['auto_pause']!=0 or not volumes_match(m,req):raise ValueError('identity/policy mismatch')
     return s,m
 
+def organization_network_policy(client,req):
+    """EVD-11: one own-sandbox-bound organization read; never a denial verdict."""
+    unknown=lambda reason:{'result':'unknown','reason':reason}
+    try:
+        _,meta=bound(client,req)
+        organization=meta['organization']
+        if not isinstance(organization,str) or not UUID.fullmatch(organization):
+            return unknown('binding_unverified')
+    except Exception:
+        return unknown('binding_unverified')
+    try:
+        from daytona_api_client.api.organizations_api import OrganizationsApi
+        value=OrganizationsApi(client._api_client).get_organization(organization,_request_timeout=15)
+    except Exception as error:
+        return unknown('permission_denied' if getattr(error,'status',None)==403 else 'readback_unavailable')
+    if (getattr(value,'id',None)!=organization
+            or type(getattr(value,'sandbox_limited_network_egress',None)) is not bool):
+        return unknown('response_mismatch')
+    return {'result':'observed','reason':'matching_organization_readback',
+            'limited_network_egress':value.sandbox_limited_network_egress}
+
 def create_identity(response):
     try:
         if response.status not in (200,201):raise ValueError('create refused')
@@ -162,6 +183,7 @@ def dispatch(req):
     client=Daytona(DaytonaConfig(api_key=req['key'],api_url=API,target='us'))
     # Disable SDK retries, with origin/redirect guards also enforced at transport.
     client._api_client.configuration.retries=0
+    if req['op']=='organization_network_policy':return organization_network_policy(client,req)
     if req['op']=='rejected_create':return rejected_create(client,req)
     if req['op'] in ('volume_create','volume_lookup','volume_delete'):
         return volume_operation(client,req)

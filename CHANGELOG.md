@@ -5,6 +5,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+- Retain optional, own-sandbox-bound organization network-policy context for managed Daytona runs without treating configuration as observed denial.
+
 - Stop HTTP-opted managed Nitro and Daytona runs before paid resources when the shared canary capability is unavailable.
 - Add private canary maintenance admission controls and a deployment/rollback runbook; shared-service updates remain explicit.
 

@@ -1020,6 +1020,15 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   creating any paid receiver or provider resource. They build the checker from the same clean source as the
   managed collector. Unavailable capability stops setup with a fixed error, without a retry or legacy fallback;
   the collector still rechecks capability immediately before assessment. Preflight success is not delivery proof.
+- **EVD-11 Organization network-policy readback.** The managed Daytona collector may make one bounded
+  native organization read using only the organization ID freshly verified against its own sandbox's
+  create-returned identity, run label and creation time. No organization list, default-organization inference,
+  other-organization retry or policy mutation is permitted. The returned organization ID must match exactly
+  and `sandbox_limited_network_egress` must be an actual boolean; absent/null/string values remain unknown.
+  A separate versioned organization-default policy artifact records observed true/false or a fixed unavailable
+  reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
+  the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
+  it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
 - **EVD-3 Credential-file portability.** Reuse the independently reviewed
   SEC-3 correction (SBX-2): when an owned regular file's read-only reopen fails
   solely with EPERM while requesting O_NOATIME, retry that same pinned descriptor
@@ -2735,6 +2744,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-13 | managed exact collector options reach survey while EGR-6 stays skipped; fresh repair staging and pinned-SDK nonroot read-only filesystem regression |
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
+| EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance; managed HTTP capability failure stops before paid receiver/provider creation |
 | EVD-9 | `internal/canary/http_marker_test.go`: canonical HTTP/80 + independently collected receipts, unarmed completion without proof, legacy compatibility, malformed/oversized/body/host/port rejection, bounded acknowledgement parsing and no raw response leakage |
 | EVD-8 | `cmd/sandprobe-daytona-workload/main_test.go` `TestWorkloadPreparationFailuresAreBounded` (read/upload/exec/parse failures remain failed, zero model calls, no raw error disclosure) |
