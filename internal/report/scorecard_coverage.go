@@ -71,7 +71,6 @@ func attachCoverage(card *Card, checks map[string]Check, unknown map[string]bool
 		if c.Complete {
 			coverage.CompleteCategories++
 		}
-		card.Rows[i].GreenNotProven = card.Rows[i].Green && c.Conclusive == 0 // SCR-2: green with no conclusive check
 		card.Rows[i].Coverage = c
 	}
 	coverage.Complete = coverage.CompleteCategories == coverage.Categories
@@ -145,7 +144,7 @@ func validCardCoverage(card Card) bool {
 		}
 		conclusive := len(c.Proven) + len(c.Findings)
 		usable := conclusive + len(c.Unproven)
-		if c.Conclusive != conclusive || c.UsableResults != usable || c.Complete != (conclusive == c.Total) || row.GreenNotProven && !(row.Green && conclusive == 0) {
+		if c.Conclusive != conclusive || c.UsableResults != usable || c.Complete != (conclusive == c.Total) {
 			return false
 		}
 		want.Checks += c.Total

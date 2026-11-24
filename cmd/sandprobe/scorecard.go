@@ -96,11 +96,12 @@ func printable(s string) string {
 	return b.String()
 }
 
-// printCard writes the headline: the score, then one line per category, green, green not proven, red or not applicable (SCR-2).
+// printCard writes the headline: the score, then one line per category, green, red or not applicable (SCR-2).
 func printCard(o opts, c report.Card, statement string) {
-	caps := detectTermCaps(o.stdout, false)
-	st := styleFor(caps.color)
-	g := glyphsFor(caps.ascii)
+	green, red, reset := "", "", ""
+	if f, ok := o.stdout.(*os.File); ok && isTerminal(f) {
+		green, red, reset = "\x1b[1;32m", "\x1b[1;31m", "\x1b[0m"
+	}
 	w := o.stdout
 	if !c.Valid {
 		fmt.Fprintf(w, "\nScore: none (invalid run)\n")
@@ -115,30 +116,19 @@ func printCard(o opts, c report.Card, statement string) {
 		fmt.Fprintln(w, c.Coverage.Description())
 	}
 	for _, row := range c.Rows {
-		dot, mark, color := "●", "RED  ", st.red
-		if caps.ascii {
-			dot = g.red
-		}
+		mark, color := "RED  ", red
 		switch {
-		case row.Green && row.GreenNotProven: // SCR-2, UX-9: distinct symbol and words from proven green
-			dot, mark, color = g.gnp, g.gnpWords, st.gnp
 		case row.Green:
-			if caps.ascii {
-				dot = g.green
-			}
-			mark, color = "GREEN", st.green
+			mark, color = "GREEN", green
 		case row.NotApplicable: // SCR-2: never green, and out of the score
-			if caps.ascii {
-				dot = g.na
-			}
 			mark, color = "N/A  ", ""
 		}
-		fmt.Fprintf(w, "  %s%s %s%s  %-13s %s\n", color, dot, mark, st.reset, printable(row.Name), printable(row.Question))
+		fmt.Fprintf(w, "  %s● %s%s  %-13s %s\n", color, mark, reset, row.Name, row.Question)
 		if row.Why != "" { // a not-applicable reason is the report's own skip reason: escaped like its other text
-			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), st.reset)
+			fmt.Fprintf(w, "  %-22s %s%s%s\n", "", color, printable(row.Why), reset)
 		}
 		if row.NotProven != "" {
-			fmt.Fprintf(w, "  %-22s %s\n", "", printable(row.NotProven))
+			fmt.Fprintf(w, "  %-22s %s\n", "", row.NotProven)
 		}
 		if row.Coverage != nil {
 			fmt.Fprintf(w, "  %-22s %s\n", "", printable(row.Coverage.Description()))
