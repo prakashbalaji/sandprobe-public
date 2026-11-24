@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -28,7 +29,7 @@ import (
 	"sandprobe/internal/report"
 	"sandprobe/recipes"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // FBK-1: one repository, on one host.
@@ -186,9 +187,11 @@ func feedback(args []string, stdin io.Reader, tty func() (io.ReadCloser, error),
 
 const feedbackUsage = "sandprobe feedback bug|feature|idea -title <one line> -body-file <file or -> [-report <report.json>] [-provider <name>] [-confirm <code>]"
 
-// feedbackTTY is FBK-5's terminal: /dev/tty, only when standard input and output are both terminals.
-func feedbackTTY() func() (io.ReadCloser, error) {
-	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+// feedbackTTY is FBK-5's terminal: /dev/tty, only through the gate UX-7's keys use (AGT-1): standard input and
+// output both terminals, stdout this process's own, in the foreground process group, and not CI, SANDPROBE_NO_KEYS
+// or TERM=dumb.
+func feedbackTTY(stdout io.Writer) func() (io.ReadCloser, error) {
+	if !shouldInteract(opts{out: "text", stdout: stdout}) {
 		return nil
 	}
 	return func() (io.ReadCloser, error) { return os.Open("/dev/tty") }
@@ -381,13 +384,24 @@ func reportSummary(d *report.Doc, known map[string]bool) (string, string) {
 	return b.String(), provider
 }
 
-// credentialPattern is one FBK-4 pattern. When its regexp has a group, the group is the value; flag, when set, says
-// whether a match (and its value) is refused.
+// credentialPattern is one FBK-4 pattern. With words set, the regexp ends where a value begins, and the value is
+// read as shell words (shellWords): one word, or every word to the value's end. The match is refused when any word
+// isn't ok. Otherwise, when its regexp has a group, the group is the value, and flag, when set, says whether the match
+// is refused.
 type credentialPattern struct {
-	name string
-	re   *regexp.Regexp
-	flag func(match, value string) bool
+	name  string
+	re    *regexp.Regexp
+	flag  func(match, value string) bool
+	words int // 0: none; oneWord or allWords
+	ok    func(word string) bool
 }
+
+// The ways shellWords reads a value.
+const (
+	oneWord   = 1 // a flag's or a Bearer's value: one shell word
+	allWords  = 2 // a field's or a header's value: every word to an unquoted , or ;, a comment, or the line's end
+	wholeLine = 3 // a continuation line: every word to a comment or the line's end
+)
 
 // credKey is a key whose name says it holds a credential (FBK-4): YAML, INI, JSON, environment and header names.
 const credKey = `[A-Za-z0-9_.-]*(?:token|secret|passw(?:or)?d|passphrase|api[_-]?key|apikey|access[_-]?key|private[_-]?key|` +
@@ -395,14 +409,13 @@ const credKey = `[A-Za-z0-9_.-]*(?:token|secret|passw(?:or)?d|passphrase|api[_-]
 	`credentials?|cookie|session[_-]?id|sessionid)[A-Za-z0-9_.-]*|(?:[A-Za-z0-9_.-]*[_.-])?auth(?:[_.-][A-Za-z0-9_.-]*)?|` +
 	`[A-Za-z0-9_.-]*[_.-](?:pass|pwd)(?:[_.-][A-Za-z0-9_.-]*)?|(?:pass|pwd)[_.-][A-Za-z0-9_.-]*` // DB_PASS, MYSQL_PWD; not a bare pass
 
-// credValue is a value up to its quote, space or separator.
-const credValue = "[\"'`]?([^\\s\"'`,;]+)"
-
 // placeholder is FBK-4's short list of values that carry nothing.
 var placeholder = regexp.MustCompile(`^(?:<[^>]*>|\[[^\]]*\]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|[*xX•.…_-]+|` +
 	`(?i:redacted|none|null|nil|empty|unset|hidden|masked|true|false|~|n/a))$`)
 
 func notPlaceholder(_, v string) bool { return !placeholder.MatchString(v) }
+
+func emptyOrPlaceholder(w string) bool { return w == "" || placeholder.MatchString(w) }
 
 // ownLine is one of Sandprobe's own lines that prints its Secrets area or category as a key, exactly: profile's
 // count line and compare's question line. No other line that names secrets as a key is exempt.
@@ -426,6 +439,8 @@ var bearerWords = map[string]bool{"token": true, "tokens": true, "auth": true, "
 	"header": true, "headers": true, "scheme": true, "credential": true, "credentials": true, "value": true, "of": true,
 	"and": true, "or": true, "the": true, "a": true, "an": true, "is": true, "in": true, "for": true, "with": true, "to": true}
 
+var authScheme = regexp.MustCompile(`(?i)^(?:bearer|basic|token|bot|digest|negotiate|aws4-hmac-sha256)(?:\s+|$)`)
+
 // credentialPatterns are FBK-4's, most specific first: where two overlap, the first names the match.
 var credentialPatterns = []credentialPattern{
 	{name: "a private key", re: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-[0-9]+:`)},
@@ -437,17 +452,21 @@ var credentialPatterns = []credentialPattern{
 	// Slack: xox and any letter (xoxb, xoxp, xoxa, xoxr, xoxs, xoxe, ...), xapp, xwfp, and the rotating xoxe.xoxp, xoxe.xapp.
 	{name: "a Slack token or webhook", re: regexp.MustCompile(`\b(?:xox[a-z]|xapp|xwfp)(?:\.(?:xox[a-z]|xapp))?-[A-Za-z0-9._-]+|https://hooks\.slack\.com/[A-Za-z0-9/_-]+`)},
 	{name: "a URL with a password", re: regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]*:([^/\s@]*)@`), flag: notPlaceholder},
-	{name: "an Authorization header", re: regexp.MustCompile("(?i)\\b(?:proxy-)?authorization[\"']?\\s*[:=]\\s*[\"'`]?" +
-		"(?:(?:bearer|basic|token|bot|digest|negotiate|aws4-hmac-sha256)\\s+)?([^\\s\"'`,;]+)"), flag: notPlaceholder},
-	{name: "a bearer token", re: regexp.MustCompile("(?i)\\bbearer\\s+([^\\s\"'`,;)]+)"), flag: func(_, v string) bool {
-		return !placeholder.MatchString(v) && !bearerWords[strings.ToLower(v)]
+	{name: "an Authorization header", re: regexp.MustCompile(`(?i)\b(?:proxy-)?authorization["']?\s*(?::=|[:=])\s*(?:(?:bearer|basic|token|bot|digest|negotiate|aws4-hmac-sha256)\s+)?`),
+		words: allWords, ok: func(w string) bool {
+			return emptyOrPlaceholder(w) || (authScheme.MatchString(w) && emptyOrPlaceholder(authScheme.ReplaceAllString(w, "")))
+		}},
+	{name: "a bearer token", re: regexp.MustCompile(`(?i)\bbearer\s+`), words: oneWord,
+		ok: func(w string) bool { return emptyOrPlaceholder(w) || bearerWords[strings.ToLower(w)] }},
+	{name: "a Basic credential", re: regexp.MustCompile(`(?i)\bbasic\s+`), words: oneWord, ok: func(w string) bool {
+		if w == "" || placeholder.MatchString(w) || strings.ContainsAny(w, " \t") {
+			return true
+		}
+		rest := w[1:] // a capital first letter is prose; base64 mixes cases inside
+		return !strings.ContainsAny(w, "0123456789+/=") && (strings.ToLower(rest) == rest || strings.ToUpper(rest) == rest)
 	}},
-	{name: "a Basic credential", re: regexp.MustCompile(`(?i)\bbasic\s+([A-Za-z0-9+/]+={0,2})`), flag: func(_, v string) bool {
-		rest := v[1:] // a capital first letter is prose; base64 mixes cases inside
-		return strings.ContainsAny(v, "0123456789+/=") || (strings.ToLower(rest) != rest && strings.ToUpper(rest) != rest)
-	}},
-	{name: "a credential field", re: regexp.MustCompile("(?i)(?:" + credKey + ")[\"']?\\s*(?::=|[:=])\\s*" + credValue), flag: notPlaceholder},
-	{name: "a credential flag", re: regexp.MustCompile("(?i)(?:^|\\s)--?(?:" + credKey + ")\\s+" + credValue), flag: notPlaceholder},
+	{name: "a credential field", re: regexp.MustCompile(`(?i)(?:` + credKey + `)["']?\s*(?::=|[:=])\s*`), words: allWords, ok: emptyOrPlaceholder},
+	{name: "a credential flag", re: regexp.MustCompile(`(?i)(?:^|\s)--?(?:` + credKey + `)\s+`), words: oneWord, ok: emptyOrPlaceholder},
 	{name: "a home-directory path", re: regexp.MustCompile(`(?:/Users/|/home/)[^/\s]+|(?i:\b[a-z]:\\users\\[^\\\s]+)`)},
 	{name: "a long hex string", re: regexp.MustCompile(`[0-9A-Fa-f]{32,}`)}, // no \b: a prefix such as dop_v1_ is a word character
 	{name: "a long base64 string", re: regexp.MustCompile(`[A-Za-z0-9+/_-]{32,}={0,2}`), flag: func(m, _ string) bool {
@@ -455,25 +474,118 @@ var credentialPatterns = []credentialPattern{
 	}},
 }
 
-// scanFeedback is FBK-4 on the title and every line of the body, and its walk of doc, the person's own text, which
-// begins the body, so their lines agree. It records where and why, never the text.
+// shellWords reads the value at line[start:] the way a shell joins one: quoted parts ("..." with backslash escapes,
+// '...', and `...` when a closing backtick follows) and unquoted parts next to each other make one word, so a
+// placeholder part never excuses the rest; whitespace separates words. A # after whitespace ends the value, and so,
+// in allWords, does an unquoted , or ;. A backtick that closes a Markdown code span (an odd number before it on the
+// line), or one with no closing backtick, ends it too. An unclosed " or ' runs to the line's end. It returns the
+// words and where the value ends; wordOK reads each.
+func shellWords(line string, start, mode int) ([]string, int) {
+	var words []string
+	var w strings.Builder
+	in := false
+	end := func() {
+		if in {
+			words = append(words, w.String())
+			w.Reset()
+			in = false
+		}
+	}
+	for i := start; i < len(line); {
+		c := line[i]
+		switch {
+		case c == ' ' || c == '\t':
+			end()
+			if mode == oneWord && len(words) > 0 {
+				return words, i
+			}
+			j := i
+			for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+				j++
+			}
+			if j < len(line) && line[j] == '#' {
+				return words, i
+			}
+			i = j
+		case (c == ',' || c == ';') && mode == allWords:
+			end()
+			return words, i
+		case c == '`' && (strings.Count(line[:i], "`")%2 == 1 || !strings.Contains(line[i+1:], "`")):
+			end()
+			return words, i
+		case c == '"' || c == '\'' || c == '`':
+			j := i + 1
+			for j < len(line) && line[j] != c {
+				if c == '"' && line[j] == '\\' && j+1 < len(line) {
+					j++
+				}
+				w.WriteByte(line[j])
+				j++
+			}
+			in, i = true, j+1
+		default:
+			w.WriteByte(c)
+			in, i = true, i+1
+		}
+	}
+	end()
+	return words, len(line)
+}
+
+// wordOK is ok for a word as written, or without the ) ] } , ; that JSON and YAML close a value with, so
+// `[REDACTED]` and `"<x>"}` pass, and `"<x>"]secret` doesn't.
+func wordOK(ok func(string) bool, w string) bool { return ok(w) || ok(strings.TrimRight(w, ")]},;")) }
+
+// escape is a character written as an escape a reader decodes: JSON's and YAML's \u and \U, \x, and HTML's numeric
+// references, which GitHub renders.
+var escape = regexp.MustCompile(`\\u[0-9A-Fa-f]{4}|\\U[0-9A-Fa-f]{8}|\\x[0-9A-Fa-f]{2}|&#[0-9]{1,7};|&#[xX][0-9A-Fa-f]{1,6};`)
+
+// decodeEscapes is a line as its reader sees it, so `"pass\u0077ord": x` is scanned as `"password": x`.
+func decodeEscapes(s string) string {
+	return escape.ReplaceAllStringFunc(s, func(e string) string {
+		var n uint64
+		switch {
+		case strings.HasPrefix(e, "&#x"), strings.HasPrefix(e, "&#X"):
+			n, _ = strconv.ParseUint(e[3:len(e)-1], 16, 32)
+		case strings.HasPrefix(e, "&#"):
+			n, _ = strconv.ParseUint(e[2:len(e)-1], 10, 32)
+		default:
+			n, _ = strconv.ParseUint(e[2:], 16, 32)
+		}
+		if r := rune(n); utf8.ValidRune(r) && !unicode.IsControl(r) && !unicode.Is(unicode.Cf, r) {
+			return string(r)
+		}
+		return " "
+	})
+}
+
+// scanFeedback is FBK-4 on the title and every line of the body, each as written and as decoded, and its walk of
+// doc, the person's own text, which begins the body, so their lines agree. It records where and why, never the text.
 func scanFeedback(title, body, doc, home string) []feedbackMatch {
 	patterns := credentialPatterns
 	if home != "" && home != "/" && home != "/root" {
 		patterns = append(patterns[:len(patterns):len(patterns)], credentialPattern{name: "a home-directory path", re: regexp.MustCompile(regexp.QuoteMeta(home) + `\b`)})
 	}
 	out := scanLine(patterns, "title", 0, title)
+	if d := decodeEscapes(title); d != title && len(out) == 0 {
+		out = scanLine(patterns, "title", 0, d)
+	}
 	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		out = append(out, scanLine(patterns, "body", i+1, line)...)
-	}
+	decoded := make([]string, len(lines))
 	seen := map[int]bool{}
-	for _, m := range out {
-		if m.Where == "body" {
-			seen[m.Line] = true
+	for i, line := range lines {
+		m := scanLine(patterns, "body", i+1, line)
+		if decoded[i] = decodeEscapes(line); len(m) == 0 && decoded[i] != line {
+			m = scanLine(patterns, "body", i+1, decoded[i])
 		}
+		for _, x := range m {
+			seen[x.Line] = true
+		}
+		out = append(out, m...)
 	}
-	for _, m := range append(scanContinued(lines), scanDocuments(doc)...) { // they only add: one finding per line
+	var docs []feedbackMatch
+	scanDocuments(doc, 0, 0, &docs)
+	for _, m := range append(scanContinued(decoded), docs...) { // they only add: one finding per line
 		if !seen[m.Line] {
 			seen[m.Line] = true
 			out = append(out, m)
@@ -498,13 +610,17 @@ var danglingKey = regexp.MustCompile("(?i)(?:" +
 	"|\\b(bearer)" +
 	")\\s*\\\\?\\s*(?:(?:#|//).*)?$")
 
+// keyOnly is a line that ends with a credential key and no separator: JSON or YAML whose colon is on a later line.
+var keyOnly = regexp.MustCompile(`(?i)(?:^|[\s{,\[])["']?(?:` + credKey + `|(?:proxy-)?authorization)["']?\s*$`)
+
 // contextKey is a line that names a credential: a field, a flag or an Authorization header, with or without a value.
 var contextKey = regexp.MustCompile("(?i)(?:(?:^|\\s)--?(?:" + credKey + ")(?:\\s|$)|(?:" + credKey + ")[\"']?\\s*(?::=|[:=])" +
 	"|\\b(?:proxy-)?authorization[\"']?\\s*(?::=|[:=]))")
 
-// scanContinued is FBK-4's value on other lines. A dangling key's value is the next line that isn't blank or a
-// comment (a YAML value, JSON's next token, a folded header). After any line naming a credential, each later line
-// indented deeper than it continues the value (a YAML continuation, an obs-folded header). Each must be a placeholder.
+// scanContinued is FBK-4's value on other lines, on the decoded lines. A dangling key's value is the next line that
+// isn't blank or a comment (a YAML value, JSON's next token, a folded header); a key whose colon is on a later line
+// takes what follows that colon. After any line naming a credential, each later line indented deeper than it
+// continues the value (a YAML continuation, an obs-folded header). Each must be empty or a placeholder.
 func scanContinued(lines []string) []feedbackMatch {
 	var out []feedbackMatch
 	for i, line := range lines {
@@ -512,10 +628,22 @@ func scanContinued(lines []string) []feedbackMatch {
 			continue
 		}
 		d := danglingKey.FindStringSubmatch(line)
+		j := nextValue(lines, i)
+		if d == nil && keyOnly.MatchString(line) && j >= 0 {
+			if t := strings.TrimSpace(lines[j]); strings.HasPrefix(t, ":") || strings.HasPrefix(t, "=") {
+				if rest := strings.TrimSpace(t[1:]); rest != "" {
+					if !valueOK(rest, false) {
+						out = append(out, valueMatch(lines, j))
+					}
+				} else if k := nextValue(lines, j); k >= 0 && !valueOK(lines[k], false) {
+					out = append(out, valueMatch(lines, k))
+				}
+			}
+			continue
+		}
 		if d == nil && !contextKey.MatchString(line) {
 			continue
 		}
-		j := nextValue(lines, i)
 		if d != nil && j >= 0 {
 			if !valueOK(lines[j], d[1] != "") {
 				out = append(out, valueMatch(lines, j))
@@ -545,71 +673,118 @@ func nextValue(lines []string, i int) int {
 
 func indent(line string) int { return len(line) - len(strings.TrimLeft(line, " \t")) }
 
-// valueOK says a value line carries nothing: empty or a placeholder, after its list dash, explicit-key colon, quotes
-// and trailing comma; for a Bearer, its first word may also be an ordinary one.
+// valueOK says a value line carries nothing: every shell word on it, after its list dash and explicit-key colon, is
+// empty or a placeholder; for a Bearer, only its first word counts, and it may also be an ordinary one.
 func valueOK(line string, bearer bool) bool {
 	v := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(line), "- "), ":"))
-	v = strings.Trim(strings.TrimSuffix(v, ","), "\"'`")
-	if w := strings.Fields(v); bearer && len(w) > 0 {
-		v = w[0]
+	mode := wholeLine
+	if bearer {
+		mode = oneWord
 	}
-	return v == "" || placeholder.MatchString(v) || (bearer && bearerWords[strings.ToLower(v)])
+	words, _ := shellWords(v, 0, mode)
+	ok := func(w string) bool { return emptyOrPlaceholder(w) || (bearer && bearerWords[strings.ToLower(w)]) }
+	for _, w := range words {
+		if !wordOK(ok, w) {
+			return false
+		}
+	}
+	return true
 }
 
 func valueMatch(lines []string, j int) feedbackMatch {
 	return feedbackMatch{Where: "body", Line: j + 1, Column: utf8.RuneCountInString(lines[j][:indent(lines[j])]) + 1, Pattern: "a credential value on its own line", Text: redacted}
 }
 
-var (
-	credKeyWhole = regexp.MustCompile("(?i)^(?:" + credKey + "|(?:proxy-)?authorization)$")
-	fence        = regexp.MustCompile("^\\s*(```|~~~)")
-)
-
-// scanDocuments is FBK-4's walk: the whole body, and each fenced block, parsed as YAML and as JSON (YAML reads most
-// JSON, but not a key whose colon is on the next line). A parse that fails adds nothing and its error is never shown;
-// this only adds to the line rules.
-func scanDocuments(body string) []feedbackMatch {
-	var out []feedbackMatch
-	walkYAML(body, 0, &out)
-	walkJSON(body, 0, &out)
-	lines := strings.Split(body, "\n")
-	for i := 0; i < len(lines); i++ {
-		f := fence.FindStringSubmatch(lines[i])
-		if f == nil {
-			continue
-		}
-		j := i + 1
-		for j < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[j]), f[1]) {
-			j++
-		}
-		block := strings.Join(lines[i+1:j], "\n")
-		walkYAML(block, i+1, &out)
-		walkJSON(block, i+1, &out)
-		i = j
-	}
-	return out
+// limitMatch is FBK-4's refusal when a walk can't finish: it names the limit, never passing what it didn't read.
+func limitMatch(line int, limit string) feedbackMatch {
+	return feedbackMatch{Where: "body", Line: line, Column: 1, Pattern: limit, Text: redacted}
 }
 
-// walkYAML parses up to 16 documents and walks each; offset is the line before the text's first.
+var (
+	credKeyWhole = regexp.MustCompile("(?i)^(?:" + credKey + "|(?:proxy-)?authorization)$")
+	// fenceOpen is a CommonMark code fence's opening line, after any blockquote and list markers: three or more
+	// backticks or tildes, then an info string.
+	fenceOpen  = regexp.MustCompile("^((?:\\s*>)*\\s*(?:(?:[-*+]|[0-9]{1,9}[.)])\\s+)?\\s*)(`{3,}|~{3,})(.*)$")
+	blockquote = regexp.MustCompile(`^(?:\s*>)+ ?`)
+)
+
+// The walks' limits (FBK-4). Reaching one refuses the issue and names it.
+const (
+	maxFenceDepth = 16    // fenced blocks inside fenced blocks
+	maxJSONDepth  = 10000 // as encoding/json's own decoder allows
+)
+
+// scanDocuments is FBK-4's walk: text, and each fenced block in it, parsed as YAML and as JSON (YAML reads most JSON,
+// but not a key whose colon is on the next line). Fences follow CommonMark: a block closes only at a fence of the same
+// character at least as long as its opener, so a longer fence holds shorter ones, and each block's content is itself
+// walked, fences and all. A parse that fails adds nothing and its error is never shown; a limit reached refuses.
+func scanDocuments(text string, offset, depth int, out *[]feedbackMatch) {
+	if depth > maxFenceDepth {
+		*out = append(*out, limitMatch(offset+1, fmt.Sprintf("fenced blocks nested more than %d deep, which the checker doesn't read", maxFenceDepth)))
+		return
+	}
+	walkYAML(text, offset, out)
+	walkJSON(text, offset, out)
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		m := fenceOpen.FindStringSubmatch(lines[i])
+		if m == nil || (m[2][0] == '`' && strings.Contains(m[3], "`")) {
+			continue
+		}
+		quoted, char, n := strings.Contains(m[1], ">"), m[2][0], len(m[2])
+		var block []string
+		j := i + 1
+		for ; j < len(lines); j++ {
+			l := lines[j]
+			if quoted {
+				l = blockquote.ReplaceAllString(l, "")
+			}
+			if t := strings.TrimSpace(l); len(t) >= n && t[0] == char && strings.Trim(t, string(char)) == "" {
+				break
+			}
+			block = append(block, l)
+		}
+		scanDocuments(strings.Join(block, "\n"), offset+i+1, depth+1, out)
+		i = j
+	}
+}
+
+// walkYAML decodes every document to the end and walks each; offset is the line before the text's first. A parse
+// that fails stops it and adds nothing, but the parser's own depth and alias limits, and a parser panic, refuse.
 func walkYAML(text string, offset int, out *[]feedbackMatch) {
-	defer func() { recover() }() // a parser panic adds nothing, as a failed parse doesn't
+	defer func() {
+		if recover() != nil {
+			*out = append(*out, limitMatch(offset+1, "a YAML document the checker failed on"))
+		}
+	}()
 	dec := yaml.NewDecoder(strings.NewReader(text))
-	for n := 0; n < 16; n++ {
+	for {
 		var doc yaml.Node
-		if dec.Decode(&doc) != nil {
+		err := dec.Decode(&doc)
+		if err == io.EOF {
+			return
+		}
+		if err != nil {
+			if strings.Contains(err.Error(), "exceeded max depth") || strings.Contains(err.Error(), "excessive aliasing") {
+				*out = append(*out, limitMatch(offset+1, "a YAML document deeper or more aliased than the checker reads"))
+			}
 			return
 		}
 		walkNode(&doc, offset, out)
 	}
 }
 
-// walkNode refuses a mapping key named as a credential, or Authorization, unless its value is empty or a
-// placeholder. An alias, a tag, or a non-empty mapping or list as its value is refused too.
+// walkNode refuses a mapping key named as a credential, or Authorization, written or through an alias, unless its
+// value is empty or a placeholder. An alias, a tag, or a non-empty mapping or list as its value is refused too.
 func walkNode(n *yaml.Node, offset int, out *[]feedbackMatch) {
 	if n.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
-			if k.Kind == yaml.ScalarNode && credKeyWhole.MatchString(k.Value) && credentialNode(v) {
+			name := k
+			if k.Kind == yaml.AliasNode && k.Alias != nil { // an alias as a key names what it points to
+				name = k.Alias
+			}
+			if name.Kind == yaml.ScalarNode && credKeyWhole.MatchString(name.Value) && credentialNode(v) {
 				*out = append(*out, feedbackMatch{Where: "body", Line: offset + k.Line, Column: k.Column, Pattern: "a credential in a YAML or JSON document", Text: redacted})
 			}
 		}
@@ -617,50 +792,6 @@ func walkNode(n *yaml.Node, offset int, out *[]feedbackMatch) {
 	for _, c := range n.Content {
 		walkNode(c, offset, out)
 	}
-}
-
-// walkJSON decodes text as one JSON document and refuses what walkNode would. A key is placed at the first line
-// that spells it, else at the document's first line: the refusal stands either way.
-func walkJSON(text string, offset int, out *[]feedbackMatch) {
-	var doc any
-	if json.Unmarshal([]byte(text), &doc) != nil {
-		return
-	}
-	var walk func(any)
-	walk = func(v any) {
-		switch v := v.(type) {
-		case map[string]any:
-			for k, val := range v {
-				if credKeyWhole.MatchString(k) && credentialJSON(val) {
-					line := offset + 1
-					if q, _ := json.Marshal(k); strings.Contains(text, string(q)) {
-						line = offset + strings.Count(text[:strings.Index(text, string(q))], "\n") + 1
-					}
-					*out = append(*out, feedbackMatch{Where: "body", Line: line, Column: 1, Pattern: "a credential in a YAML or JSON document", Text: redacted})
-				}
-				walk(val)
-			}
-		case []any:
-			for _, e := range v {
-				walk(e)
-			}
-		}
-	}
-	walk(doc)
-}
-
-func credentialJSON(v any) bool {
-	switch v := v.(type) {
-	case nil, bool:
-		return false
-	case string:
-		return v != "" && !placeholder.MatchString(v)
-	case map[string]any:
-		return len(v) > 0
-	case []any:
-		return len(v) > 0
-	}
-	return true // a number
 }
 
 func credentialNode(v *yaml.Node) bool {
@@ -676,6 +807,73 @@ func credentialNode(v *yaml.Node) bool {
 	return true // an alias, or anything else
 }
 
+// walkJSON reads text as JSON values through the token stream, never into a map, so every key is seen, a repeated
+// one included, and refuses what walkNode would; a key is placed at the line where it ends. A stream that breaks stops
+// it, keeping what it found before; nesting deeper than maxJSONDepth refuses.
+func walkJSON(text string, offset int, out *[]feedbackMatch) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.UseNumber()
+	lineAt := func() int { return offset + strings.Count(text[:dec.InputOffset()], "\n") + 1 }
+	refuse := func(line int) {
+		*out = append(*out, feedbackMatch{Where: "body", Line: line, Column: 1, Pattern: "a credential in a YAML or JSON document", Text: redacted})
+	}
+	errDeep := errors.New("too deep")
+	// value reads one value; cred is the line of the credential key that holds it, or 0.
+	var value func(cred, depth int) error
+	value = func(cred, depth int) error {
+		if depth > maxJSONDepth {
+			return errDeep
+		}
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			n := 0
+			for dec.More() {
+				inner := 0
+				if t == '{' {
+					k, err := dec.Token()
+					if err != nil {
+						return err
+					}
+					if key, _ := k.(string); credKeyWhole.MatchString(key) {
+						inner = lineAt()
+					}
+				}
+				if err := value(inner, depth+1); err != nil {
+					return err
+				}
+				n++
+			}
+			if _, err := dec.Token(); err != nil {
+				return err
+			}
+			if cred > 0 && n > 0 {
+				refuse(cred)
+			}
+		case string:
+			if cred > 0 && !emptyOrPlaceholder(t) {
+				refuse(cred)
+			}
+		case json.Number:
+			if cred > 0 {
+				refuse(cred)
+			}
+		}
+		return nil
+	}
+	for {
+		if err := value(0, 0); err != nil {
+			if err == errDeep {
+				*out = append(*out, limitMatch(offset+1, fmt.Sprintf("a JSON document nested more than %d deep, which the checker doesn't read", maxJSONDepth)))
+			}
+			return
+		}
+	}
+}
+
 func scanLine(patterns []credentialPattern, where string, n int, line string) []feedbackMatch {
 	var taken [][2]int
 	var out []feedbackMatch
@@ -685,22 +883,35 @@ func scanLine(patterns []credentialPattern, where string, n int, line string) []
 			continue
 		}
 		for _, loc := range p.re.FindAllStringSubmatchIndex(line, -1) {
-			value := line[loc[0]:loc[1]]
-			if len(loc) > 2 && loc[2] >= 0 {
-				value = line[loc[2]:loc[3]]
-			}
-			if p.flag != nil && !p.flag(line[loc[0]:loc[1]], value) {
-				continue
+			span := [2]int{loc[0], loc[1]}
+			if p.words != 0 {
+				words, end := shellWords(line, loc[1], p.words)
+				refused := false
+				for _, w := range words {
+					refused = refused || !wordOK(p.ok, w)
+				}
+				if !refused {
+					continue
+				}
+				span[1] = max(end, loc[1])
+			} else {
+				value := line[loc[0]:loc[1]]
+				if len(loc) > 2 && loc[2] >= 0 {
+					value = line[loc[2]:loc[3]]
+				}
+				if p.flag != nil && !p.flag(line[loc[0]:loc[1]], value) {
+					continue
+				}
 			}
 			overlap := false
 			for _, t := range taken {
-				overlap = overlap || (loc[0] < t[1] && t[0] < loc[1])
+				overlap = overlap || (span[0] < t[1] && t[0] < span[1])
 			}
 			if overlap {
 				continue
 			}
 			start := loc[1] - len(strings.TrimLeft(line[loc[0]:loc[1]], " \t")) // a flag's match starts at the space before it
-			taken = append(taken, [2]int{loc[0], loc[1]})
+			taken = append(taken, span)
 			out = append(out, feedbackMatch{Where: where, Line: n, Column: utf8.RuneCountInString(line[:start]) + 1, Pattern: p.name, Text: redacted})
 		}
 	}

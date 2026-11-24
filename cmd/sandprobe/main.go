@@ -85,7 +85,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	if cmd == "feedback" { // FBK-1: its own flags
-		return feedback(rest, os.Stdin, feedbackTTY(), stdout, stderr)
+		return feedback(rest, os.Stdin, feedbackTTY(stdout), stdout, stderr)
 	}
 	var passthrough []string // PRV-14: docker run options, after "--", passed through unchanged
 	for i, a := range rest {

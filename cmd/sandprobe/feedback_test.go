@@ -343,11 +343,11 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 		"JSON next line":       {"\"password\":\n  \"" + v + "\",", own, 3},
 		"explicit YAML key":    {"? token\n: " + v, own, 3},
 		"folded Authorization": {"Authorization:\n  " + v, own, 3},
-		"Authorization scheme": {"Authorization: Bearer\n  " + v, "an Authorization header", 2},
+		"Authorization scheme": {"Authorization: Bearer\n  " + v, own, 3},
 		"flag continued":       {"mycli --token \\\n  " + v, "a credential flag", 2},
 		"Bearer at line end":   {"the header was Bearer\n  " + v, own, 3},
 		"fenced JSON":          {"```json\n{\"user\": {\"password\"\n  :\n  \"" + v + "\"}}\n```", doc, 3},
-		"fenced escaped key":   {"```json\n{\"pass\\u0077ord\": \"" + v + "\"}\n```", doc, 3},
+		"fenced escaped key":   {"```json\n{\"pass\\u0077ord\": \"" + v + "\"}\n```", "a credential field", 3},
 		"fenced YAML alias":    {"```yaml\nx: &a [1]\ntoken: *a\n```", "a credential field", 4},
 		// the advisor's probes and Codex's exact forms
 		"Codex JSON token":            {"\"token\":\n  \"" + v + "\"", own, 3},
@@ -358,6 +358,19 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 		"second continuation line":    {"token:\n  <redacted>\n  " + v, own, 4},
 		"continued after placeholder": {"token: <redacted>\n  " + v, own, 3},
 		"folded after placeholder":    {"Authorization: Bearer <token>\n  " + v, own, 3},
+		// round 3: a placeholder part never excuses the rest, fences nest by length, and walks read to the end
+		"shell concatenation":  {"export TOKEN=\"<redacted>\"" + v, "a credential field", 2},
+		"single-quoted concat": {"TOKEN='<redacted>'" + v, "a credential field", 2},
+		"YAML words":           {"password: <redacted> " + v, "a credential field", 2},
+		"header concat":        {"Authorization: Bearer <token>" + v, "an Authorization header", 2},
+		"flag concat":          {"mycli --token \"<x>\"" + v, "a credential flag", 2},
+		"Bearer concat":        {"curl -H 'Bearer <x>'" + v, "a bearer token", 2},
+		"continuation concat":  {"token:\n  \"<redacted>\"" + v, own, 3},
+		"nested fences":        {"````md\n```yaml\nx: &k password\n*k : " + v + "\n```\n````", doc, 5},
+		"17th YAML document":   {strings.Repeat("---\nsafe: 1\n", 15) + "---\nx: &k password\n*k : " + v, doc, 34},
+		"Codex duplicate key":  {"```json\n{\n  \"pass\\u0077ord\"\n  :\n  \"" + v + "\",\n  \"password\": null\n}\n```", doc, 4},
+		"escaped key in prose": {"the config had \"pass\\u0077ord\": \"" + v + "\" in it", "a credential field", 2},
+		"HTML entity key":      {"&#112;assword: " + v, "a credential field", 2},
 	}
 	for _, prefix := range []string{"xoxb", "xoxp", "xoxa", "xoxr", "xoxs", "xoxe", "xoxc", "xoxd", "xoxo", "xapp", "xwfp", "xoxe.xoxp", "xoxe.xapp"} {
 		cases["Slack "+prefix] = struct {
@@ -399,8 +412,45 @@ func TestFeedbackRefusesShortCredentials(t *testing.T) {
 	r := fb(t, "{\"user\": {\"password\"\n:\n\""+v+"\"}}\n", "bug", "-title", "whole", "-o", "json")
 	var d refusal
 	if json.Unmarshal([]byte(r.stdout), &d) != nil || r.code != exitUsage || strings.Contains(r.stdout, v) || gh.read("calls") != "" ||
-		len(d.Matches) != 1 || d.Matches[0].Pattern != doc || d.Matches[0].Line != 1 {
+		len(d.Matches) == 0 || d.Matches[0].Pattern != doc || d.Matches[0].Line != 1 {
 		t.Errorf("a whole JSON body: exit %d, %+v", r.code, d)
+	}
+}
+
+// FBK-4: a walk that reaches a limit refuses and names it; it never passes what it didn't read.
+func TestFeedbackWalkLimits(t *testing.T) {
+	pinGH(t, "absent")
+	deepJSON := strings.Repeat("[", maxJSONDepth+1) + strings.Repeat("]", maxJSONDepth+1)
+	var fences []string
+	for n := maxFenceDepth + 5; n >= 3; n-- {
+		fences = append(fences, strings.Repeat("`", n))
+	}
+	closers := slices.Clone(fences)
+	slices.Reverse(closers)
+	deepFences := strings.Join(fences, "\n") + "\nx\n" + strings.Join(closers, "\n")
+	for name, tc := range map[string]struct{ body, limit string }{
+		"JSON depth":   {deepJSON + "\n", "deeper"},
+		"fence depth":  {deepFences + "\n", fmt.Sprintf("fenced blocks nested more than %d deep", maxFenceDepth)},
+		"YAML aliases": {"a: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\n", ""},
+	} {
+		r := fb(t, tc.body, "bug", "-title", "limits", "-o", "json")
+		var d refusal
+		json.Unmarshal([]byte(r.stdout), &d)
+		if tc.limit == "" { // aliases aren't expanded in a node walk, so they reach no limit and aren't a credential
+			if r.code != exitApproval {
+				t.Errorf("%s: exit %d, %+v", name, r.code, d)
+			}
+			continue
+		}
+		if r.code != exitUsage || len(d.Matches) == 0 || !strings.Contains(d.Matches[0].Pattern, tc.limit) {
+			t.Errorf("%s: exit %d, %+v", name, r.code, d)
+		}
+	}
+	// The JSON walk reads tokens: a key repeated later, as null, doesn't hide the first one's value.
+	var out []feedbackMatch
+	walkJSON(`{"password": "abc", "password": null}`, 0, &out)
+	if len(out) != 1 {
+		t.Errorf("a repeated key: %+v", out)
 	}
 }
 
