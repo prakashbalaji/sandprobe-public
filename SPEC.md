@@ -2126,6 +2126,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 | `sandprobe explain <check>` | what a check does, why it matters, its proof, its fix | no |
 | `sandprobe guide` | the agent guide; `-install claude` writes a Claude Code skill, `-install codex` an AGENTS.md block | the skill or block only |
 | `sandprobe schema` | the JSON Schema for OUT-1 | no |
+| `sandprobe feedback bug\|feature\|idea` | shows a public issue for summationai/sandprobe, then files exactly that one with the person's consent (FBK-1, FBK-5) | an issue, only with `-confirm <code>` or a typed yes |
 
 - **AGT-3 Approval.** Outside a terminal, anything that creates, resets or deletes needs `-y`. Without it, `run`
   exits 3 and prints the plan as JSON with `needs_approval: true`. A local proxy for EGR-3 needs `-allow-local-proxy`, or EGR-3 is skipped. An existing box also needs `-attest <provider id>`,
@@ -2761,6 +2762,130 @@ SEC-5 found.
   So PER-5 is always skipped, "no root this run may mark", no marker is placed, and the container is never reset. The
   plan's Marks and Reset lines say none, and `docs/providers/docker.md` says the same.
 
+## Feedback, 24 November 2026
+
+So an agent, or a person, can file a bug, a feature request or an idea as a public issue without sending anything a
+box or a machine holds.
+
+- **FBK-1 One command, one place.** `sandprobe feedback bug|feature|idea -title <one line> -body-file <file, or - for
+  standard input> [-report <report.json>] [-provider <name>] [-o json] [-confirm <code>]` files a public issue on
+  `github.com/summationai/sandprobe` and nowhere else: no other host, repository or service, and no telemetry. It
+  takes no `-y`: FBK-5's code replaces it, and `-y` is a usage error that says so. The
+  title is the kind's prefix (`Bug: `, `Feature: `, `Idea: `), then `-title`. The label is the one the issue forms
+  already use: `bug` for a bug, `enhancement` for a feature or an idea. `-provider` names the provider or run mode the
+  feedback is about, from a fixed list: the native providers, `aws-nitro`, `docker`, `exec` and the shipped recipes.
+  Any other value is a usage error.
+- **FBK-2 What it sends.** The issue body is the `-body-file` text as given, with CRLF read as LF and a leading byte
+  order mark dropped. Then comes FBK-3's summary when `-report` names a report. Then a fixed environment block under
+  the bug-report form's own headings: `### Sandprobe version` (this binary's `Version` and the Go version it was built
+  with) and `### Where you ran it` (`GOOS/GOARCH`, then `-provider`, or else the summary's provider when it isn't
+  `other`). Last is one line saying it was filed with `sandprobe feedback`. Nothing else is sent: no file, path, host
+  name, user name or environment variable. The title is one line of at most 200 characters. The body is valid UTF-8,
+  not blank, and at most 48 KiB. Neither may hold a control character, other than the body's tab and newline, or a
+  Unicode format character, so the preview can't hide or reorder what is sent.
+- **FBK-3 A summary, never the report.** `-report` reads a saved report as ANL-1 does. When that fails, the command
+  is refused with ANL-1's fixed error, and nothing from the file is shown. The summary holds only values from fixed
+  vocabularies: the provider, when FBK-1's list names it, else `other`; whether the run is valid and complete; SCR-2's
+  score and what it is out of, for a valid run; and each check's catalog ID with its result, where a result outside
+  OUT-1's own reads `other`. It never holds a path, a file name, an environment variable's name, a box's name or ID,
+  a run ID or nonce, evidence, a reason, a receipt, a marker, or any other string from the report. A report's names
+  and paths can identify a person's box, and the issue is public. The summary says, as ANL-1 requires, that the saved
+  report was checked for structure only and not re-verified.
+- **FBK-4 Refuse, never redact.** Before anything is shown or contacted, the whole outgoing text is scanned: the
+  title and the body, with the summary and the environment block. When in doubt it refuses, since a refusal costs a
+  rewrite and a leak can't be taken back. It refuses, at any length:
+  - a private key (PEM or PuTTY), a JSON Web Token, a Slack webhook, and these keys and tokens, each known by every
+    prefix its issuer uses: AWS key IDs (`AKIA`, `ASIA` and AWS's other `A???` ID prefixes), GitHub (`ghp_`, `gho_`,
+    `ghu_`, `ghs_`, `ghr_`, `github_pat_`), Anthropic (`sk-ant-`), OpenAI (`sk-`), and Slack (`xox` and any letter,
+    such as `xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`, `xoxs-`, `xoxe-`, and `xapp-`, `xwfp-`, and the rotating
+    `xoxe.xoxp-` and `xoxe.xapp-` forms);
+  - an `Authorization` or `Proxy-Authorization` header with any value, and a `Bearer` value or a `Basic` credential
+    anywhere;
+  - a URL whose user information holds a password, even with an empty user name (`https://:x@host`);
+  - a credential field: a key whose name says it holds a credential (one holding `token`, `secret`, `password`,
+    `passwd`, `passphrase`, `api-key`, `access-key`, `private-key`, `client-key`, `key-data`, `certificate-data`,
+    `credential` or `cookie`, the key `auth`, or `pass` or `pwd` as one word of a longer name such as `DB_PASS` or
+    `MYSQL_PWD`, written with `-`, `_` or nothing between the words, in any case),
+    with any value. That covers YAML, INI, JSON, environment-variable and header forms (`access-token: x`,
+    `aws_secret_access_key = x`, `"refresh_token": "x"`, `AWS_SESSION_TOKEN=x`, `X-Auth-Token: x`), and a command-line
+    flag with such a name (`--token x`).
+  - a value on another line: a credential field, flag or `Authorization` header, or a `Bearer`, whose line ends at
+    the key, its separator, its scheme or a comment, takes the next line that isn't blank or a comment as its value.
+    That covers a YAML value on the next line, JSON's next token, a YAML explicit key (`? token`), and a header's
+    folded continuation. After any line naming a credential, with or without a value, each later line indented deeper
+    than it continues the value, as YAML and folded headers allow, and must be a placeholder too. A YAML block scalar
+    (`token: |` or `>`) is refused outright, whatever follows.
+  - a credential in a document: the person's own body, and each fenced code block in it, is also parsed as YAML
+    (with `gopkg.in/yaml.v3`, this command's one dependency) and, separately, as JSON, since YAML reads most JSON but
+    not a key whose colon is on the next line. In each one that parses, every mapping key named as above, or
+    `Authorization`, is refused unless its value is empty or a placeholder; an alias, a merge, a tag or a non-empty
+    mapping or list as the value is refused. A key's escapes are decoded first, so `"pass\u0077ord"` is `password`. A
+    parse that fails adds nothing, and its error is never shown. This walk only adds refusals to the line rules.
+
+  The only values these let through are obvious placeholders: `<...>`, `[...]`, `$NAME` or `${NAME}`, a mask such as
+  `***` or `xxx`, and `redacted`, `none`, `null`, `nil`, `empty`, `unset`, `hidden`, `masked`, `true`, `false`, `~`
+  or `n/a`. A `Bearer` value may also be an ordinary word, such as `token` or `authentication`, and a `Basic` value
+  is a credential only when it has a digit, `+`, `/`, `=`, or an upper-case letter after its first. Exactly two of
+  Sandprobe's own lines print its Secrets area or category as a key, and they aren't credential fields: `profile`'s
+  `secrets: map[...]; finding IDs [...]` and `compare`'s `  ● Secrets: <a Secrets check's question>`, each matched
+  whole, with only counts, check IDs and the catalog's own questions inside. `secrets: x` or any other line is refused
+  like the rest. Two patterns need
+  a length, since nothing else marks them: a hex string of 32 or more digits, and a base64 string of 32 or more
+  characters with a digit, an upper-case and a lower-case letter. It also refuses home-directory paths:
+  `/Users/<name>`, `/home/<name>`, `C:\Users\<name>`, and this machine's own home directory unless that is `/` or
+  `/root`. Any match refuses the whole issue and exits 2. The refusal names each match's place
+  (the title, or the body's line and column) and its pattern, and shows `[REDACTED]` for the matched text, which it
+  never prints. Sandprobe never rewrites the text: the person or the agent edits it and runs the command again.
+- **FBK-5 Consent to exactly this issue.** A person's explicit consent is bound to exactly what is posted, and it
+  replaces AGT-3's `-y` for this command. FBK-4's scan always comes first: a credential refuses the issue whatever
+  `-confirm` holds.
+  - **Preview.** Without `-confirm`, the command sends nothing and makes no link. It prints the preview: that the
+    issue is PUBLIC, the repository, the gh account it would be filed as (or that it would be a link), the title, the
+    labels and the body. Then it prints a confirmation code, and exits 3. The code is the first 12 hex digits of
+    SHA-256 over a fixed encoding of exactly what would be posted: the repository, the way it goes (`gh` or `link`),
+    the gh login, the labels, the title and the body, as they would reach gh's arguments and standard input. `-o json`
+    doesn't change it.
+  - **Confirm.** `-confirm <code>` files, or prints the link, only when the code equals the code of what it would post
+    now. Otherwise it files nothing and makes no link, and exits 3 with AGT-5's error `feedback.changed`. The error
+    says whether the way it goes changed (the code matches the same issue as a link, but gh is now signed in) or the
+    issue did, and that it must be previewed and approved again. It never prints the new code. An edit, another
+    account, another label, another way, or another Sandprobe version all change the code.
+  - **Terminal.** When standard input and output are both terminals, without `-o json` or `-confirm`, it may ask the
+    person instead, after the preview: "File this public issue as @<login>? Type yes:", or, for a link, "Print the
+    link to file this public issue yourself? Type yes:". It reads the answer from `/dev/tty` and accepts only `yes`.
+    Anything else, or no `/dev/tty`, sends nothing and exits 3.
+  - **Agents.** An agent never answers that prompt and never files on its own judgement. It shows its person the
+    exact title and body, says the issue is public, names the account, and asks ("May I file this public issue as
+    @<login>?"). It runs again with `-confirm <code>` only after a clear yes in the conversation, and changes nothing
+    in between.
+- **FBK-6 Through gh, or a link.** Sandprobe files through `gh` when gh is on PATH and one read-only query,
+  `gh api graphql --hostname github.com -f query=<a fixed query>`, returns the signed-in account's login and its permission on
+  summationai/sandprobe, with the login in GitHub's own form (letters, digits and single hyphens, at most 39). It runs
+  `gh issue create --repo github.com/summationai/sandprobe --title=<title> --body-file -`, with the body on standard
+  input. It adds `--label=<label>` only when that account may triage the repository; an issue from any other account
+  arrives without a label, its kind in its title's prefix. Each value is one argument, never a shell string, and it
+  never adds `--attach`. The repository names
+  its host, so `GH_HOST` and `GH_REPO` can't move it. gh uses its own sign-in: Sandprobe never reads a token, from the
+  environment or from gh, and never prints gh's error output, only its exit status. An issue counts as filed only when
+  gh exits 0 and prints a URL under `https://github.com/summationai/sandprobe/issues/`. Without gh, Sandprobe files
+  nothing. On a confirmed run only (FBK-5) it prints a link that a person opens to file the issue; a preview never
+  prints it, since opening it sends the draft to GitHub. The link is `https://github.com/summationai/sandprobe/issues/new`
+  with `template` and `title`, and the form's own fields. `template` is `bug-report.yml` for a bug, or
+  `feature-request.yml` for a feature or an idea; the form adds its label, where a `labels` parameter would fail for
+  anyone who can't triage. The body and summary go in the form's main field (`actual` or `details`), and the
+  environment goes in `version` and `platform`. Every value is percent-encoded. The link is at most 8,000 characters.
+  A longer one leaves the main field out, and the body and summary are written to a new file only the person can
+  read, whose path is printed, for the person to paste. When gh fails, or exits 0 with no such URL, the command prints
+  the link, says nothing is confirmed filed and to check the repository's issues before opening it, and exits 5.
+- **FBK-7 Output.** In text, the command prints the preview, then the code and what to do with it, or, once
+  confirmed, the issue's URL or the link. `-o json` prints one document: `repo`, `public` (always `true`), `kind`,
+  `title`, `labels`, `body`, `via` (`gh` or `link`) and `filed`. It adds `account`, the gh login, when it goes
+  through gh. A preview adds `needs_approval: true` and `confirm`, the code. A confirmed run adds `url` (the issue's,
+  or the link), `body_file` when one was written, and `note` when gh failed. A refusal under `-o json` is AGT-5's
+  error with code `feedback.refused` and `matches`, each with `where`, `line`, `column`, `pattern` and `text`, which
+  is always `[REDACTED]`. Exit codes: 0 when filed or when the link is printed; 2 for usage (`-y` included) or a
+  refusal; 3 for a preview, a no, or a code that doesn't match; 5 when gh failed.
+
 ## Tests
 
 Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
@@ -2769,6 +2894,7 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 
 | Extension rule | Tests |
 | --- | --- |
+| FBK-1 to FBK-7 | `cmd/sandprobe/feedback_test.go`, with `PATH` pinned in every test to a directory holding a fake `gh` that records the full arguments, standard input and `GH_HOST`/`GH_REPO` of every call, or holding none, so no test can reach GitHub: `TestFeedbackKinds` (each kind's prefix, label, form and main field, through gh and through the link, once confirmed), `TestFeedbackRefusesCredentials` (one refusal per FBK-4 pattern, home paths included, each naming the place and the pattern and never printing the matched text, in text and in `-o json`, with nothing sent and gh never run; ordinary text and placeholders pass), `TestFeedbackPassesOwnOutput` (every check's `explain`, and `scorecard`, `profile` and `assess` of every saved report in text and JSON, and `compare`, pass the scan; `secrets: x`, `SECRETS=`, longer names and an altered own line don't), `TestFeedbackRefusesShortCredentials` (the security reviews of #65: short values in every header, Bearer, Basic, URL, YAML, INI, JSON, environment, flag and prefixed-token form; every Slack prefix; a URL with an empty user; `DB_PASS` and `MYSQL_PWD`; a YAML or JSON value on the next line, a second continuation line, a continuation after a placeholder, a block scalar, an explicit key, a folded `Authorization` header, and credentials found only by the YAML and JSON walks of a fenced block or the whole body, an escaped key among them; through gh and through the link, in text and in `-o json`, with and without a `-confirm` code: each is refused, the value appears in no output, gh is never run, and no link or file is made), `TestFeedbackReportSummary` (a saved report made hostile in the test, with credentials, home paths, variable names and a box name in every free-text field and as its provider, still passes ANL-1; none of them reaches the preview, gh's arguments, its standard input or the link; an edited report gets ANL-1's fixed error), `TestFeedbackTransport` (the exact arguments of the graphql query and of `issue create`, unchanged with `GH_HOST` and `GH_REPO` set; the body on standard input; the label only for an account that can triage; gh absent or not signed in gives the link once confirmed; gh failing or printing no issue URL exits 5 with the link), `TestFeedbackLink` (percent-encoding, the 8,000-character limit, and the body written to a private file when it is longer), `TestFeedbackJSON` (one document with FBK-7's fields; `public` and, through gh, `account`; a login not in GitHub's form means no gh), `TestFeedbackConsent` (a preview prints the code, exits 3, makes no link and never runs `issue create`; the matching code files exactly the previewed title, labels and body; an edited body, another account, gh signed in after a link preview, or a wrong code is refused with `feedback.changed` and nothing filed or linked; `-o json` doesn't change the code; `-y` is a usage error; the terminal prompt accepts only `yes`, and no `/dev/tty` means no filing), `TestFeedbackUsage` (a bad kind, title, body, `-provider` or `-confirm`) |
 | REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing, and `.github/release-version_test.sh` (REL-2's version grammar: `x.y.z` publishes as a full release, `x.y.z-rc.N` as a pre-release never marked Latest, and everything else is refused, a leading `v`, another suffix, a missing part, a second line and an empty version among them); on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
 | ANL-2 terminal escaping | `cmd/sandprobe/scorecard_test.go` `TestPrintableEscapesUnicodeFormatControls` (bidi/isolate/zero-width/BOM and existing control escaping; ordinary Unicode preserved) |
