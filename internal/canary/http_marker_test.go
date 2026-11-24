@@ -179,3 +179,36 @@ func TestHTTPMarkerAckIsBoundedAndNotAnHTTPStatusPass(t *testing.T) {
 		}
 	}
 }
+
+func FuzzHTTPMarkerRequestBound(f *testing.F) {
+	f.Add([]byte("GET /sandprobe/v1/echo/nonce HTTP/1.1\r\nHost: nonce.canary.sandprobe.test\r\nConnection: close\r\n\r\n"))
+	f.Add([]byte("health\n"))
+	f.Add([]byte(strings.Repeat("x", 4096)))
+	f.Fuzz(func(t *testing.T, wire []byte) {
+		r := &countedReader{Reader: bytes.NewReader(wire)}
+		_, _, isHTTP := readTCPMarker(r, "sandprobe.test", 80)
+		max := 64
+		if isHTTP {
+			max = httpMarkerLimit
+		}
+		if r.n > max {
+			t.Fatalf("request read %d bytes, limit %d", r.n, max)
+		}
+	})
+}
+func FuzzHTTPMarkerAckBound(f *testing.F) {
+	var b bytes.Buffer
+	writeHTTPMarkerAckV1(&b, "nonce")
+	f.Add(b.Bytes())
+	f.Add([]byte("HTTP/1.1 403 secret\r\n\r\n"))
+	f.Fuzz(func(t *testing.T, wire []byte) {
+		r := &countedReader{Reader: bytes.NewReader(wire)}
+		err := ReadHTTPMarkerAckV1(r, "nonce")
+		if r.n > httpMarkerLimit+1 {
+			t.Fatalf("ack read %d bytes", r.n)
+		}
+		if err != nil && err.Error() != ErrUnexpectedAck.Error() {
+			t.Fatal("raw error escaped the parser")
+		}
+	})
+}
