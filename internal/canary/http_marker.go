@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"net/http"
+	"net/textproto"
 	"strconv"
 	"strings"
 )
@@ -55,30 +55,39 @@ func readTCPMarker(r io.Reader, domain string, port int) (line, nonce string, is
 		return string(prefix) + rest, "", false
 	}
 	limited.N += httpMarkerLimit - 64
-	req, err := http.ReadRequest(bufio.NewReader(io.MultiReader(strings.NewReader(string(prefix)), br)))
+	request := bufio.NewReader(io.MultiReader(strings.NewReader(string(prefix)), br))
+	line, err := readHTTPLine(request)
 	if err != nil {
 		return "", "", true
 	}
-	defer req.Body.Close()
-	if req.Method != "GET" || req.Proto != "HTTP/1.1" || req.ContentLength != 0 || len(req.TransferEncoding) != 0 || req.Header.Get("Connection") != "close" || !validMarkerHeaders(req.Header) || len(req.Header.Values("Connection")) != 1 || !strings.HasPrefix(req.RequestURI, httpMarkerPath) {
+	parts := strings.Split(line, " ")
+	if len(parts) != 3 || parts[0] != "GET" || parts[2] != "HTTP/1.1" || !strings.HasPrefix(parts[1], httpMarkerPath) {
 		return "", "", true
 	}
-	n := strings.TrimPrefix(req.RequestURI, httpMarkerPath)
+	headers, err := readHTTPHeaders(request)
+	if err != nil || !validMarkerHeaders(headers) || !strings.EqualFold(headers.Get("Connection"), "close") || len(headers.Values("Connection")) != 1 || len(headers.Values("Host")) != 1 {
+		return "", "", true
+	}
+	n := strings.TrimPrefix(parts[1], httpMarkerPath)
 	expected := n + ".canary." + domain
-	if !validHTTPMarker(domain, n) || req.URL.Path != req.RequestURI || !(strings.EqualFold(req.Host, expected) || strings.EqualFold(req.Host, expected+":80")) {
+	if !validHTTPMarker(domain, n) || !(strings.EqualFold(headers.Get("Host"), expected) || strings.EqualFold(headers.Get("Host"), expected+":80")) {
 		return "", "", true
 	}
+
 	return "", n, true
 }
 
 // Forwarding metadata is bounded and ignored: receipt source is always the socket peer.
-func validMarkerHeaders(h http.Header) bool {
+func validMarkerHeaders(h textproto.MIMEHeader) bool {
+	if values := h.Values("Content-Length"); len(values) > 0 && (len(values) != 1 || values[0] != "0") {
+		return false
+	}
 	if len(h) > 16 {
 		return false
 	}
 	for key := range h {
 		switch key {
-		case "Connection", "Accept", "User-Agent", "Via", "Forwarded", "X-Forwarded-For", "X-Forwarded-Proto", "X-Request-Id", "Traceparent", "Tracestate":
+		case "Content-Length", "Host", "Connection", "Accept", "User-Agent", "Via", "Forwarded", "X-Forwarded-For", "X-Forwarded-Proto", "X-Request-Id", "Traceparent", "Tracestate":
 		default:
 			return false
 		}
@@ -100,13 +109,16 @@ func ReadHTTPMarkerAckV1(r io.Reader, nonce string) error {
 	}
 	limited := &io.LimitedReader{R: r, N: httpMarkerLimit + 1}
 	br := bufio.NewReader(limited)
-	res, err := http.ReadResponse(br, nil)
+	line, err := readHTTPLine(br)
 	if err != nil {
 		return ErrUnexpectedAck
 	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		code := res.StatusCode
+	match := httpStatusLine.FindStringSubmatch(line + "\r\n")
+	if match == nil || !strings.HasPrefix(line, "HTTP/1.1 ") {
+		return ErrUnexpectedAck
+	}
+	code, _ := strconv.Atoi(match[1])
+	if code != 200 {
 		if code == 403 || code == 407 {
 			return &ackError{label: "http_status_" + strconv.Itoa(code)}
 		}
@@ -115,16 +127,61 @@ func ReadHTTPMarkerAckV1(r io.Reader, nonce string) error {
 		}
 		return ErrUnexpectedAck
 	}
+	headers, err := readHTTPHeaders(br)
+	if err != nil {
+		return ErrUnexpectedAck
+	}
+
 	expected := "sandprobe:" + nonce + "\n"
-	if res.Proto != "HTTP/1.1" || res.ContentLength != int64(len(expected)) || len(res.TransferEncoding) != 0 || res.Header.Get("Content-Type") != "text/plain" || res.Header.Get("Content-Encoding") != "" || !res.Close {
+	if len(headers.Values("Content-Length")) != 1 || headers.Get("Content-Length") != strconv.Itoa(len(expected)) || len(headers.Values("Transfer-Encoding")) != 0 || len(headers.Values("Content-Type")) != 1 || headers.Get("Content-Type") != "text/plain" || len(headers.Values("Content-Encoding")) != 0 || len(headers.Values("Connection")) != 1 || !strings.EqualFold(headers.Get("Connection"), "close") {
 		return ErrUnexpectedAck
 	}
-	body, err := io.ReadAll(io.LimitReader(res.Body, int64(len(expected)+1)))
-	if err != nil || string(body) != expected {
+	body := make([]byte, len(expected))
+	if _, err := io.ReadFull(br, body); err != nil || string(body) != expected {
 		return ErrUnexpectedAck
 	}
+
 	if _, err = br.ReadByte(); err != io.EOF || limited.N == 0 {
 		return ErrUnexpectedAck
 	}
 	return nil
+}
+
+// This deliberately small wire parser keeps net/http's server stack out of the probe.
+func readHTTPLine(r *bufio.Reader) (string, error) {
+	line, err := r.ReadString('\n')
+	if err != nil || !strings.HasSuffix(line, "\r\n") {
+		return "", ErrUnexpectedAck
+	}
+	return strings.TrimSuffix(line, "\r\n"), nil
+}
+func readHTTPHeaders(r *bufio.Reader) (textproto.MIMEHeader, error) {
+	h := textproto.MIMEHeader{}
+	for count := 0; ; count++ {
+		line, err := readHTTPLine(r)
+		if err != nil {
+			return nil, ErrUnexpectedAck
+		}
+		if line == "" {
+			return h, nil
+		}
+		if count >= 16 {
+			return nil, ErrUnexpectedAck
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || key == "" {
+			return nil, ErrUnexpectedAck
+		}
+		for _, c := range []byte(key) {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c))) {
+				return nil, ErrUnexpectedAck
+			}
+		}
+		for _, c := range []byte(value) {
+			if c != '\t' && (c < 32 || c > 126) {
+				return nil, ErrUnexpectedAck
+			}
+		}
+		h.Add(textproto.CanonicalMIMEHeaderKey(key), strings.Trim(value, " \t"))
+	}
 }

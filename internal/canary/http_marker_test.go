@@ -60,7 +60,7 @@ func TestHTTPMarkerReceiptsAndLegacyCompatibility(t *testing.T) {
 	if n := count(query(t, c, "http-run"), nonce); n.Count != 1 || n.Elsewhere != 0 {
 		t.Fatalf("missing independent HTTP receipt: %+v", n)
 	}
-	forwarded := strings.Replace(markerRequest(t, nonce), "Connection: close", "Connection: close\r\nVia: owned-test\r\nX-Forwarded-For: 203.0.113.7", 1)
+	forwarded := strings.Replace(markerRequest(t, nonce), "Connection: close", "Connection: close\r\nVia: owned-test\r\nContent-Length: 0\r\nX-Forwarded-For: 203.0.113.7", 1)
 	response = httpRoundTrip(t, addr, forwarded)
 	if err := ReadHTTPMarkerAckV1(bytes.NewReader(response), nonce); err != nil {
 		t.Fatal(err)
