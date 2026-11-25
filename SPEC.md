@@ -1119,6 +1119,19 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
   the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
   it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
+- **EVD-15 Metadata-only persistence marker.** The host may explicitly choose `symlink-v1` for PER-5 instead
+  of the default regular file. The frozen planned path is `<root>/.sandprobe-link-<run id>`, distinct from the
+  regular-file namespace. After pinning and verifying the surveyed root, create exclusively a symbolic link
+  whose target text is exactly the public run ID. Never follow it or open its target. Pin the link itself with
+  `O_PATH|O_NOFOLLOW`, verify its type, and read only its bounded link text with `readlinkat(fd, "", ...)`.
+  The name must still identify that pinned link after the metadata read. A matching link after a proven reset
+  shows persistence of run-owned metadata even if the filesystem renumbered its inode; this is not proof of
+  regular-file contents or stable inode identity. A different target, other type, replacement during measurement,
+  unsupported syscall/filesystem or unreadable metadata stays unknown. There is no fallback to reading contents.
+  Absence remains find-only `not_found`, never a pass. Preserve native reset/volume binding and every planned root.
+  Regular-file markers retain their exact inode/length guards. Existing wire fields keep their meaning (marker
+  payload length and placement inode); the distinct planned namespace freezes the selected mechanism. Old graders
+  reject the new namespace rather than treating it as a regular-file proof. Defaults remain regular-file markers.
 - **EVD-14 Bounded policy-readback diagnostics.** EVD-11's optional organization read may report only fixed
   failure categories: authentication, permission, endpoint availability, rate limit, request rejection, service
   availability, timeout, transport or response-schema failure; other errors retain `readback_unavailable`.
@@ -3667,6 +3680,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
+| EVD-15 | `TestLinkMarkerSurvivesRenumberingWithoutFollowingTarget`, `TestLinkMarkerRejectsWrongTypeAndMetadata`, `TestLinkMarkerRejectsConcurrentReplacementAndUnsupportedRead`, `TestLinkMarkerCreationIsExclusiveAndRootBound`, existing `TestRecheckIdentityDiagnostics`, `TestPlanMetadataPersistenceMarker`, `TestMetadataMarkerStillRequiresResetAndVolumeProof`, and `TestMetadataMarkerChangesComparisonContext` |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |
 | EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance; managed HTTP capability failure stops before paid receiver/provider creation |

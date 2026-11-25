@@ -24,7 +24,7 @@ its check was excluded; an exclusion can mask a separate feature or implementati
 | AMP-6 | Host connectivity is not implemented. The handler checks `/dev/vsock` presence, but never connects; a present device yields unknown. A missing device or an exclusion can prevent selection. Neither approval nor device presence alone completes the measurement. |
 | AMP-7 | Requires a Kubernetes API target named by the workload environment and permitted scope. This check makes a TLS handshake, not an authenticated permissions assessment. |
 | AMP-8.blk | Uses sysfs names mapped to `/dev/<name>`, plus explicitly declared custom paths under EVD-13. An existing workload device can be declared with `run exec -block-device-path`; this never attaches a device or reads device data. Do not add a device just to reduce exclusions. |
-| PER-5 | Requires a supported reset, run-owned storage and a safely identifiable run-owned marker. An inode mismatch remains unknown and unread; a claimed persistent volume alone does not prove marker survival. |
+| PER-5 | Requires a supported reset, run-owned storage and a safely identifiable run-owned marker. For the default regular-file marker, an inode mismatch remains unknown and unread. EVD-15 adds an explicit host-API `symlink-v1` alternative: only the run-owned link's bounded metadata is checked, never its target or file contents. Unsupported link operations stay unknown. A claimed persistent volume alone does not prove marker survival. |
 
 For network checks, a connected socket followed by a TLS reset or HTTP error, without an independent canary
 receipt, proves neither delivery nor a refusal. A new protocol must be supported by the deployed canary and

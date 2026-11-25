@@ -88,6 +88,43 @@ func (pc *per5Case) grade() Report {
 	return Grade(pc.m, pc.d, pc.c)
 }
 
+func TestMetadataMarkerStillRequiresResetAndVolumeProof(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mut  func(*per5Case)
+		want string
+	}{
+		{"survived", func(*per5Case) {}, obs.Finding},
+		{"absent", func(pc *per5Case) { pc.check.Marks[0].State = "absent" }, obs.NotFound},
+		{"reset incomplete", func(pc *per5Case) { pc.reset.Done = false }, obs.Unknown},
+		{"volume changed", func(pc *per5Case) {
+			v := pc.reset.Volumes["/data"]
+			v[1].ID = "other-volume"
+			pc.reset.Volumes["/data"] = v
+		}, obs.Unknown},
+		{"unmeasurable metadata", func(pc *per5Case) {
+			pc.check.Marks[0].State = "unknown"
+			pc.check.Marks[0].Why = "unsupported metadata operation"
+		}, obs.Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pc := per5Base("recreate")
+			for i := range pc.m.Marks {
+				pc.m.Marks[i].Path = pc.m.Marks[i].Root + "/" + obs.LinkMarkerPrefix + pc.m.RunID
+				pc.mark.Marks[i].Path = pc.m.Marks[i].Path
+			}
+			tc.mut(pc)
+			r := pc.grade()
+			if !r.Valid || outcome(r, "PER-5").Result != tc.want {
+				t.Fatalf("metadata changed proof requirements: valid=%v outcome=%+v", r.Valid, outcome(r, "PER-5"))
+			}
+			if tc.want == obs.Finding && !strings.Contains(outcome(r, "PER-5").Evidence, "symbolic-link metadata") {
+				t.Fatal("metadata evidence mislabeled as a regular-file measurement")
+			}
+		})
+	}
+}
+
 func TestPER5(t *testing.T) {
 	for _, tc := range []struct {
 		name, model     string

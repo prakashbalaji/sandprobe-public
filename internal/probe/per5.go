@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"sandprobe/internal/obs"
 )
 
@@ -110,9 +112,12 @@ func bootID() string {
 	return strings.TrimSpace(string(b))
 }
 
-// markerName checks a planned marker path is exactly <root>/.sandprobe-<run id>: the probe creates nothing else.
+// markerName accepts only the exact regular-file or EVD-15 link namespace for this run.
 func markerName(root, path, runID string) (string, bool) {
 	name := obs.MarkerPrefix + runID
+	if path == filepath.Join(root, obs.LinkMarkerPrefix+runID) {
+		name = obs.LinkMarkerPrefix + runID
+	}
 	return name, runIDShape.MatchString(runID) && filepath.IsAbs(root) && path == filepath.Join(root, name)
 }
 
@@ -145,6 +150,20 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 	var rst syscall.Stat_t
 	if syscall.Fstat(dfd, &rst) != nil || uint64(rst.Dev) != m.Dev || rst.Ino != m.Ino {
 		return 0, 0, "the root isn't the directory the survey saw"
+	}
+	if name == obs.LinkMarkerPrefix+runID {
+		// EVD-15: symlinkat is exclusive; no target is opened, followed or read.
+		if err := unix.Symlinkat(runID, dfd, name); err != nil {
+			return 0, 0, "the metadata marker can't be created: " + errName(errnoOf(err))
+		}
+		ino, why, absent := linkMarkerProof(dfd, name, runID)
+		if absent {
+			why = "the created metadata marker disappeared"
+		}
+		if why != "" {
+			return 0, 0, why
+		}
+		return ino, int64(len(runID)), ""
 	}
 	fd, err := syscall.Openat(dfd, name, syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_WRONLY|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
@@ -216,6 +235,16 @@ func recheck(m obs.Placed, runID string) (string, string) {
 		return "unknown", "the root can't be opened: " + errName(errnoOf(err))
 	}
 	defer syscall.Close(dfd)
+	if name == obs.LinkMarkerPrefix+runID {
+		_, why, absent := linkMarkerProof(dfd, name, runID)
+		if absent {
+			return "absent", ""
+		}
+		if why != "" {
+			return "unknown", why
+		}
+		return "survived", ""
+	}
 	pfd, err := syscall.Openat(dfd, name, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	switch e := errnoOf(err); {
 	case e == syscall.ENOENT:
@@ -255,3 +284,35 @@ func recheck(m obs.Placed, runID string) (string, string) {
 	}
 	return "survived", ""
 }
+
+// EVD-15: read only the pinned link's bounded metadata, never a target's contents.
+// The post-read name check rejects a replacement during this measurement.
+func linkMarkerProof(dfd int, name, runID string) (uint64, string, bool) {
+	fd, err := syscall.Openat(dfd, name, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if errnoOf(err) == syscall.ENOENT {
+		return 0, "", true
+	}
+	if err != nil {
+		return 0, "the metadata marker can't be pinned: " + errName(errnoOf(err)), false
+	}
+	defer syscall.Close(fd)
+	var st syscall.Stat_t
+	if syscall.Fstat(fd, &st) != nil || st.Ino == 0 || st.Mode&syscall.S_IFMT != syscall.S_IFLNK {
+		return 0, "the metadata marker isn't a symbolic link; target unread", false
+	}
+	buf := make([]byte, len(runID)+1)
+	n, err := readMarkerLink(fd, buf)
+	if err != nil {
+		return 0, "the marker link metadata can't be read: " + errName(errnoOf(err)), false
+	}
+	if n != len(runID) || !bytes.Equal(buf[:n], []byte(runID)) {
+		return 0, "the marker link metadata doesn't match this run; target unread", false
+	}
+	var after unix.Stat_t
+	if unix.Fstatat(dfd, name, &after, unix.AT_SYMLINK_NOFOLLOW) != nil || after.Mode&unix.S_IFMT != unix.S_IFLNK || uint64(after.Dev) != uint64(st.Dev) || after.Ino != st.Ino {
+		return 0, "the metadata marker changed during measurement; target unread", false
+	}
+	return st.Ino, "", false
+}
+
+var readMarkerLink = func(fd int, buf []byte) (int, error) { return unix.Readlinkat(fd, "", buf) }

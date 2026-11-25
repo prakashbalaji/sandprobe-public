@@ -3,9 +3,11 @@ package obs
 // PER-5 and TWN-3: what crosses the box boundary for the marks, the reset and the recheck.
 
 const (
-	MarkSchema    = "sandprobe.mark/1"
-	RecheckSchema = "sandprobe.recheck/1"
-	MarkerPrefix  = ".sandprobe-" // a marker is <root>/.sandprobe-<run id>, holding only the run id (SBX-1)
+	MarkSchema       = "sandprobe.mark/1"
+	RecheckSchema    = "sandprobe.recheck/1"
+	MarkerPrefix     = ".sandprobe-"      // a marker is <root>/.sandprobe-<run id>, holding only the run id (SBX-1)
+	LinkMarkerPrefix = ".sandprobe-link-" // EVD-15: explicit metadata-only marker namespace.
+	LinkMarkerKind   = "symlink-v1"
 )
 
 // Root is a storage root the agent can write, from the survey's read-only inventory: nothing is created to find it.

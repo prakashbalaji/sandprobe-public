@@ -97,6 +97,24 @@ func TestExecuteRejectsInvalidBlockDevicePaths(t *testing.T) {
 	}
 }
 
+func TestPlanMetadataPersistenceMarker(t *testing.T) {
+	s := &obs.Survey{Roots: []obs.Root{{Path: "/data", Dev: 1, Ino: 2}}}
+	st := Storage{Model: "recreate", Volumes: []obs.Volume{{ID: "owned-volume", MountPath: "/data"}}}
+	for _, kind := range []string{"", obs.LinkMarkerKind} {
+		m, _ := Plan(Options{PersistenceMarker: kind}, s, "box-1", st, "203.0.113.10", "canary.test", "pin")
+		prefix := obs.MarkerPrefix
+		if kind == obs.LinkMarkerKind {
+			prefix = obs.LinkMarkerPrefix
+		}
+		if len(m.Marks) != 1 || m.Marks[0].Path != "/data/"+prefix+m.RunID || m.Marks[0].Volume.ID != "owned-volume" {
+			t.Fatal("marker mechanism not frozen in the plan", m.Marks)
+		}
+	}
+	if _, err := Execute(context.Background(), nil, nil, Options{PersistenceMarker: "other"}); err == nil {
+		t.Fatal("unsupported marker reached execution")
+	}
+}
+
 // The survey's Kubernetes API reaches the manifest and the probe's input; a vsock device keeps AMP-6 selected, and
 // without one it's skipped (GRD-3).
 func TestPlanSurvey(t *testing.T) {
