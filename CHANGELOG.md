@@ -49,10 +49,13 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   boolean; any failure leaves the policy unknown, with no fallback. It is a configuration read, and never proves the
   network is enforced (EVD-19).
 
-- Managed raw-evidence artifacts now declare `sandprobe.managed-evidence/2`, separately from public
-  report schemas. This versions the optional host reset-stage diagnostics. Use the matching new managed
-  reader; older strict internal readers cannot consume version2. Historical unversioned evidence remains
-  replayable as legacy version1 without the new stage. No public OUT-1 schema or grading rule changes.
+- Managed raw-evidence artifacts (`standard-evidence.json` and the Nitro bridge's collection response) now declare
+  `sandprobe.managed-evidence/2`, separately from the public report schemas. The version covers the reset failure
+  stage above. This release's readers require version 2 for a live collection, replay unversioned history as version
+  1 only when it has no stage, and refuse an unknown, null or empty version before grading. Readers from 0.3.4 and
+  earlier don't check the version: they refuse an artifact that carries a stage, and their Nitro replay accepts a
+  version 2 artifact with no stage as if it were unversioned. Use this release's reader for this release's
+  artifacts. No public report schema or grading rule changed (EVD-20).
 
 ## 0.3.4 (2026-11-24)
 

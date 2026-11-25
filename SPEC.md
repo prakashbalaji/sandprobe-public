@@ -1138,8 +1138,10 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   they remain readable when they lack the new stage. An unknown, null or incompatible version is rejected,
   never retried or downgraded. Live Nitro collection requires version2. Retrospective finalization carries
   the evidence version into its strict Go request; an unversioned/version1 request containing a nonempty
-  failure stage is rejected before grading. Empty diagnostics retain legacy replay compatibility. Old strict
-  internal readers cannot consume version2; use the collector's matching new reader. A version is a format
+  failure stage is rejected before grading. Empty diagnostics retain legacy replay compatibility. Readers
+  from 0.3.4 and earlier don't check the version, so it is no boundary for them: their strict Go decoder refuses an
+  envelope that carries a failure stage, but their Nitro replay unwraps the envelope, drops `schema`, and finalizes
+  a version2 envelope with no stage as if it were unversioned. Use the collector's matching new reader. A version is a format
   declaration, never authentication, freshness, attestation or positive security evidence.
 - **EVD-11 Organization network-policy readback.** The managed Daytona collector may make one bounded
   native organization read using only the organization ID freshly verified against its own sandbox's
