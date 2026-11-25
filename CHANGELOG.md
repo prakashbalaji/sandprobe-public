@@ -38,12 +38,18 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   does. SEC-4, EGR-3, AMP-6 and AMP-7 are always off, whatever the recipe's header says, unless you turn one on by
   name with `-provider-endpoints`. The report's `run.provider` is `recipe`, and a new record, `run.recipe`, holds
   `own: true` and the SHA-256 of the recipe. Every command that reads a saved report refuses one whose record is
-  missing, misplaced or malformed. The record is part of `sandprobe/6`. `-provider` isn't accepted with `-recipe`.
+  missing, misplaced or malformed. A report with the record declares `sandprobe/7`, which this release reads and
+  0.3.3 refuses; every other report stays `sandprobe/6`. `compare` treats two reports whose records differ, or one
+  with the record against one without, as a changed setup and exits 5. `-provider` isn't accepted with `-recipe`.
   [docs/providers/recipe.md](docs/providers/recipe.md) explains how to write one, and
   `examples/recipes/docker-template.sh` is a complete example on local Docker (RCP-4).
 - A `run kubernetes` report now lists the recipe's create, delete and last gone answer in `provider_calls`, each
   with the recipe's SHA-256 (PRV-3, RCP-2).
 - A recipe whose header holds a value that isn't printable ASCII, or is over 400 characters, is refused (RCP-1).
+- What a recipe writes to fd 3, `run kubernetes`'s included, is shown and recorded as printable ASCII only, and only
+  its first 4 KiB is kept: fd 3 is now a pipe Sandprobe drains, so a recipe that floods it grows nothing (RCP-1).
+- The cap on a command's captured output now holds in memory. It was applied only to writes made one at a time, so
+  a recipe, a box or a provider CLI that printed without end could grow Sandprobe's memory.
 
 ## 0.3.2 (2026-11-24)
 

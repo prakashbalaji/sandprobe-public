@@ -106,7 +106,8 @@ Your recipe speaks through three channels, and Sandprobe treats each differently
   there.
 - **Standard error is thrown away.** Tools print tokens and signed URLs there, so Sandprobe never shows it.
 - **File descriptor 3 is your message to the person.** When a function fails, Sandprobe shows what the recipe wrote
-  to fd 3, and only that, cut to its last 300 characters.
+  to fd 3, and only that, cut to its last 300 characters. Sandprobe keeps the first 4 KiB written there and discards
+  the rest. It shows printable ASCII only: a newline or tab becomes a space, and every other byte is dropped.
 
 Write messages with a small helper, and run every tool with fd 3 closed, so that only your recipe can write a message:
 
@@ -128,11 +129,13 @@ Never write a credential to fd 3.
   time.
 - The record is removed only when `sp_gone` exits 0. Otherwise the run exits 7 and names the ID and the record.
   Delete the box with your provider's own tool, by that ID, and then remove the record.
-- With `addressed-by: name`, `sp_whois` prints the ID that holds the name now. Sandprobe calls it before every call
-  and sends nothing more to the box once the answer isn't the ID the create returned. The report says what that
-  check can't rule out.
-- Sandprobe gives `sp_delete` and `sp_gone` only the ID. What they do with it is your code, so "confirmed gone" in the
-  report means your `sp_gone` said so. Make it answer 0 only on a positive "not found".
+- With `addressed-by: name`, `sp_whois` prints the ID that holds the name now. Sandprobe calls it before each
+  `sp_shell` and before `sp_delete`, and makes neither call once the answer isn't the ID the create returned.
+  `sp_gone` still runs then, to check that the box with that ID is absent. The report says what that check can't
+  rule out.
+- Sandprobe gives `sp_delete` and `sp_gone` the ID, with the name and the target that every call gets, and requires
+  them to act only on that ID. It can't enforce what your code does with them, so "confirmed gone" in the report
+  means your `sp_gone` said so. Make it answer 0 only on a positive "not found".
 
 ## Start the box from your template
 
@@ -209,8 +212,9 @@ recipe of your own: only Sandprobe's own reviewed scope for a provider can say t
   "recipe": {"own": true, "sha256": "<64 hex>"}
   ```
 
-  `sha256` is of the recipe's bytes that ran. A saved report whose record is missing, misplaced or malformed is
-  refused by every command that reads reports.
+  `sha256` is of the recipe's bytes that ran. A report with the record declares `sandprobe/7`; every other report
+  stays `sandprobe/6`. A saved report whose record is missing, misplaced or malformed is refused by every command
+  that reads reports. `sandprobe compare` treats two reports whose records differ as a changed setup and exits 5.
 - `provider_calls` lists your recipe's create, delete and last gone answer. Each names the recipe by its SHA-256, for
   example `own recipe sha256:<64 hex> sp_create`, with the exit code and the box's ID.
 - `cleanup.residual` names the SHA-256 and your header's `provider:` line as the recipe's own word, quotes the
