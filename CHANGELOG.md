@@ -12,6 +12,11 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   Info or High, and a saved card doesn't record which, so a saved card that leaves one off its findings is refused
   rather than read as green (SCR-7).
 
+- Add `examples/modal/bridge.py`, a short script that lets `run exec` probe a throwaway Modal sandbox of your own: it
+  creates the sandbox, opens `sh` in it through `Sandbox.exec`, and terminates it by the ID create returned. It acts
+  only on the one live sandbox of its app with the recorded tag and ID, cleans up after any failure, prints no SDK
+  text, and starts no stdin call once the remote has ended (FIX-10). `docs/providers/modal.md` shows the loop with it.
+
 ## 0.3.1 (2026-11-24)
 
 - `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that
