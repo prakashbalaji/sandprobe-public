@@ -54,7 +54,8 @@ what the agent can reach inside the box, so several categories read red by desig
   connection and then applies your network policy. A connection the proxy accepted isn't a refusal, so Sandprobe
   reports HTTPS and TCP 22, 80 and 8080 as unproven, not blocked. Outbound UDP is off by default, and DNS goes through
   Docker's resolver.
-- **Cloud access** reads "Not tested", as on every `run exec` without `-provider-endpoints`.
+- **Cloud access** reads "Not tested" with the commands above, which name neither `-provider` nor
+  `-provider-endpoints`.
 
 So read the report as what an agent can do inside its microVM, and Docker's own documentation for what keeps it
 from your machine. Sandprobe doesn't test the microVM boundary.
