@@ -75,7 +75,7 @@ func shippedRecipe(name string) (*host.Recipe, error) {
 // ownRecipe loads a person's own recipe file (run -recipe, RCP-4). It opens the path once, without following a symlink
 // at its last component and without blocking (so a pipe there can't hang the open), then checks the descriptor it
 // opened, not the path: a regular file of at most 64 KiB, read through that bound. Those bytes are the only ones
-// hashed and run. The error is fixed, and echoes nothing from the file.
+// hashed and run. That error is fixed; a parse error names at most a header key (host.ParseRecipe).
 func ownRecipe(path string) (*host.Recipe, error) {
 	fix := "sandprobe plan -recipe <file> (docs/providers/recipe.md)"
 	bad := fail("usage", "-recipe takes a regular file of at most 64 KiB, named itself and not through a symlink (RCP-4)", fix, exitUsage)

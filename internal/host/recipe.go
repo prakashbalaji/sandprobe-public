@@ -85,7 +85,8 @@ func (r *Recipe) RunProvider() string {
 	return r.Name
 }
 
-// ParseRecipe checks a recipe's header and functions (RCP-1).
+// ParseRecipe checks a recipe's header and functions (RCP-1). Its errors echo nothing from the recipe but a header
+// key's own name, lowercase letters and hyphens, cut to 32 characters: a person's own file reaches it too (RCP-4).
 func ParseRecipe(name string, text []byte) (*Recipe, error) {
 	if len(text) > RecipeMax {
 		return nil, fmt.Errorf("the recipe is over %d KiB", RecipeMax>>10)
@@ -103,7 +104,7 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 			break
 		}
 		if seen[m[1]] {
-			return nil, fmt.Errorf("the recipe's header names %s twice", m[1])
+			return nil, fmt.Errorf("the recipe's header names %.32s twice", m[1])
 		}
 		seen[m[1]] = true
 		if !recipeLine.MatchString(m[2]) { // RCP-1: plans and reports show a header's values
@@ -134,12 +135,12 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 	}
 	for _, id := range r.Exclusions {
 		if !excludable[id] {
-			return nil, fmt.Errorf("the recipe excludes %s, which only a provider's endpoints may exclude (GRD-3)", id)
+			return nil, errors.New("the recipe's exclusions name something other than SEC-4, EGR-3, AMP-6 and AMP-7, the checks a provider's endpoints may exclude (GRD-3)")
 		}
 	}
 	for _, e := range r.Env {
 		if !recipeEnv.MatchString(e) || e == "SANDPROBE_BOX" || e == "SANDPROBE_NAME" || e == "SANDPROBE_TARGET" {
-			return nil, fmt.Errorf("the recipe's env names %q, not a SANDPROBE_ setting of its own", e)
+			return nil, errors.New("the recipe's env names something that isn't a SANDPROBE_ setting of its own")
 		}
 	}
 	need := []string{"sp_ready", "sp_create", "sp_shell", "sp_delete", "sp_gone"}

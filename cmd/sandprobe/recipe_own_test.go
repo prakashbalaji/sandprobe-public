@@ -134,13 +134,16 @@ func TestOwnRecipeFile(t *testing.T) {
 		"no provider":       write("noprov.sh", strings.Replace(good, "# provider: modal\n", "", 1)),
 		"an escape":         write("esc.sh", strings.Replace(good, "provider: modal", "provider: mo\x1b[2Jdal", 1)),
 		"excludes SEC-1":    write("sec1.sh", ownHeader("# exclusions: SEC-1\n")+ownBody),
+		"excludes a marker": write("excl.sh", ownHeader("# exclusions: SEC-4 MARKER-IN-THE-FILE\n")+ownBody),
+		"env, a marker":     write("env.sh", ownHeader("# env: MARKER-IN-THE-FILE\n")+ownBody),
+		"a long key":        write("key.sh", ownHeader("# "+strings.Repeat("k", 200)+": x\n")+ownBody),
 		"name, no sp_whois": write("name.sh", strings.Replace(good, "addressed-by: id", "addressed-by: name", 1)),
 	} {
 		for _, mode := range []string{"text", "json"} {
 			var out, errs bytes.Buffer
 			code := run([]string{"plan", "-recipe", p, "-no-canary", "-o", mode}, &out, &errs)
 			said := out.String() + errs.String()
-			if code != exitUsage || strings.Contains(said, "MARKER-IN-THE-FILE") || strings.Contains(said, "\x1b") {
+			if code != exitUsage || strings.Contains(said, "MARKER-IN-THE-FILE") || strings.Contains(said, "\x1b") || strings.Contains(said, strings.Repeat("k", 33)) {
 				t.Errorf("%s (%s): exit %d, %q", name, mode, code, said)
 			}
 			if mode == "json" && !strings.Contains(out.String(), `"error": "usage"`) {
@@ -479,6 +482,36 @@ func TestOwnRecipeDocker(t *testing.T) {
 	if j, _ := filepath.Glob(filepath.Join(configDir(), "*.state")); len(j) != 0 {
 		t.Errorf("records left: %v", j)
 	}
+	// RCP-4: a copy whose header lists one exclusion still runs with all four off, each skip opt-in in the manifest.
+	fewer := filepath.Join(t.TempDir(), "fewer.sh")
+	if !bytes.Contains(text, []byte("# exclusions: SEC-4 EGR-3 AMP-6 AMP-7\n")) {
+		t.Fatal("the example's header no longer lists the four exclusions")
+	}
+	os.WriteFile(fewer, bytes.Replace(text, []byte("# exclusions: SEC-4 EGR-3 AMP-6 AMP-7\n"), []byte("# exclusions: SEC-4\n"), 1), 0o644)
+	dir = t.TempDir()
+	out.Reset()
+	errs.Reset()
+	if code := run([]string{"run", "-recipe", fewer, "-as", "nobody", "-no-canary", "-y", "-o", "json", "-out", dir}, &out, &errs); code != exitPartial {
+		t.Fatalf("a header with one exclusion: exit %d: %s", code, errs.String())
+	}
+	files, _ = filepath.Glob(filepath.Join(dir, "sandprobe-recipe-*.json"))
+	if len(files) != 1 {
+		t.Fatalf("reports: %v", files)
+	}
+	if d, err = analysis.Load(files[0]); err != nil || !d.Grade.Valid || len(d.Manifest.SkipKinds) != 4 {
+		t.Fatalf("a header with one exclusion: %v, kinds %v", err, d.Manifest.SkipKinds)
+	}
+	for _, id := range host.RecipeDefaultExclusions {
+		if _, skipped := d.Manifest.Skipped[id]; !skipped || d.Manifest.SkipKinds[id] != obs.SkipOptIn || slices.Contains(d.Manifest.Selected, id) {
+			t.Errorf("a header with one exclusion: %s ran, or its kind is %q", id, d.Manifest.SkipKinds[id])
+		}
+	}
+	for _, c := range d.Checks {
+		if slices.Contains(host.RecipeDefaultExclusions, c.ID) && c.Result != obs.Skipped {
+			t.Errorf("a header with one exclusion: %s is %s", c.ID, c.Result)
+		}
+	}
+	gone(d.Run.Box.ProviderID)
 	// A template that isn't a local image stops at sp_ready, before any plan: nothing is pulled or created.
 	t.Setenv("SANDPROBE_TEMPLATE", "sandprobe-no-such-template:none")
 	errs.Reset()
