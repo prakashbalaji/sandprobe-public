@@ -42,3 +42,8 @@ is a persistence finding, not a pass or a claim of regular-file content identity
 the selected mechanism remains visible in the plan and comparisons. If no marker can be placed, Sandprobe records
 the placement failure and avoids an unnecessary reset. Incomplete resets may report a bounded host-stage label;
 provider error messages and credentials are never used as that label.
+
+The optional Daytona organization-default policy readback is separate from the standard 28 checks. EVD-19 uses
+Daytona's documented sandbox-ID organization read after fresh run ownership verification, rather than an
+account-level organization read. A response is observed only with the matching organization and a strict boolean;
+a rejected or unverifiable response remains unknown. It never proves effective network enforcement.
