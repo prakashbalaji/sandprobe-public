@@ -1,6 +1,6 @@
 # Modal: `run modal`
 
-**Status:** Beta. Last validated: pending. [All providers](README.md)
+**Status:** Beta. Last validated: 25 Nov 2026, `run modal` with the code released as 0.3.7. [All providers](README.md)
 
 `run modal` creates one Modal Sandbox with Modal's defaults in your own workspace (root, open egress, CPU), probes it,
 terminates it by its ID and confirms it's gone (PRV-18).
@@ -25,6 +25,10 @@ sandprobe run modal -y
 - The App `sandprobe` and the built image stay in your workspace. `modal app stop sandprobe` removes the App.
 - Cloud access is not applicable and the score is out of five: SEC-4, EGR-3, AMP-6 and AMP-7 would contact endpoints
   Modal owns, and PRV-5 excludes them.
+
+- A run is expected to finish incomplete and exit 5: as root with `CAP_SYS_PTRACE`, AMP-1, AMP-4 and AMP-8's block
+  device check end unknown, as they did on 25 Nov. The score and reports are still written. A run that couldn't be
+  cleared also exits 5, and prints no score.
 
 It tests Modal's defaults, so a low score is a starting point. To test a sandbox set up the way your agents run, use
 [`run exec`](#probe-your-own-modal-sandbox-with-run-exec), where the fixes below were proven.

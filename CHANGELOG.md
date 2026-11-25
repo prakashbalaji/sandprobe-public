@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.7 (2026-11-25)
 
 - `sandprobe run modal -y` is built in. It makes one Modal Sandbox with Modal's defaults in the workspace
   `SANDPROBE_MODAL_WORKSPACE` names, probes it through the hosted canary, terminates it by its ID and confirms it's
