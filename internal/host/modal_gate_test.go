@@ -2,11 +2,14 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	pb "github.com/modal-labs/modal-client/go/proto/modal_proto"
 	"google.golang.org/grpc"
+
+	"sandprobe/internal/obs"
 )
 
 // POC-1: no call but the auth exchange reaches Modal until the server names the operator's workspace; another workspace's
@@ -42,5 +45,34 @@ func TestWorkspaceGate(t *testing.T) {
 		if _, err := (&workspaceGate{want: "example-ws"}).stream(ctx, nil, nil, "x", nil); err == nil {
 			t.Error("a stream ran before the workspace was verified")
 		}
+	}
+}
+
+// PRV-18: the 10 Nov default sandbox's own findings clear the gate; any other name or path, or a line or document it
+// can't read, trips it.
+func TestModalStop(t *testing.T) {
+	const names, reads = "secret-shaped names in the agent's environment, values never read: ", "the agent can read "
+	for name, c := range map[string]struct {
+		obs  obs.Observation
+		trip bool
+	}{
+		"GPG_KEY":            {obs.Observation{ID: "SEC-1", Result: obs.Finding, Evidence: names + "GPG_KEY", ObservedNames: []string{"GPG_KEY"}}, false},
+		"the twin":           {obs.Observation{ID: "SEC-1", Result: obs.Finding, Evidence: names + "SANDPROBE_TWIN"}, false},
+		"another name":       {obs.Observation{ID: "SEC-1", Result: obs.Finding, Evidence: names + "GPG_KEY, MODAL_TOKEN"}, true},
+		"only in the list":   {obs.Observation{ID: "SEC-1", Result: obs.Finding, Evidence: names + "GPG_KEY", ObservedNames: []string{"MODAL_TOKEN"}}, true},
+		"unreadable names":   {obs.Observation{ID: "SEC-1", Result: obs.Finding, Evidence: "something else"}, true},
+		"shadow":             {obs.Observation{ID: "SEC-3", Result: obs.Finding, Evidence: reads + "/etc/shadow (opened, never read)"}, false},
+		"another file":       {obs.Observation{ID: "SEC-3", Result: obs.Finding, Evidence: reads + "/etc/shadow, /root/.netrc (opened, never read)"}, true},
+		"unreadable paths":   {obs.Observation{ID: "SEC-3", Result: obs.Finding, Evidence: ""}, true},
+		"a pass":             {obs.Observation{ID: "SEC-3", Result: obs.Pass}, false},
+		"some other finding": {obs.Observation{ID: "SEC-2", Result: obs.Finding, Evidence: "x"}, false},
+	} {
+		b, _ := json.Marshal(obs.Doc{Observations: []obs.Observation{c.obs}})
+		if got := ModalStop(b); (got != "") != c.trip {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+	if ModalStop([]byte("{")) == "" {
+		t.Error("a document that doesn't parse cleared the gate")
 	}
 }

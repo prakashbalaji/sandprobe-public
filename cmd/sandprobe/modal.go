@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -164,6 +166,10 @@ func runModal(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 	if run == nil {
 		return 0, fail("provider_error", err.Error(), cleanup, failExit(cleaned))
 	}
+	tag := box.Tags["sandprobe-run"]
+	if code, stopped, err := modalStopped(run, tag, started, cleanup, cleaned, stderr); stopped {
+		return code, err
+	}
 	d := report.Build(run, report.Meta{Version: Version, Provider: "modal", BoxName: box.ID(), CreatedBySandprobe: true, StartedAt: started, Duration: time.Since(started), Calls: box.Calls, Cleanup: cleanup, Residual: host.ModalResidual})
 	code, reportErr := finish(o, r, d, cleaned)
 	if reportErr != nil {
@@ -176,4 +182,46 @@ func runModal(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
 		return exitPartial, nil
 	}
 	return code, nil
+}
+
+// exitHeld is a stop case (POC-5, PRV-18): only a private note is kept, and no report.
+const exitHeld = 8
+
+// modalIncident is all that stays of a run that tripped the stop gate: the rule, the times and the cleanup. The rule
+// holds names or paths, never a value.
+type modalIncident struct {
+	Rule    string    `json:"rule"`
+	Started time.Time `json:"started"`
+	At      time.Time `json:"at"`
+	Cleanup string    `json:"cleanup"`
+}
+
+// modalStopped is PRV-18's gate, after the sandbox's deletion and before any report exists. A tripped gate keeps the
+// private note alone and exits 8, or 7 if the sandbox isn't confirmed gone; neither the terminal nor -o json repeats
+// what was seen. Evidence that can't clear the gate writes no report either.
+func modalStopped(run *host.Run, tag string, started time.Time, cleanup string, cleaned bool, stderr io.Writer) (code int, stopped bool, err error) {
+	// The gate first, so a trip never reads "run it again"; a document that doesn't parse holds nothing to gate on.
+	_, perr := obs.ParseDoc(run.Doc)
+	if rule := host.ModalStop(run.Doc); perr == nil && rule != "" {
+		path := filepath.Join(configDir(), "modal-"+tag+".incident.json")
+		b, _ := json.MarshalIndent(modalIncident{Rule: rule, Started: started.UTC(), At: time.Now().UTC(), Cleanup: cleanup}, "", "  ")
+		kept := "only a private note was kept: " + path
+		if werr := os.WriteFile(path, append(b, '\n'), 0o600); werr != nil {
+			kept = "the private note couldn't be written to " + path
+		}
+		code = exitHeld
+		if !cleaned {
+			code = exitCleanup
+		}
+		return code, true, fail("stopped", "the sandbox held a credential surface that neither the image nor Sandprobe put there, which may be Modal's own, so no report was written; "+kept+"; "+cleanup,
+			"don't run it again; report it privately to Modal, as its security page says", code)
+	}
+	why := host.ModalUnsound(run.Evidence, run.Report.Valid, run.Report.Invalid)
+	if perr != nil {
+		why = "the probe's document doesn't parse"
+	}
+	if why != "" {
+		return failExit(cleaned), true, fail("provider_error", "the run can't be cleared ("+why+"), so no report was written; "+cleanup, "run it again", failExit(cleaned))
+	}
+	return 0, false, nil
 }

@@ -19,6 +19,9 @@ sandprobe run modal -y
   is for another workspace, nothing is created.
 - The sandbox has a 15-minute timeout as a spend backstop. A private journal in `~/.config/sandprobe` names it until
   it's confirmed gone; exit 7 names that journal.
+- The image and Sandprobe put no credential in the sandbox but the image's own `/etc/shadow` and `GPG_KEY`. If the probe
+  sees any other, it may be Modal's own: the run deletes the sandbox, writes no report, keeps a private note and exits
+  8. Don't run it again; report it privately to Modal.
 - The App `sandprobe` and the built image stay in your workspace. `modal app stop sandprobe` removes the App.
 - Cloud access is not applicable and the score is out of five: SEC-4, EGR-3, AMP-6 and AMP-7 would contact endpoints
   Modal owns, and PRV-5 excludes them.

@@ -5,10 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"sandprobe/internal/grade"
+	"sandprobe/internal/host"
+	"sandprobe/internal/obs"
 )
 
 // PRV-18, AGT-3: the plan and an unapproved run read no token and make no SDK call, whatever the environment holds; an
@@ -80,5 +87,56 @@ func TestModalCleanupBudget(t *testing.T) {
 	}
 	if deleteModal(&modalCleanupFake{err: errors.New("refused")}) == nil {
 		t.Fatal("a failed delete was ignored")
+	}
+}
+
+// PRV-18, AGENTS rule 7: a trip keeps only the private note, writes no report, prints none of what was seen and exits
+// 8, or 7 when the deletion isn't confirmed; evidence that can't clear the gate exits 5, with no note and no report.
+func TestModalStopped(t *testing.T) {
+	doc := func(id, evidence string) []byte {
+		b, _ := json.Marshal(obs.Doc{Observations: []obs.Observation{{ID: id, Result: obs.Finding, Evidence: evidence}}})
+		return b
+	}
+	sound := obs.CanaryEvidence{Live: true, ReceiptsRead: true}
+	for name, c := range map[string]struct {
+		doc     []byte
+		ev      obs.CanaryEvidence
+		valid   bool
+		cleaned bool
+		code    int // 0: the run goes on to its report
+		note    bool
+	}{
+		"the image's own":       {doc("SEC-3", "the agent can read /etc/shadow (opened, never read)"), sound, true, true, 0, false},
+		"a provider credential": {doc("SEC-3", "the agent can read /etc/shadow, /MARKER/token (opened, never read)"), sound, true, true, exitHeld, true},
+		"a name we can't place": {doc("SEC-1", "secret-shaped names in the agent's environment, values never read: GPG_KEY, MARKER_TOKEN"), sound, true, true, exitHeld, true},
+		"not confirmed gone":    {doc("SEC-3", "the agent can read /MARKER/token (opened, never read)"), sound, true, false, exitCleanup, true},
+		"tripped and unsound":   {doc("SEC-3", "the agent can read /MARKER/token (opened, never read)"), obs.CanaryEvidence{}, false, true, exitHeld, true},
+		"canary not read":       {doc("SEC-3", "the agent can read /etc/shadow (opened, never read)"), obs.CanaryEvidence{Live: true}, true, true, exitPartial, false},
+		"invalid":               {doc("SEC-3", "the agent can read /etc/shadow (opened, never read)"), sound, false, true, exitPartial, false},
+		"unparseable":           {[]byte("{"), sound, true, true, exitPartial, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			os.MkdirAll(configDir(), 0o700)
+			code, stopped, err := modalStopped(&host.Run{Doc: c.doc, Evidence: c.ev, Report: grade.Report{Valid: c.valid}}, "tag1", time.Now(), "the cleanup", c.cleaned, io.Discard)
+			if stopped != (c.code != 0) || code != c.code || (err != nil) != stopped {
+				t.Fatalf("exit %d, stopped %v, %v", code, stopped, err)
+			}
+			if err != nil && strings.Contains(fmt.Sprintf("%+v %s", err, err), "MARKER") {
+				t.Errorf("the error repeats what was seen: %v", err)
+			}
+			path := filepath.Join(configDir(), "modal-tag1.incident.json")
+			b, rerr := os.ReadFile(path)
+			if (rerr == nil) != c.note {
+				t.Fatalf("note: %v", rerr)
+			}
+			if c.note {
+				st, _ := os.Stat(path)
+				if st.Mode().Perm() != 0o600 || !strings.Contains(string(b), "MARKER") || !strings.Contains(string(b), "the cleanup") {
+					t.Errorf("%v %s", st.Mode(), b)
+				}
+			}
+		})
 	}
 }

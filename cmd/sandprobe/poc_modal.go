@@ -43,7 +43,6 @@ const (
 	pocApp          = "sandprobe"
 	pocImage        = "python:3.12-slim-bookworm"
 	pocSidecarImage = "alpine:3.21"
-	exitHeld        = 8 // POC-5: a stop case; only the incident note is kept
 )
 
 func init() { pocCmd = pocMain }
@@ -220,16 +219,16 @@ func pocRun(o opts, r runFlags, stderr io.Writer) (int, error) {
 			return err
 		}
 		rec.Survey, rec.Manifest, rec.Input, rec.Doc, rec.Evidence = run.Survey, run.Manifest, run.Input, run.Doc, run.Evidence
-		if why := evidenceUnsound(run.Evidence, run.Report.Valid, run.Report.Invalid); why != "" {
+		if why := host.ModalUnsound(run.Evidence, run.Report.Valid, run.Report.Invalid); why != "" {
 			return errors.New("the gate can't clear this setup, so nothing more ran: " + why) // never a clear on no evidence
 		}
 		if rule := host.ModalGate(setup, twin, run.Evidence.Receipts, run.Evidence.Elsewhere); rule != "" {
 			return &held{rule}
 		}
-		if unknownNames := unplacedNames(run.Doc, names); len(unknownNames) > 0 {
+		if unknownNames := host.ModalUnplacedNames(run.Doc, names); len(unknownNames) > 0 {
 			return &held{"SEC-1 names whose source POC-7 can't establish: " + strings.Join(unknownNames, ", ")}
 		}
-		if creds := unexpectedCreds(run.Doc); len(creds) > 0 { // anything but the image's own shadow file: Modal's? (POC-5)
+		if creds := host.ModalUnexpectedCreds(run.Doc); len(creds) > 0 { // anything but the image's own shadow file: Modal's? (POC-5)
 			return &held{"SEC-3 credential files beyond the image's own /etc/shadow: " + strings.Join(creds, ", ")}
 		}
 		ps, err := processNames(ctx, box) // names only: which processes SEC-2 and SEC-5 saw (POC-7)
@@ -555,48 +554,6 @@ func imageEnvNames(image string) ([]string, error) {
 	return names, nil
 }
 
-// unplacedNames are SEC-1's names that neither the image declares nor the host set (it sets SANDPROBE_TWIN only).
-func unplacedNames(doc []byte, image []string) []string {
-	d, err := obs.ParseDoc(doc)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, o := range d.Observations {
-		if o.ID != "SEC-1" || o.Result != obs.Finding {
-			continue
-		}
-		_, list, _ := strings.Cut(o.Evidence, "values never read: ")
-		for n := range strings.SplitSeq(list, ", ") {
-			if n != "" && !contains(image, n) && n != "SANDPROBE_TWIN" {
-				out = append(out, n)
-			}
-		}
-	}
-	return out
-}
-
-// unexpectedCreds are SEC-3's readable credential paths other than the image's own /etc/shadow.
-func unexpectedCreds(doc []byte) []string {
-	d, err := obs.ParseDoc(doc)
-	if err != nil {
-		return []string{"(the document didn't parse)"}
-	}
-	var out []string
-	for _, o := range d.Observations {
-		if o.ID != "SEC-3" || o.Result != obs.Finding {
-			continue
-		}
-		list := strings.TrimSuffix(strings.TrimPrefix(o.Evidence, "the agent can read "), " (opened, never read)")
-		for p := range strings.SplitSeq(list, ", ") {
-			if p != "/etc/shadow" {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
 // processNames is every visible process's name, from /proc/<pid>/comm: metadata, never arguments or environment.
 func processNames(ctx context.Context, box *host.ModalBox) (map[string]string, error) {
 	out, err := box.Exec(ctx, []string{"sh", "-c", `for p in /proc/[0-9]*; do printf '%s %s\n' "${p#/proc/}" "$(cat "$p/comm" 2>/dev/null)"; done`}, nil)
@@ -676,20 +633,4 @@ func readImages(dir string, missingOK bool) (imageList, error) {
 		return imageList{}, errors.New("images.json names no workspace; clean those images by hand in the workspace that built them")
 	}
 	return list, nil
-}
-
-// evidenceUnsound is why a run's canary evidence can't clear POC-5's gate: an empty receipt list means nothing
-// unless the run was live, the receipts were read, and the canary wasn't overloaded.
-func evidenceUnsound(ev obs.CanaryEvidence, valid bool, invalid string) string {
-	switch {
-	case !ev.Live:
-		return "the canary wasn't armed for the run"
-	case !ev.ReceiptsRead:
-		return "the canary's receipts weren't read"
-	case ev.Overloaded:
-		return "the canary was overloaded, so its counts prove nothing either way"
-	case !valid:
-		return "the probe's document isn't valid: " + invalid
-	}
-	return ""
 }
