@@ -596,6 +596,54 @@ func TestContrast(t *testing.T) {
 	}
 }
 
+// keyframeColors is every color a keyframe may set, as "animation | property" and the one token allowed there: the
+// flash behind a row a link lands on washes it with the selection token, for 1.4s.
+var keyframeColors = map[string]string{"flash | background": "sel"}
+
+var (
+	keyframesRE = regexp.MustCompile(`@keyframes ([a-z-]+) \{((?:[^{}]*\{[^{}]*\})*)\s*\}`)
+	frameDeclRE = regexp.MustCompile(`([a-z-]+):\s*([^;{}]+);`)
+)
+
+// UX-9: TestContrast's audit leaves keyframes out, so a keyframe's colors are held here. One may set only the token
+// keyframeColors lists for it, and a row's words keep 4.5:1 on the flash at its strongest. Fades of opacity and
+// moves are not colors and pass.
+func TestKeyframeColors(t *testing.T) {
+	css := commentRE.ReplaceAllString(stylesheet(t), "")
+	blocks := keyframesRE.FindAllStringSubmatch(css, -1)
+	if len(blocks) < 4 || len(blocks) != strings.Count(css, "@keyframes") {
+		t.Fatalf("read %d of %d @keyframes blocks", len(blocks), strings.Count(css, "@keyframes"))
+	}
+	seen := map[string]bool{}
+	for _, b := range blocks {
+		for _, d := range frameDeclRE.FindAllStringSubmatch(b[2], -1) {
+			key, value, kind := b[1]+" | "+d[1], strings.TrimSpace(d[2]), kindOf(d[1])
+			colored := kind != "" && kind != "opacity" && !slices.Contains(plain, value)
+			if !colored && !strings.Contains(value, "var(--") {
+				continue
+			}
+			if tok, ok := keyframeColors[key]; !ok || value != "var(--"+tok+")" {
+				t.Errorf("@keyframes %s: %s is a color keyframeColors doesn't allow there", key, value)
+			}
+			seen[key] = true
+		}
+	}
+	for key := range keyframeColors {
+		if !seen[key] {
+			t.Errorf("keyframeColors lists %s, which no keyframe sets", key)
+		}
+	}
+	wash := "bg+" + keyframeColors["flash | background"] // a row sits on the page
+	for _, name := range []string{"light", "graphite", "mission"} {
+		pal := tokens(t, css, name)
+		for ink, on := range map[string]string{"text": wash, "muted": wash, "faint": wash, "green": wash, "unk": wash, "on-fail": wash + "+fail-bg"} {
+			if got := contrast(color(t, pal, ink).over(surface(t, pal, on)), surface(t, pal, on)); got < floors[text] {
+				t.Errorf("%s: --%s on %s, a flashed row, is %.2f:1, and text owes %.1f:1", name, ink, strings.ReplaceAll(on, "+", " + "), got, floors[text])
+			}
+		}
+	}
+}
+
 // span is the least and the greatest a CSS length can come to, in px.
 type span struct{ lo, hi float64 }
 
