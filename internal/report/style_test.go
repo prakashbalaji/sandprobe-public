@@ -108,8 +108,7 @@ var (
 	floors   = map[role]float64{text: 4.5, mark: 3.0, decoration: 1.2, ground: 0}
 )
 
-// kindOf sorts the properties that can carry a color into the kinds the roles are checked against. A local custom
-// property (the legend's --c) is "local".
+// kindOf sorts the properties that can carry a color into the kinds the roles are checked against.
 func kindOf(prop string) string {
 	switch {
 	case prop == "color":
@@ -122,8 +121,6 @@ func kindOf(prop string) string {
 		return "line"
 	case prop == "opacity":
 		return "opacity"
-	case strings.HasPrefix(prop, "--"):
-		return "local"
 	case prop == "text-shadow" || prop == "box-shadow" || prop == "caret-color" || prop == "accent-color" || prop == "-webkit-text-fill-color":
 		return "other"
 	}
@@ -139,7 +136,7 @@ var borderRE = regexp.MustCompile(`^border(-(top|right|bottom|left|block|inline|
 // fill, and neither may be a decoration: that is what keeps text out of the one class allowed under 3:1.
 var roleKinds = map[role][]string{
 	text:       {"ink", "fill"},
-	mark:       {"fill", "fill-area", "line", "opacity", "local"},
+	mark:       {"fill", "fill-area", "line", "opacity"},
 	decoration: {"line"},
 	ground:     {"fill-area", "fill"},
 }
@@ -298,9 +295,7 @@ var audit = []use{
 	{"h2.ap-h b", "color", text, "bg"},
 	{".note", "color", text, "bg"},
 	{".legend", "color", text, "bg"},
-	{".legend .lg-pass", "--c", mark, "bg"},
-	{".legend .lg-find", "--c", mark, "bg"},
-	{".legend .lg-unk", "--c", mark, "bg"},
+	{".legend span::before", "border-top", mark, "bg"}, // drawn in --c, which each kind of legend line sets
 	{".mapbox", "background", ground, ""},
 	{".map .grid", "stroke", decoration, "raise"},
 	{".map .wall", "stroke", mark, "raise"},
@@ -363,20 +358,28 @@ var (
 // tokenUse is a palette token as one declaration uses it.
 type tokenUse struct {
 	rule  cssRule
-	token string
+	token string   // the palette token, or the local custom property the color comes through
+	inks  []string // the palette tokens it can be: the token itself, or every token a rule sets the local property to
 }
 
 // paints reads every use of a palette token from the screen's rules, keyed "selector | property", and checks every
-// other color the rules write: a local custom property set by an audited rule, a plain value, or one fixed lists. It
-// knows the properties kindOf names; a color written out on any other property is beyond it.
+// other color the rules write: a plain value, or one fixed lists. A local custom property (the legend's --c) may only
+// be set to one palette token, and a declaration that draws with it is a use like any other, measured as every token
+// the property is set to. It knows the properties kindOf names; a color written out on any other is beyond it.
 func paints(t *testing.T, rules []cssRule, palette map[string]string) map[string]tokenUse {
 	t.Helper()
-	locals := map[string]bool{}
+	locals := map[string][]string{}
 	for _, r := range rules {
 		for _, d := range r.decls {
-			if strings.HasPrefix(d[0], "--") {
-				locals[strings.TrimPrefix(d[0], "--")] = true
+			if !strings.HasPrefix(d[0], "--") {
+				continue
 			}
+			m := varUseRE.FindStringSubmatch(d[1])
+			if m == nil || m[0] != d[1] || palette[m[1]] == "" {
+				t.Errorf("%s | %s: %s: a local property may only be set to one palette token", r.sel, d[0], d[1])
+				continue
+			}
+			locals[d[0][2:]] = append(locals[d[0][2:]], m[1])
 		}
 	}
 	out, seenFixed := map[string]tokenUse{}, map[string]bool{}
@@ -387,7 +390,7 @@ func paints(t *testing.T, rules []cssRule, palette map[string]string) map[string
 			for _, m := range varUseRE.FindAllStringSubmatch(d[1], -1) {
 				if _, ok := palette[m[1]]; ok {
 					tokens = append(tokens, m[1])
-				} else if locals[m[1]] {
+				} else if locals[m[1]] != nil {
 					local = append(local, m[1])
 				}
 			}
@@ -395,17 +398,21 @@ func paints(t *testing.T, rules []cssRule, palette map[string]string) map[string
 			case len(tokens)+len(local) > 0 && funcRE.MatchString(varUseRE.ReplaceAllString(d[1], "")):
 				// color-mix(), rgb(from ...), calc(): the color drawn isn't the token's, and this test can't work it out
 				t.Errorf("%s: %s puts a palette color through a function this test can't measure", key, d[1])
-			case len(tokens) > 1:
-				t.Errorf("%s: two palette tokens in one declaration: %s", key, d[1])
-			case len(tokens) == 1:
+			case strings.HasPrefix(d[0], "--"): // a local property's source, read above
+			case len(tokens)+len(local) > 1:
+				t.Errorf("%s: two colors in one declaration: %s", key, d[1])
+			case len(tokens)+len(local) == 1:
+				use := tokenUse{r, strings.Join(append(tokens, local...), ""), tokens}
+				if len(local) == 1 {
+					use.inks = locals[local[0]]
+				}
 				if kind == "" || kind == "other" {
-					t.Errorf("%s uses --%s: a property this test has no rule for", key, tokens[0])
+					t.Errorf("%s uses --%s: a property this test has no rule for", key, use.token)
 				}
 				if _, dup := out[key]; dup {
 					t.Errorf("%s is set twice: the audit can't tell the two apart", key)
 				}
-				out[key] = tokenUse{r, tokens[0]}
-			case len(local) > 0: // drawn with a color an audited rule sets: the legend's lines
+				out[key] = use
 			case kind == "" || kind != "opacity" && slices.Contains(plain, d[1]):
 			case fixed[key+": "+d[1]] != "" && kind != "ink" && d[0] != "-webkit-text-fill-color":
 				seenFixed[key+": "+d[1]] = true
@@ -483,6 +490,10 @@ func TestContrast(t *testing.T) {
 			continue
 		}
 		tok := used[key].token
+		if !slices.Equal(used[key].inks, []string{tok}) {
+			t.Errorf("%s: a surface can't take its color through a local property", key)
+			continue
+		}
 		if u.on == "" {
 			bases[tok] = true
 			for name, pal := range palettes {
@@ -527,37 +538,39 @@ func TestContrast(t *testing.T) {
 			!slices.ContainsFunc(stacks, func(s string) bool { return s == own.token || strings.HasSuffix(s, "+"+own.token) }) {
 			t.Errorf("%s: the rule sets its own background, --%s, and audit lists no surface ending in it", key, own.token)
 		}
-		ink, label := p.token, "--"+p.token
+		inks, dimmed := p.inks, ""
 		if kindOf(u.prop) == "opacity" {
 			of, ok := used[dims[key]]
 			if !ok {
 				t.Errorf("%s: dims doesn't name the color this opacity dims", key)
 				continue
 			}
-			ink, label = of.token, "--"+of.token+" at --"+p.token
+			inks, dimmed = of.inks, " at --"+p.token
 		}
 		for _, name := range []string{"light", "graphite", "mission"} {
 			pal := palettes[name]
-			fg := color(t, pal, ink)
-			if kindOf(u.prop) == "opacity" {
-				dim, err := strconv.ParseFloat(pal[p.token], 64)
-				if err != nil || dim <= 0 || dim > 1 {
-					t.Errorf("%s: %s: --%s is %q, want an opacity", name, key, p.token, pal[p.token])
-					continue
+			for _, ink := range inks { // one, or every token a local property is set to
+				fg, label := color(t, pal, ink), "--"+ink+dimmed
+				if dimmed != "" {
+					dim, err := strconv.ParseFloat(pal[p.token], 64)
+					if err != nil || dim <= 0 || dim > 1 {
+						t.Errorf("%s: %s: --%s is %q, want an opacity", name, key, p.token, pal[p.token])
+						continue
+					}
+					fg.a *= dim
 				}
-				fg.a *= dim
-			}
-			for _, s := range stacks {
-				if !made(s) {
-					continue
-				}
-				on, where := surface(t, pal, s), strings.ReplaceAll(s, "+", " + ")
-				got := contrast(fg.over(on), on)
-				if testing.Verbose() { // go test -v -run 'TestContrast$' lists every ratio
-					t.Logf("%-8s %5.2f:1 (floor %.1f) %s on %s  [%s]", name, got, floors[u.role], label, where, key)
-				}
-				if got < floors[u.role] {
-					t.Errorf("%s: %s: %s on %s is %.2f:1, and %s owes %.1f:1", name, key, label, where, got, roleName[u.role], floors[u.role])
+				for _, s := range stacks {
+					if !made(s) {
+						continue
+					}
+					on, where := surface(t, pal, s), strings.ReplaceAll(s, "+", " + ")
+					got := contrast(fg.over(on), on)
+					if testing.Verbose() { // go test -v -run 'TestContrast$' lists every ratio
+						t.Logf("%-8s %5.2f:1 (floor %.1f) %s on %s  [%s]", name, got, floors[u.role], label, where, key)
+					}
+					if got < floors[u.role] {
+						t.Errorf("%s: %s: %s on %s is %.2f:1, and %s owes %.1f:1", name, key, label, where, got, roleName[u.role], floors[u.role])
+					}
 				}
 			}
 		}
@@ -832,8 +845,12 @@ var sizeParents = map[string]string{
 
 var mapBoxRE = regexp.MustCompile(`\n\.map \{ display: block; width: 100%; min-width: (\d+)px; height: auto; max-height: (\d+)px; \}`)
 
+// missionCapitals is the one rule allowed under 12px: mission's capitals, 10.5px and no smaller (UX-9).
+const missionCapitals = `[data-theme="mission"] .kicker, [data-theme="mission"] .panel h3, [data-theme="mission"] .stats span, ` +
+	`[data-theme="mission"] .facts dt, [data-theme="mission"] .toc p, [data-theme="mission"] .ctag, [data-theme="mission"] .key`
+
 // UX-9: on a screen, body text is 14px on a line height of 1.55 and no font size the stylesheet sets can come to
-// under 12px; mission keeps its own type. Every size is worked out to the least it can be: a clamp() to its floor,
+// under 12px. mission keeps its own type, held the same way: a 13px body, and its capitals alone under the floor. Every size is worked out to the least it can be: a clamp() to its floor,
 // an em against the least its parent can be. The map's text is in the map's own units, so it is measured at the
 // smallest the map is drawn. An element with no size of its own takes its parent's, which this test also holds.
 func TestTypeSizes(t *testing.T) {
@@ -850,9 +867,6 @@ func TestTypeSizes(t *testing.T) {
 	var all []sized
 	bySel := map[string]string{}
 	for _, r := range screenRules(t, css) {
-		if strings.Contains(r.sel, `[data-theme="mission"]`) {
-			continue
-		}
 		for _, d := range r.decls {
 			if d[0] != "font" && d[0] != "font-size" {
 				continue
@@ -918,9 +932,19 @@ func TestTypeSizes(t *testing.T) {
 		if testing.Verbose() {
 			t.Logf("%6.2fpx at the least  %s { %s }%s", least, s.sel, s.expr, unit)
 		}
-		if least < 12 {
-			t.Errorf("%s: font size %s can come to %.2fpx%s, under 12px", s.sel, s.expr, least, unit)
+		floor := 12.0
+		if s.sel == missionCapitals {
+			floor = 10.5
 		}
+		if least < floor {
+			t.Errorf("%s: font size %s can come to %.2fpx%s, under %gpx", s.sel, s.expr, least, unit, floor)
+		}
+	}
+	if _, ok := bySel[missionCapitals]; !ok {
+		t.Error("mission's capitals rule, the one allowed under 12px, is gone or renamed")
+	}
+	if got, err := resolve("mission", bySel[`[data-theme="mission"] body`], 0); err != nil || got != (span{13, 13}) {
+		t.Errorf("mission's body text isn't 13px: %v %v", got, err)
 	}
 	body, err := resolve("body", bySel["body"], 0)
 	if err != nil || body != (span{14, 14}) || !strings.Contains(css, "font: 400 14px/1.55 var(--sans);") {
