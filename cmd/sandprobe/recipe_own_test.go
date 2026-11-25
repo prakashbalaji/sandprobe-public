@@ -366,6 +366,159 @@ func TestOwnRecipeCleanupExits(t *testing.T) {
 	}
 }
 
+// firstMention records, at the first write that carries mark, whether the file at path existed yet.
+type firstMention struct {
+	bytes.Buffer
+	mark, path   string
+	seen, before bool
+}
+
+func (w *firstMention) Write(p []byte) (int, error) {
+	if !w.seen && bytes.Contains(p, []byte(w.mark)) {
+		_, err := os.Stat(w.path)
+		w.seen, w.before = true, err == nil
+	}
+	return w.Buffer.Write(p)
+}
+
+// RCP-4: before the file's first execution, one stderr line names it as given with its full SHA-256, in text and with
+// -o json alike. The recipe's top-level code records that it ran: it hasn't when the line is written, and has after.
+// A usage error or a refused file runs nothing and writes no such line.
+func TestOwnRecipeAnnounced(t *testing.T) {
+	path, sum, calls := ownFile(t, ownHeader("")+"\necho top >> \"$SANDPROBE_TEST_LOG\"\n"+ownBody)
+	log := filepath.Join(filepath.Dir(path), "log")
+	t.Chdir(filepath.Dir(path))
+	for _, args := range [][]string{
+		{"plan", "-recipe", "my-recipe.sh", "-no-canary"},
+		{"plan", "-recipe", "my-recipe.sh", "-no-canary", "-o", "json"},
+		{"run", "-recipe", "my-recipe.sh", "-no-canary"},
+		{"run", "-recipe", "my-recipe.sh", "-no-canary", "-o", "json"},
+	} {
+		os.Remove(log)
+		var out bytes.Buffer
+		errs := &firstMention{mark: sum, path: log}
+		code := run(args, &out, errs)
+		line := "sandprobe: running your own recipe my-recipe.sh (SHA-256 " + sum + "): its sp_ready runs now, before the plan\n"
+		if (code != exitGraded && code != exitApproval) || !errs.seen || errs.before || !strings.HasPrefix(errs.String(), line) {
+			t.Errorf("%q: exit %d, announced %v, the recipe had already run %v:\n%s", args, code, errs.seen, errs.before, errs.String())
+		}
+		if c := calls(); !strings.HasPrefix(c, "top\n") || !strings.Contains(c, "ready") || strings.Contains(c, "create") {
+			t.Errorf("%q: the recipe's own record of what ran:\n%s", args, c)
+		}
+		if slices.Contains(args, "json") {
+			var p planDoc
+			if err := json.Unmarshal(out.Bytes(), &p); err != nil || p.RecipeSHA256 != sum {
+				t.Errorf("%q: stdout isn't the plan alone: %v\n%s", args, err, out.String())
+			}
+		}
+	}
+	link := filepath.Join(filepath.Dir(path), "link.sh")
+	os.Symlink(path, link)
+	for _, args := range [][]string{
+		{"plan", "-recipe", "my-recipe.sh", "-no-canary", "-as", "bad user"},
+		{"plan", "-recipe", "my-recipe.sh", "-no-canary", "-provider-endpoints", "all"},
+		{"plan", "-recipe", link, "-no-canary"},
+		{"plan", "kubernetes", "-recipe", "my-recipe.sh"},
+	} {
+		os.Remove(log)
+		var out bytes.Buffer
+		errs := &firstMention{mark: sum, path: log}
+		if code := run(args, &out, errs); code != exitUsage || errs.seen || calls() != "" {
+			t.Errorf("%q: exit %d, announced %v, ran %q", args, code, errs.seen, calls())
+		}
+	}
+}
+
+// ownSaved is a saved Docker report as a run through a person's own recipe would have written it (RCP-4): the four
+// default exclusions skipped as host.Plan plans them, sandprobe/6, the box created by Sandprobe, and run.recipe.
+func ownSaved(t *testing.T) report.Doc {
+	t.Helper()
+	b, err := os.ReadFile(skipSaved(t, host.OwnRecipeProvider, host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d report.Doc
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	d = noLetter(d)
+	d.Run.Box.CreatedBySandprobe = true
+	d.Run.Recipe = &report.RunRecipe{Own: true, SHA256: strings.Repeat("0123456789abcdef", 4)}
+	return d
+}
+
+// RCP-4, AGT-6 and ANL-1: every command that reads a saved report loads one carrying run.recipe, in text and JSON, and
+// the page scorecard -out re-renders embeds the record unchanged. The same report without the record, or with it
+// forged, is refused by each of them.
+func TestOwnRecipeReportConsumers(t *testing.T) {
+	pinGH(t, "absent") // feedback previews only: no gh, nothing sent
+	body := writeBody(t, plainBody)
+	d := ownSaved(t)
+	good := writeDoc(t, d)
+	record := `"recipe":{"own":true,"sha256":"` + d.Run.Recipe.SHA256 + `"}`
+	if b, _ := os.ReadFile(good); !bytes.Contains(b, []byte(record)) {
+		t.Fatalf("the saved report doesn't carry the record as a run writes it: %s", b)
+	}
+	forged := map[string]string{}
+	for name, edit := range map[string]func(d *report.Doc){
+		"no record":         func(d *report.Doc) { d.Run.Recipe = nil },
+		"own false":         func(d *report.Doc) { d.Run.Recipe.Own = false },
+		"an upper-case SHA": func(d *report.Doc) { d.Run.Recipe.SHA256 = strings.ToUpper(d.Run.Recipe.SHA256) },
+		"not created by us": func(d *report.Doc) { d.Run.Box.CreatedBySandprobe = false },
+		"as run exec":       func(d *report.Doc) { d.Run.Provider = "exec" },
+	} {
+		f := ownSaved(t)
+		edit(&f)
+		forged[name] = writeDoc(t, f)
+	}
+	for _, args := range [][]string{{"scorecard", "%"}, {"scorecard", "%", "-o", "json"}, {"profile", "%"}, {"profile", "%", "-o", "json"},
+		{"assess", "%", "canary-egress-deny-v1"}, {"assess", "%", "canary-egress-deny-v1", "-o", "json"},
+		{"compare", "%", "%"}, {"compare", "%", "%", "-o", "json"}, {"fix", "%"}, {"fix", "%", "-o", "json"}} {
+		at := func(path string) (int, string) {
+			var out, errs bytes.Buffer
+			code := run(strings.Split(strings.ReplaceAll(strings.Join(args, "\x00"), "%", path), "\x00"), &out, &errs)
+			return code, out.String() + errs.String()
+		}
+		if code, said := at(good); code == exitUsage || strings.Contains(said, "unsafe report input") {
+			t.Errorf("%q: exit %d\n%s", args, code, said)
+		}
+		for name, path := range forged {
+			if code, said := at(path); code != exitUsage || !strings.Contains(said, "report") {
+				t.Errorf("%q, %s: exit %d\n%s", args, name, code, said)
+			}
+		}
+	}
+	// FBK-3: feedback's preview of the report's summary.
+	if p := fbIn(t, "", nil, "bug", "-title", "a summary", "-report", good, "-body-file", body, "-o", "json"); p.code != exitApproval || !strings.Contains(p.stdout+p.stderr, "### Report summary") {
+		t.Errorf("feedback's preview: exit %d\n%s%s", p.code, p.stdout, p.stderr)
+	}
+	for name, path := range forged {
+		if p := fbIn(t, "", nil, "bug", "-title", "a summary", "-report", path, "-body-file", body, "-o", "json"); p.code != exitUsage || strings.Contains(p.stdout, "### Report summary") {
+			t.Errorf("feedback's preview, %s: exit %d\n%s", name, p.code, p.stdout)
+		}
+	}
+	// SCR-3: the page scorecard -out re-renders embeds the report with its record, and that report reads back.
+	dir := t.TempDir()
+	var out, errs bytes.Buffer
+	run([]string{"scorecard", good, "-out", dir}, &out, &errs)
+	pages, _ := filepath.Glob(filepath.Join(dir, "sandprobe-recipe-*.html"))
+	if len(pages) != 1 {
+		t.Fatalf("pages %v: %s", pages, errs.String())
+	}
+	page, _ := os.ReadFile(pages[0])
+	data := reportData.FindSubmatch(page)
+	if data == nil || !bytes.Contains(data[1], []byte(record)) {
+		t.Fatalf("the re-rendered page's report doesn't carry the record")
+	}
+	embedded := filepath.Join(dir, "embedded.json")
+	os.WriteFile(embedded, data[1], 0o644)
+	var card, again bytes.Buffer
+	run([]string{"scorecard", good, "-o", "json"}, &card, &errs)
+	if code := run([]string{"scorecard", embedded, "-o", "json"}, &again, &errs); code == exitUsage || again.String() != card.String() {
+		t.Errorf("the page's embedded report doesn't read back to the same card: exit %d\n%s", code, again.String())
+	}
+}
+
 // The worked example is a sound recipe of a person's own, and isn't shipped: it gets no PRV row (RCP-4).
 func TestExampleRecipe(t *testing.T) {
 	rc, err := ownRecipe("../../examples/recipes/docker-template.sh")
@@ -459,6 +612,10 @@ func TestOwnRecipeDocker(t *testing.T) {
 	}
 	if !strings.Contains(d.Cleanup.Outcome, "confirmed gone") || !strings.Contains(d.Cleanup.Residual, sha) || !strings.Contains(d.Cleanup.Residual, "hasn't reviewed") {
 		t.Errorf("cleanup: %+v", d.Cleanup)
+	}
+	// RCP-4: the typed record a reader relies on agrees with provider_calls and the residual on the recipe's SHA-256.
+	if want := (report.RunRecipe{Own: true, SHA256: sha}); d.Run.Recipe == nil || *d.Run.Recipe != want {
+		t.Errorf("run.recipe is %+v, want %+v", d.Run.Recipe, want)
 	}
 	if raw, _ := os.ReadFile(files[0]); bytes.Contains(raw, []byte("docker-template")) || bytes.Contains(raw, []byte(filepath.Dir(recipe))) {
 		t.Error("the report holds the recipe's path")

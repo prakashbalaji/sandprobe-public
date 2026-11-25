@@ -84,6 +84,9 @@ type Meta struct {
 	Calls              []obs.ProviderCall
 	Cleanup            string // how the box's teardown ended
 	Residual           string // a provider's stated residual risk (PRV-1)
+	// OwnRecipeSHA256 is the SHA-256 of a person's own recipe file, for a run made through one (RCP-4): Build writes
+	// run.recipe from it. Empty for every other run, a shipped recipe's included.
+	OwnRecipeSHA256 string
 }
 
 // Doc is OUT-1.
@@ -126,7 +129,17 @@ type Run struct {
 	Mode       string `json:"mode"`
 	Provider   string `json:"provider"`
 	Box        Box    `json:"box"`
-	NoCanary   bool   `json:"no_canary,omitempty"` // HCN-5, set by the host from its manifest, never by the box
+	// Recipe is RCP-4's record of a run made through a person's own recipe, and of no other run. It joins sandprobe/6,
+	// which no release has shipped (AGT-6). ANL-1 reads it only whole.
+	Recipe   *RunRecipe `json:"recipe,omitempty"`
+	NoCanary bool       `json:"no_canary,omitempty"` // HCN-5, set by the host from its manifest, never by the box
+}
+
+// RunRecipe says a run's box came from a person's own recipe, and which: the SHA-256 of the bytes that ran, 64
+// lowercase hex digits. Own is always true: a shipped recipe's run carries no record. No path, and no header text.
+type RunRecipe struct {
+	Own    bool   `json:"own"`
+	SHA256 string `json:"sha256"`
 }
 
 type Box struct {
@@ -263,6 +276,9 @@ func Build(r *host.Run, m Meta) Doc {
 		Toolchain: []any{}, Overrides: []string{}, Contacted: []Contact{}, Receipts: r.Evidence.Receipts, Markers: []Marker{},
 		ProviderCalls: m.Calls, Cleanup: Cleanup{Outcome: m.Cleanup, Residual: m.Residual},
 		Limits: Limits{NotTested: NotTested, NotProven: rep.NotProven, ScopedOut: rep.ScopedOut, Skipped: rep.Skipped}}
+	if m.OwnRecipeSHA256 != "" { // RCP-4
+		d.Run.Recipe = &RunRecipe{Own: true, SHA256: m.OwnRecipeSHA256}
+	}
 	if man.CanaryTCP80Protocol != "" && obs.ValidCanaryTCP80Protocol(man.CanaryTCP80Protocol) {
 		d.Toolchain = append(d.Toolchain, map[string]string{"canary_tcp80_protocol": man.CanaryTCP80Protocol})
 	}

@@ -185,7 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "explain":
 		err = explain(o, positional)
 	case "plan":
-		err = plan(o, r, positional)
+		err = plan(o, r, positional, stderr)
 	case "run":
 		code, err = runCmd(o, r, positional, stderr)
 	case "poc":

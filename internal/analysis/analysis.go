@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -18,6 +19,9 @@ import (
 const MaxReport = 8 << 20
 
 var ErrInput = errors.New("unsupported, inconsistent or unsafe report input")
+
+// recipeSHA256 is the one form run.recipe's digest takes (RCP-4).
+var recipeSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Load never follows the final symlink, opens devices or accepts unframed JSON.
 func Load(path string) (*report.Doc, error) {
@@ -45,6 +49,9 @@ func Parse(b []byte) (*report.Doc, error) {
 // absent either (GRD-1).
 func canonicalNewFields(b []byte, d *report.Doc) bool {
 	var p struct {
+		Run struct {
+			Recipe json.RawMessage `json:"recipe"`
+		} `json:"run"`
 		Grade struct {
 			Letter json.RawMessage `json:"letter"`
 		} `json:"grade"`
@@ -62,6 +69,9 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 		return false
 	}
 	if p.Grade.Letter != nil && d.Schema == report.SchemaNoLetter {
+		return false
+	}
+	if p.Run.Recipe != nil && d.Run.Recipe == nil { // AGT-6, RCP-4: a present run.recipe is never null
 		return false
 	}
 	if p.Manifest.SkipKinds != nil && len(d.Manifest.SkipKinds) == 0 || p.Manifest.Attested != nil && len(d.Manifest.Attested) == 0 {
@@ -139,6 +149,13 @@ func Validate(d *report.Doc) error {
 		return ErrInput
 	}
 	if !slices.Contains([]string{"exec", "entrypoint"}, d.Run.Mode) {
+		return ErrInput
+	}
+	// RCP-4: run.recipe is read only whole. It is there exactly when the run's provider is "recipe", under sandprobe/6
+	// only (AGT-6), saying the recipe is the person's own (a shipped recipe's run carries no record), with the SHA-256
+	// in its one form, on a box Sandprobe created. So a reader can tell an own-recipe report from any other by it.
+	if rec := d.Run.Recipe; (rec != nil) != (d.Run.Provider == host.OwnRecipeProvider) ||
+		rec != nil && (legacy || !rec.Own || !recipeSHA256.MatchString(rec.SHA256) || !d.Run.Box.CreatedBySandprobe) {
 		return ErrInput
 	}
 	if d.Manifest.BoxID == "" || d.Manifest.BoxID != d.Run.Box.ProviderID || d.Manifest.ProbeSHA256 == "" || d.Manifest.ProbeSHA256 != d.Probe.SHA256 {

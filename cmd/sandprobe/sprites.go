@@ -459,9 +459,9 @@ func printPlan(w io.Writer, p planDoc) {
 	line("Leaves", p.Residual)
 }
 
-func plan(o opts, r runFlags, args []string) error {
-	if r.recipeSet { // RCP-4: the file takes the provider's place
-		_, e := runRecipe(o, r, "", true, nil)
+func plan(o opts, r runFlags, args []string, stderr io.Writer) error {
+	if r.recipeSet { // RCP-4: the file takes the provider's place, and is named on stderr before it first runs
+		_, e := runRecipe(o, r, "", true, stderr)
 		return e
 	}
 	if len(args) == 1 && args[0] == "exec" {

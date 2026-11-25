@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"sandprobe/internal/catalog"
@@ -278,9 +279,22 @@ func TestCompareBetter(t *testing.T) {
 	}
 }
 
-// RCP-4 and ANL-1: a report of a person's own recipe (run.provider "recipe") reads with its opt-in kinds and its
-// attestations, since this binary's own policy for it is PRV-15's four as opt-in. A provider_terms kind on it, a
-// declared provider beside it, or the same report under a name the policy lacks, is refused.
+// ownRecipeRun is a real Docker fixture run as a run through a person's own recipe writes it (RCP-4): sandprobe/6,
+// run.provider "recipe", the box created by Sandprobe, opt-in kinds, and run.recipe with the recipe's SHA-256.
+func ownRecipeRun(t *testing.T) report.Doc {
+	t.Helper()
+	d := attestedRun(t, false)
+	if d.Schema != report.SchemaNoLetter || d.Run.Provider != "exec" || d.Run.Recipe != nil {
+		t.Fatalf("the fixture run: %s %s %+v", d.Schema, d.Run.Provider, d.Run.Recipe)
+	}
+	d.Run.Provider, d.Run.Box.CreatedBySandprobe = host.OwnRecipeProvider, true
+	d.Run.Recipe = &report.RunRecipe{Own: true, SHA256: strings.Repeat("0123456789abcdef", 4)}
+	return d
+}
+
+// RCP-4 and ANL-1: a report of a person's own recipe (run.provider "recipe") reads with its record, its opt-in kinds
+// and its attestations, since this binary's own policy for it is PRV-15's four as opt-in. A provider_terms kind on it,
+// a declared provider beside it, or the same report under a name the policy lacks, is refused.
 func TestOwnRecipeReport(t *testing.T) {
 	for name, tc := range map[string]struct {
 		edit func(d *report.Doc)
@@ -288,13 +302,12 @@ func TestOwnRecipeReport(t *testing.T) {
 	}{
 		"as written":          {func(d *report.Doc) {}, true},
 		"a provider_terms":    {func(d *report.Doc) { d.Manifest.SkipKinds["EGR-3"] = obs.SkipProviderTerms }, false},
-		"declaring modal":     {func(d *report.Doc) { d.Manifest.DeclaredProvider, d.Schema = "modal", report.SchemaDeclaredProvider }, false},
+		"declaring modal":     {func(d *report.Doc) { d.Manifest.DeclaredProvider = "modal" }, false},
 		"a name of its own":   {func(d *report.Doc) { d.Run.Provider = "myrecipe" }, false},
 		"the header's claim":  {func(d *report.Doc) { d.Run.Provider = "modal" }, false},
 		"the recipe's record": {func(d *report.Doc) { d.Run.Provider = "own-0123456789ab" }, false},
 	} {
-		d := attestedRun(t, false)
-		d.Run.Provider, d.Run.Box.CreatedBySandprobe = host.OwnRecipeProvider, true
+		d := ownRecipeRun(t)
 		tc.edit(&d)
 		raw, err := json.Marshal(d)
 		if err != nil {
@@ -302,6 +315,123 @@ func TestOwnRecipeReport(t *testing.T) {
 		}
 		if _, err := Parse(raw); (err == nil) != tc.ok {
 			t.Errorf("%s: accepted %v, want %v", name, err == nil, tc.ok)
+		}
+	}
+}
+
+// RCP-4, AGT-6 and ANL-1: run.recipe is read only whole, so a reader can rely on it to tell an own-recipe report from
+// any other. It is there exactly when run.provider is "recipe", under sandprobe/6 only, with own true, a SHA-256 of 64
+// lowercase hex digits and a box Sandprobe created. Every other shape is refused, and each control beside a forged
+// report reads, so the record alone refuses it.
+func TestOwnRecipeRecordForged(t *testing.T) {
+	sha := strings.Repeat("0123456789abcdef", 4)
+	parse := func(d report.Doc, edit func(doc, run map[string]any)) error {
+		t.Helper()
+		raw, err := json.Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tree map[string]any
+		if err := json.Unmarshal(raw, &tree); err != nil {
+			t.Fatal(err)
+		}
+		if edit != nil {
+			edit(tree, tree["run"].(map[string]any))
+		}
+		raw, _ = json.Marshal(tree)
+		_, err = Parse(raw)
+		return err
+	}
+	own := ownRecipeRun(t)
+	if err := parse(own, nil); err != nil {
+		t.Fatalf("the honest report: %v", err)
+	}
+	whole := func() map[string]any {
+		return map[string]any{"own": true, "sha256": sha}
+	}
+	rec := func(v any) func(doc, run map[string]any) { return func(_, run map[string]any) { run["recipe"] = v } }
+	set := func(k string, v any) func(doc, run map[string]any) { // the whole record, one member changed
+		r := whole()
+		r[k] = v
+		return rec(r)
+	}
+	drop := func(k string) func(doc, run map[string]any) {
+		r := whole()
+		delete(r, k)
+		return rec(r)
+	}
+	forged := map[string]func(doc, run map[string]any){
+		"no record":             func(_, run map[string]any) { delete(run, "recipe") },
+		"null":                  rec(nil),
+		"empty":                 rec(map[string]any{}),
+		"a string":              rec(sha),
+		"a list":                rec([]any{whole()}),
+		"true":                  rec(true),
+		"own false":             set("own", false),
+		"own absent":            drop("own"),
+		"own null":              set("own", nil),
+		"own a string":          set("own", "true"),
+		"own a number":          set("own", 1),
+		"a path beside":         set("path", "/home/me/recipe.sh"),
+		"a provider beside":     set("provider", "modal"),
+		"another case of a key": set("SHA256", sha),
+		"not created by us":     func(_, run map[string]any) { run["box"].(map[string]any)["created_by_sandprobe"] = false },
+		"created_by absent":     func(_, run map[string]any) { delete(run["box"].(map[string]any), "created_by_sandprobe") },
+		"under sandprobe/7":     func(doc, _ map[string]any) { doc["schema"] = "sandprobe/7" },
+	}
+	forged["digest absent"] = drop("sha256")
+	for name, v := range map[string]any{"empty": "", "null": nil, "short": sha[:63], "long": sha + "0", "upper case": strings.ToUpper(sha),
+		"not hex": "g" + sha[1:], "with a prefix": "sha256:" + sha, "with a newline": sha + "\n", "a number": 12} {
+		forged["digest "+name] = set("sha256", v)
+	}
+	for name, edit := range forged {
+		if err := parse(own, edit); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// The record on a report of any other provider: each reads without it, and is refused with it.
+	exec := attestedRun(t, false)
+	kube := attestedRun(t, false)
+	kube.Run.Provider, kube.Run.Box.CreatedBySandprobe = "kubernetes", true
+	docker := *baseline(t)
+	docker.Schema, docker.Grade.Letter = report.SchemaNoLetter, nil
+	docker.Run.Box.CreatedBySandprobe = true
+	for name, d := range map[string]report.Doc{"exec": exec, "kubernetes": kube, "docker": docker} {
+		if err := parse(d, nil); err != nil {
+			t.Fatalf("%s, with no record: %v", name, err)
+		}
+		if err := parse(d, rec(whole())); err == nil {
+			t.Errorf("%s: accepted with a record", name)
+		}
+		if err := parse(d, set("own", false)); err == nil {
+			t.Errorf("%s: accepted with a record that says own is false", name)
+		}
+		if err := parse(d, rec(nil)); err == nil {
+			t.Errorf("%s: accepted with a null record", name)
+		}
+	}
+	// AGT-6: sandprobe/1 to sandprobe/5 never carry the record. The older form of this run reads as run exec wrote
+	// it (sandprobe/2, with its letter); the same report as a "recipe" one is refused under every older version, with
+	// the record or without it.
+	letter := "F"
+	old := attestedRun(t, false)
+	old.Schema, old.Grade.Letter = report.SchemaFor(old.Manifest), &letter
+	if err := parse(old, nil); err != nil || old.Schema != report.SchemaSkipKinds {
+		t.Fatalf("the older run exec report (%s): %v", old.Schema, err)
+	}
+	for _, version := range []string{report.Schema, report.SchemaSkipKinds, report.SchemaHostController, report.SchemaCanaryHTTP, report.SchemaDeclaredProvider} {
+		d := ownRecipeRun(t)
+		d.Schema, d.Grade.Letter = version, &letter
+		if err := parse(d, nil); err == nil {
+			t.Errorf("%s: accepted with the record", version)
+		}
+		if err := parse(d, func(_, run map[string]any) { delete(run, "recipe") }); err == nil {
+			t.Errorf("%s: a recipe report accepted without the record", version)
+		}
+		d = attestedRun(t, false)
+		d.Schema, d.Grade.Letter, d.Run.Recipe = version, &letter, own.Run.Recipe
+		if err := parse(d, nil); err == nil {
+			t.Errorf("%s: a run exec report accepted with the record", version)
 		}
 	}
 }

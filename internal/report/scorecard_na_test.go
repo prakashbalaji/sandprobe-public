@@ -407,3 +407,29 @@ func TestOwnRecipePolicy(t *testing.T) {
 		t.Errorf("Cloud access %+v, out of %d, %v", r, c.Of, c.NotCounted())
 	}
 }
+
+// RCP-4 and AGT-6: Build writes run.recipe for a run through a person's own recipe, as exactly own and the SHA-256,
+// and no recipe key for any other run, a shipped recipe's included.
+func TestOwnRecipeRecordWritten(t *testing.T) {
+	sha := strings.Repeat("0123456789abcdef", 4)
+	m, pd, ev := replan(t, host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	b, _ := json.Marshal(pd)
+	r := &host.Run{Manifest: m, Doc: b, Evidence: ev, Report: grade.GradeBytes(m, b, &ev)}
+	for provider, own := range map[string]string{host.OwnRecipeProvider: sha, "kubernetes": "", "exec": ""} {
+		d := Build(r, Meta{Version: "fixture", Provider: provider, BoxName: m.BoxID, CreatedBySandprobe: true, OwnRecipeSHA256: own})
+		raw, _ := json.Marshal(d)
+		var tree struct {
+			Run map[string]json.RawMessage `json:"run"`
+		}
+		if err := json.Unmarshal(raw, &tree); err != nil {
+			t.Fatal(err)
+		}
+		got, has := tree.Run["recipe"]
+		if want := `{"own":true,"sha256":"` + sha + `"}`; own != "" && string(got) != want || own == "" && has {
+			t.Errorf("%s: run.recipe is %s", provider, got)
+		}
+		if d.Schema != SchemaNoLetter {
+			t.Errorf("%s: %s", provider, d.Schema)
+		}
+	}
+}

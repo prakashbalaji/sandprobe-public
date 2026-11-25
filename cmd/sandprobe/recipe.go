@@ -229,6 +229,13 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	allowLocal := r.allowLocalProxy && slices.Contains(attested, "EGR-3") // SBX-1 (e): only once EGR-3 is on
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ownSHA := "" // RCP-4: the report's run.recipe, for a person's own recipe alone
+	if rc.Own {
+		ownSHA = rc.SHA256
+		// The file's first execution is next (sp_ready, and anything at its top level), before any approval. Its
+		// bytes go on record first, whatever the output mode, in case it hangs or misbehaves.
+		fmt.Fprintf(stderr, "sandprobe: running your own recipe %s (SHA-256 %s): its sp_ready runs now, before the plan\n", shownPath(rc.File), rc.SHA256)
+	}
 	rctx, rcancel := context.WithTimeout(ctx, time.Minute)
 	target, err := rc.Ready(rctx) // RCP-1: settings checked, and where the box will be, before the plan
 	rcancel()
@@ -339,7 +346,7 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 		return 0, fail("provider_error", err.Error()+"; "+cleanup, "see the message", failExit(cleaned))
 	}
 	d := report.Build(run, report.Meta{Version: Version, Provider: name, BoxName: box.ID(), CreatedBySandprobe: true,
-		StartedAt: start, Duration: time.Since(start), Calls: box.Calls, Cleanup: cleanup, Residual: p.Residual})
+		StartedAt: start, Duration: time.Since(start), Calls: box.Calls, Cleanup: cleanup, Residual: p.Residual, OwnRecipeSHA256: ownSHA})
 	if r.as == "" {
 		d.Grade.Notes = append(d.Grade.Notes, "The probe ran as whoever the box runs it as; that user isn't confirmed as the agent's (PRV-15).")
 	} else {
