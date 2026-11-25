@@ -3,6 +3,34 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- `sandprobe run -recipe <file>` and `sandprobe plan -recipe <file>` run a recipe of your own: a small shell file,
+  kept in your repository, that creates one box on your provider, opens `sh` in it as your agent, and deletes it by
+  the ID its create returned. Point it at the template you hardened, and each run probes a fresh box made from that
+  template. A recipe is host code that runs on your machine with your credentials, and Sandprobe hasn't reviewed it
+  or your provider's terms: the plan says so, and shows the file's path and full SHA-256, before anything is created.
+  `plan -recipe` already runs the recipe's `sp_ready`, and a stderr line names the file and its SHA-256 before it
+  does. SEC-4, EGR-3, AMP-6 and AMP-7 are always off, whatever the recipe's header says, unless you turn one on by
+  name with `-provider-endpoints`. The report's `run.provider` is `recipe`, and a new record, `run.recipe`, holds
+  `own: true` and the SHA-256 of the recipe. Every command that reads a saved report refuses one whose record is
+  missing, misplaced or malformed. A report with the record declares `sandprobe/7`, which this release reads and
+  0.3.3 refuses; every other report stays `sandprobe/6`. `compare` treats two reports whose records differ, or one
+  with the record against one without, as a changed setup and exits 5. `-provider` isn't accepted with `-recipe`.
+  [docs/providers/recipe.md](docs/providers/recipe.md) explains how to write one, and
+  `examples/recipes/docker-template.sh` is a complete example on local Docker (RCP-4).
+
+- A `run kubernetes` report now lists the recipe's create, delete and last gone answer in `provider_calls`, each
+  with the recipe's SHA-256 (PRV-3, RCP-2).
+
+- A recipe whose header holds a value that isn't printable ASCII, or is over 400 characters, is refused (RCP-1).
+
+- What a recipe writes to fd 3, `run kubernetes`'s included, is shown and recorded as printable ASCII only, and only
+  its first 4 KiB is kept: fd 3 is now a pipe Sandprobe drains, so a recipe that floods it grows nothing (RCP-1).
+
+- The cap on a command's captured output now holds in memory. It was applied only to writes made one at a time, so
+  a recipe, a box or a provider CLI that printed without end could grow Sandprobe's memory.
+
 ## 0.3.3 (2026-11-24)
 
 - The letter grade is gone from the JSON report, `profile` and `assess`; the terminal, the page and `-min` had already
@@ -28,28 +56,6 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   and every result mark 3:1: pill outlines and the fainter severity dots fell short in `graphite` and `mission`.
   Outside `mission`, no label is under 12px, where some were 10.5px, and the map scrolls sideways before its text
   shrinks below that. An unknown is still dashed and never green, and the page still prints on white (UX-8, UX-9).
-
-- `sandprobe run -recipe <file>` and `sandprobe plan -recipe <file>` run a recipe of your own: a small shell file,
-  kept in your repository, that creates one box on your provider, opens `sh` in it as your agent, and deletes it by
-  the ID its create returned. Point it at the template you hardened, and each run probes a fresh box made from that
-  template. A recipe is host code that runs on your machine with your credentials, and Sandprobe hasn't reviewed it
-  or your provider's terms: the plan says so, and shows the file's path and full SHA-256, before anything is created.
-  `plan -recipe` already runs the recipe's `sp_ready`, and a stderr line names the file and its SHA-256 before it
-  does. SEC-4, EGR-3, AMP-6 and AMP-7 are always off, whatever the recipe's header says, unless you turn one on by
-  name with `-provider-endpoints`. The report's `run.provider` is `recipe`, and a new record, `run.recipe`, holds
-  `own: true` and the SHA-256 of the recipe. Every command that reads a saved report refuses one whose record is
-  missing, misplaced or malformed. A report with the record declares `sandprobe/7`, which this release reads and
-  0.3.3 refuses; every other report stays `sandprobe/6`. `compare` treats two reports whose records differ, or one
-  with the record against one without, as a changed setup and exits 5. `-provider` isn't accepted with `-recipe`.
-  [docs/providers/recipe.md](docs/providers/recipe.md) explains how to write one, and
-  `examples/recipes/docker-template.sh` is a complete example on local Docker (RCP-4).
-- A `run kubernetes` report now lists the recipe's create, delete and last gone answer in `provider_calls`, each
-  with the recipe's SHA-256 (PRV-3, RCP-2).
-- A recipe whose header holds a value that isn't printable ASCII, or is over 400 characters, is refused (RCP-1).
-- What a recipe writes to fd 3, `run kubernetes`'s included, is shown and recorded as printable ASCII only, and only
-  its first 4 KiB is kept: fd 3 is now a pipe Sandprobe drains, so a recipe that floods it grows nothing (RCP-1).
-- The cap on a command's captured output now holds in memory. It was applied only to writes made one at a time, so
-  a recipe, a box or a provider CLI that printed without end could grow Sandprobe's memory.
 
 ## 0.3.2 (2026-11-24)
 
