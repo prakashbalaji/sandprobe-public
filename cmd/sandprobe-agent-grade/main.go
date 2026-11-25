@@ -124,13 +124,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if err != nil {
 		return errors.New("standard report rendering failed")
 	}
-	return json.NewEncoder(out).Encode(struct {
-		Report       report.Doc         `json:"report"`
-		Observations string             `json:"observations"`
-		Evidence     obs.CanaryEvidence `json:"evidence"`
-		Input        obs.Input          `json:"input"`
-		HTML         string             `json:"html"`
-	}{doc, string(r.Doc), r.Evidence, r.Input, string(html)})
+	return json.NewEncoder(out).Encode(report.NewManagedEvidence(doc, string(r.Doc), r.Evidence, r.Input, string(html)))
 }
 
 func main() {
