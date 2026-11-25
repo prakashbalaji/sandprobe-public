@@ -3,6 +3,13 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- `run kubernetes` now waits up to a minute for a new node to take `kubectl exec`. A node EKS Auto Mode has just
+  started refuses exec until its certificate is issued, so a first run there could stop with only "the command failed:
+  exit status 1". Only that error is retried, and a pod that never takes exec stops the run with a message that says
+  so (PRV-16).
+
 ## 0.3.5 (2026-11-25)
 
 - The web report has a new layout and plainer words. It opens with one sheet: what was tested (the provider, in

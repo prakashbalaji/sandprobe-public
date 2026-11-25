@@ -139,9 +139,37 @@ sp_create() {
 	esac
 	echo "${sp_made#"Pod/$SANDPROBE_NAME/"}"
 	sp_kube wait --for=condition=Ready "pod/$SANDPROBE_NAME" --timeout=180s >/dev/null || {
-		sp_say "the pod didn't become ready"
+		sp_say "the pod didn't become ready within 3 minutes"
 		return 1
 	}
+}
+
+# sp_wait waits until the pod takes exec, for about a minute: a new node's kubelet serves exec only once its serving
+# certificate is issued, a little after the pod is ready (EKS Auto Mode starts nodes on demand). The host calls it once
+# the create's UID is on disk (RCP-2). Only that error is retried. kubectl's message is matched and never shown, and
+# each try is made only while the name still holds that UID.
+sp_wait() {
+	sp_try=0
+	while :; do
+		[ "$(sp_whois)" = "$SANDPROBE_BOX" ] || {
+			sp_say "the pod's name no longer holds the pod the create returned"
+			return 1
+		}
+		sp_err=$(sp_kube exec "$SANDPROBE_NAME" -- sh -c : 2>&1 >/dev/null) && return 0
+		case $sp_err in
+		*"error dialing backend"*) ;;
+		*)
+			sp_say "kubectl exec can't start sh in the pod; its own message isn't shown, since it can carry a credential"
+			return 1
+			;;
+		esac
+		sp_try=$((sp_try + 1))
+		[ "$sp_try" -lt 12 ] || {
+			sp_say "the pod's node still doesn't take kubectl exec, a minute after the pod was ready; a new node can need longer, so run again"
+			return 1
+		}
+		sleep 5 3>&-
+	done
 }
 
 # sp_whois prints the UID now holding the name, or nothing.

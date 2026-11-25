@@ -29,6 +29,9 @@ type Recipe struct {
 	// Reset says the recipe defines sp_checkpoint, sp_restore or sp_recreate. Resets aren't built, so none is ever
 	// called, and the plan and report say so (RCP-3).
 	Reset bool
+	// Waits says a shipped recipe defines sp_wait, called once the create's ID is on disk (RCP-1, RCP-2). A person's own
+	// recipe has no such call: its sp_create returns only when the box is ready for a shell.
+	Waits bool
 	// Own marks a person's own recipe file (run -recipe, RCP-4): nobody reviewed it, so it always carries all four
 	// default exclusions, and its header is only its own word. File is its path as given, for the plan and the record
 	// alone: never a report, and never the record's name.
@@ -73,7 +76,7 @@ func ParseOwnRecipe(text []byte) (*Recipe, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.Name, r.Own, r.Exclusions = "own-"+r.SHA256[:12], true, slices.Clone(RecipeDefaultExclusions)
+	r.Name, r.Own, r.Waits, r.Exclusions = "own-"+r.SHA256[:12], true, false, slices.Clone(RecipeDefaultExclusions)
 	return r, nil
 }
 
@@ -160,6 +163,7 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 			return nil, fmt.Errorf("the recipe has no %s() (RCP-1)", fn)
 		}
 	}
+	r.Waits = regexp.MustCompile(`(?m)^sp_wait\(\) *\{`).Match(text)
 	r.Reset = regexp.MustCompile(`(?m)^sp_(checkpoint|restore|recreate)\(\) *\{`).Match(text)
 	return r, nil
 }
@@ -340,6 +344,16 @@ func (b *RecipeBox) Create(ctx context.Context) error {
 	b.BoxID = id
 	b.ExecBox.Env = recipeEnviron(b.env())
 	b.record(at, "sp_create", code, err)
+	return err
+}
+
+// Wait runs a shipped recipe's sp_wait, if it defines one: the box takes sp_shell, or the recipe says why not. It may
+// run a command in the box, so the caller records the ID first (RCP-2).
+func (b *RecipeBox) Wait(ctx context.Context) error {
+	if !b.Recipe.Waits {
+		return nil
+	}
+	_, _, err := b.Recipe.call(ctx, "sp_wait", b.env())
 	return err
 }
 
