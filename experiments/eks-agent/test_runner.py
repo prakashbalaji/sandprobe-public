@@ -38,6 +38,29 @@ class FakeRunner(Runner):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_persistence_marker_is_explicit_and_cannot_change_on_resume(self):
+        with tempfile.TemporaryDirectory() as root:
+            j=Journal(root,'a'*16,create=True)
+            try:
+                r=Runner(j,controller='host',storage_profile='persistent-artifacts',persistence_marker='symlink-v1')
+                self.assertEqual(r.persistence_marker,'symlink-v1')
+                j.data.update(persistence_marker='symlink-v1',source_commit='a'*40)
+                with self.assertRaisesRegex(Failure,'persistence_marker_changed'):
+                    Runner(j,controller='host',storage_profile='persistent-artifacts',persistence_marker='file')
+                j.data.pop('persistence_marker')
+                with self.assertRaisesRegex(Failure,'persistence_marker_changed'):
+                    Runner(j,controller='host',storage_profile='persistent-artifacts',persistence_marker='symlink-v1')
+                self.assertEqual(Runner(j,controller='host',storage_profile='persistent-artifacts').persistence_marker,'file')
+            finally:j.close()
+        for marker,profile in [('other','persistent-artifacts'),('symlink-v1','ephemeral')]:
+            with tempfile.TemporaryDirectory() as root:
+                j=Journal(root,'a'*16,create=True)
+                try:
+                    with self.assertRaisesRegex(Failure,'invalid_persistence_marker_or_profile'):
+                        Runner(j,controller='host',storage_profile=profile,persistence_marker=marker)
+                    self.assertEqual(j.data['resources'],{})
+                finally:j.close()
+
     def test_kubectl_version_requires_supported_skew_before_cloud(self):
         for minor in ["36","37","38","37+"]:
             self.assertEqual(kubectl_version({"clientVersion":{"major":"1","minor":minor}}),"1."+minor.rstrip("+"))

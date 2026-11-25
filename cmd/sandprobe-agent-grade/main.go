@@ -22,6 +22,7 @@ import (
 )
 
 type request struct {
+	PersistenceMarker   string                    `json:"persistence_marker,omitempty"`
 	CanaryTCP80Protocol string                    `json:"canary_tcp80_protocol,omitempty"`
 	UploadAddresses     map[string]string         `json:"upload_addresses,omitempty"`
 	UploadHosts         []string                  `json:"upload_hosts,omitempty"`
@@ -36,6 +37,9 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	raw, err := io.ReadAll(io.LimitReader(in, 65537))
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
 		return errors.New("invalid grading request")
+	}
+	if (q.PersistenceMarker != "" && q.PersistenceMarker != obs.LinkMarkerKind) || (q.PersistenceMarker != "" && q.Persistent == nil) {
+		return errors.New("unsupported persistence marker or profile")
 	}
 	if (q.Pod.Workspace != nil) != (q.Persistent != nil) {
 		return errors.New("persistent storage and lifecycle must be declared together")
@@ -96,7 +100,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	for _, id := range []string{"SEC-4", "AMP-6", "AMP-7", "EGR-3"} {
 		excluded[id] = "RUN-8 defensive audit scope excludes provider-owned endpoints"
 	}
-	r, err := host.Execute(ctx, box, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses, CanaryTCP80Protocol: q.CanaryTCP80Protocol})
+	r, err := host.Execute(ctx, box, public, host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: excluded, WorkloadContract: q.Contract, UploadHosts: q.UploadHosts, UploadAddresses: q.UploadAddresses, CanaryTCP80Protocol: q.CanaryTCP80Protocol, PersistenceMarker: q.PersistenceMarker})
 	if err != nil {
 		return errors.New("standard probe assessment failed")
 	}

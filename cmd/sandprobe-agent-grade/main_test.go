@@ -23,6 +23,16 @@ func TestInvalidBridgeRequestsNeverEmitAssessment(t *testing.T) {
 	}
 }
 
+func TestInvalidPersistenceMarkerNeverStartsBridge(t *testing.T) {
+	for _, selector := range []string{"other", obs.LinkMarkerKind} {
+		var out bytes.Buffer
+		err := run(context.Background(), strings.NewReader(`{"persistence_marker":"`+selector+`"}`), &out)
+		if err == nil || !strings.Contains(err.Error(), "unsupported persistence marker") || out.Len() != 0 {
+			t.Fatal("invalid marker/profile reached bridge setup", err)
+		}
+	}
+}
+
 func TestInvalidRunReasonCannotExposeExecStderr(t *testing.T) {
 	r := &host.Run{Report: grade.Report{Invalid: "synthetic-private-detail"}}
 	sanitizeInvalid(r)

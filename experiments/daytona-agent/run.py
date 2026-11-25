@@ -243,6 +243,9 @@ def main(args):
     if model not in {"mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"}:
         raise Failure("unsupported_model")
     storage_profile = getattr(args, "storage_profile", "ephemeral")
+    marker = getattr(args, "persistence_marker", "file")
+    if marker not in ("file", "symlink-v1") or (marker != "file" and storage_profile == "ephemeral"):
+        raise Failure("invalid_persistence_marker_or_profile")
     if storage_profile not in ("ephemeral", "persistent-workspace", "persistent-artifacts"):
         raise Failure("unsupported_storage_profile")
     parse_hosts = runpy.run_path(str(ROOT / "deploy/workload_measurement.py"))["upload_hosts"]
@@ -287,7 +290,7 @@ def main(args):
             "source_commit": source, "model_client_version":model_check["client_version"], "profile": PROFILE, "region": REGION, "account": ACCOUNT,
             "snapshot_id": SNAPSHOT, "deployment_pattern": "host_controller_no_guest_credentials", "upload_hosts": approved_hosts,
             "storage_profile": storage_profile, "model": model,
-            "canary_tcp80_protocol": getattr(args, "canary_tcp80_protocol", "legacy")})
+            "canary_tcp80_protocol": getattr(args, "canary_tcp80_protocol", "legacy"), "persistence_marker": marker})
     print("Managed run: " + run_id, flush=True)
     print("Private records: " + str(folder), flush=True)
     tools = folder / "tools"
@@ -330,7 +333,7 @@ def main(args):
               "--model-python",args.model_python,"--out", str(folder), "--run-id", run_id, "--snapshot", SNAPSHOT,
               "--network", ",".join(ip + "/32" for ip in network), "--source-root", str(ROOT),
               "--canary-state", env["STATE"], "--upload-hosts", ",".join(approved_hosts),
-              "--storage-profile", storage_profile, "--model", model]+(["--canary-tcp80-protocol","tcp80-http-marker-v1"] if getattr(args,"canary_tcp80_protocol","legacy")=="http-v1" else []), env, timeout=1500 if storage_profile != "ephemeral" else 1000)
+              "--storage-profile", storage_profile, "--model", model]+(["--canary-tcp80-protocol","tcp80-http-marker-v1"] if getattr(args,"canary_tcp80_protocol","legacy")=="http-v1" else [])+(["--persistence-marker",marker] if marker != "file" else []), env, timeout=1500 if storage_profile != "ephemeral" else 1000)
     except (Failure, KeyboardInterrupt):
         failed = True
         persist(folder / "execution-failure.json", {"category": "managed_execution_incomplete"})
@@ -381,6 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", choices=("mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"), default="mistral.ministral-3-3b-instruct")
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     parser.add_argument("--canary-tcp80-protocol", choices=("legacy","http-v1"), default="legacy")
+    parser.add_argument("--persistence-marker", choices=("file","symlink-v1"), default="file")
     parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace", "persistent-artifacts"), default="ephemeral")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not PROFILE:

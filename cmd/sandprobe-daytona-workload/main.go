@@ -32,7 +32,7 @@ import (
 var sourceCommit string
 var hexRun = regexp.MustCompile(`^[a-f0-9]{16}$`)
 
-type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts, storageProfile, model, canaryProtocol string }
+type options struct{ key, python, modelPython, folder, canary, runID, snapshot, network, root, uploadHosts, storageProfile, model, canaryProtocol, persistenceMarker string }
 type taskResult struct {
 	Schema                     string `json:"schema"`
 	Workload                   string `json:"workload"`
@@ -380,6 +380,9 @@ func execute(ctx context.Context, o options) (err error) {
 	if o.storageProfile != "ephemeral" && o.storageProfile != "persistent-workspace" && o.storageProfile != "persistent-artifacts" {
 		return errors.New("invalid storage profile")
 	}
+	if (o.persistenceMarker != "" && o.persistenceMarker != obs.LinkMarkerKind) || (o.persistenceMarker != "" && o.storageProfile == "ephemeral") {
+		return errors.New("unsupported persistence marker or profile")
+	}
 	lock, e := lockManagedFolder(o.folder)
 	if e != nil {
 		return e
@@ -647,6 +650,7 @@ func execute(ctx context.Context, o options) (err error) {
 	stage = "standard-collection"
 	collection := collectionOptions(sha, contract)
 	collection.CanaryTCP80Protocol = o.canaryProtocol
+	collection.PersistenceMarker = o.persistenceMarker
 	collection.UploadHosts = uploadHosts
 	collection.UploadAddresses, e = workloadUploadAddresses(uploadHosts, config.NetworkAllowList)
 	if e != nil {
@@ -794,6 +798,7 @@ func main() {
 	flag.StringVar(&cleanupState, "cleanup-state", "", "original private cleanup journal")
 	flag.StringVar(&cleanupPersistentState, "cleanup-persistent-state", "", "original private volume/consumer journal")
 	flag.StringVar(&o.canaryProtocol, "canary-tcp80-protocol", "", "explicit canary TCP/80 protocol; legacy by default")
+	flag.StringVar(&o.persistenceMarker, "persistence-marker", "", "explicit persistent-profile marker mechanism; regular file by default")
 	flag.StringVar(&o.key, "key-file", "", "owner-only API key file")
 	flag.StringVar(&o.python, "sdk-python", "", "pinned SDK interpreter")
 	flag.StringVar(&o.modelPython, "model-python", "", "pinned Nitro Bedrock SDK interpreter")
