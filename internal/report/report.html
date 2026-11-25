@@ -406,7 +406,7 @@ footer p { margin: 0; color: var(--faint); font-size: 12px; }
   var root = document.documentElement, themes = ["auto", "light", "graphite", "mission"];
   var raw = document.getElementById("report-data").textContent;
   var name = document.getElementById("themeName");
-  try { var saved = localStorage.getItem("sandprobe-theme"); if (saved === "modern") saved = "graphite"; if (themes.indexOf(saved) >= 0) root.setAttribute("data-theme", saved); } catch (e) {}
+  try { var saved = localStorage.getItem("sandprobe-theme"); if (saved === "modern" || saved === "dark") saved = "graphite"; if (themes.indexOf(saved) >= 0) root.setAttribute("data-theme", saved); } catch (e) {}
   name.textContent = root.getAttribute("data-theme");
   document.getElementById("theme").addEventListener("click", function () {
     var next = themes[(themes.indexOf(root.getAttribute("data-theme")) + 1) % themes.length];

@@ -308,6 +308,8 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 	}
 	switch theme {
 	case "light", "graphite", "mission":
+	case "dark": // UX-8: another name for graphite; the page only ever says graphite
+		theme = "graphite"
 	default: // UX-8: anything else, the retired "modern" included, is the default, which follows the viewer's system
 		theme = "auto"
 	}

@@ -128,13 +128,14 @@ func TestHTMLIsSafe(t *testing.T) {
 	}
 }
 
-// UX-8: -theme takes auto, light, graphite and mission; auto is the default, and what the retired modern and any other
-// value render. Every page carries all three palettes and the rule that gives auto graphite on a dark system, so one
-// file is right on either machine. The page's button steps through the four, and a remembered modern reads as graphite.
+// UX-8: -theme takes auto, light, graphite and mission, and dark as another name for graphite; auto is the default, and
+// what the retired modern and any other value render. Every page carries all three palettes and the rule that gives auto graphite on a dark system, so one
+// file is right on either machine. The page's button steps through the four, and a remembered modern or dark reads as
+// graphite.
 func TestThemes(t *testing.T) {
 	d := Build(run(), meta())
 	for in, want := range map[string]string{"": "auto", "auto": "auto", "light": "light", "graphite": "graphite", "mission": "mission",
-		"modern": "auto", "dark": "auto", "Mission": "auto", evil: "auto"} {
+		"dark": "graphite", "modern": "auto", "Dark": "auto", "Mission": "auto", evil: "auto"} {
 		for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
 			b, err := render(d, in)
 			if err != nil {
@@ -144,11 +145,11 @@ func TestThemes(t *testing.T) {
 			if !strings.Contains(p, `<html lang="en" data-theme="`+want+`">`) || !strings.Contains(p, `<span id="themeName">`+want+`</span>`) {
 				t.Errorf("-theme %q: want %s", in, want)
 			}
-			if !strings.Contains(p, `themes = ["auto", "light", "graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern") saved = "graphite";`) ||
+			if !strings.Contains(p, `themes = ["auto", "light", "graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern" || saved === "dark") saved = "graphite";`) || strings.Contains(p, `"dark"]`) ||
 				!strings.Contains(p, `if (themes.indexOf(saved) >= 0) root.setAttribute("data-theme", saved);`) ||
 				!strings.Contains(p, `var next = themes[(themes.indexOf(root.getAttribute("data-theme")) + 1) % themes.length];`) ||
 				!strings.Contains(p, `localStorage.setItem("sandprobe-theme", next);`) {
-				t.Errorf("-theme %q: the button doesn't step through and remember the four, a remembered modern is lost, or an unknown one is used", in)
+				t.Errorf("-theme %q: the button doesn't step through and remember the four, a remembered modern or dark is lost, or an unknown one is used", in)
 			}
 			css := styleRE.FindStringSubmatch(p)[1]
 			for name, open := range paletteAt {
