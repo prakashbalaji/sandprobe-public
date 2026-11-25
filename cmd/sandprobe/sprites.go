@@ -292,9 +292,13 @@ func providers(o opts, r runFlags) error {
 		}
 	}
 	list = append(list, kp)
-	for _, n := range []string{"modal"} {
-		list = append(list, provider{Name: n, Unbuilt: true, Fix: "not built yet"})
+	mp := provider{Name: "modal", Canary: canaryAt, CanaryOK: canaryOK, Fix: canaryFix}
+	if _, err := modalWorkspace(); err != nil { // PRV-18: no token read and no SDK call here
+		mp.Fix = fixOf(err)
+	} else {
+		mp.Ready = mp.CanaryOK
 	}
+	list = append(list, mp)
 	if o.json() {
 		o.emit(list)
 		return nil
@@ -496,6 +500,10 @@ func plan(o opts, r runFlags, args []string, stderr io.Writer) error {
 		_, err := runVercel(o, r, true, nil)
 		return err
 	}
+	if len(args) == 1 && args[0] == "modal" {
+		_, err := runModal(o, r, true, nil)
+		return err
+	}
 	if len(args) == 1 && args[0] == "e2b" {
 		_, err := runE2B(o, r, true, nil)
 		return err
@@ -509,7 +517,7 @@ func plan(o opts, r runFlags, args []string, stderr io.Writer) error {
 		return err
 	}
 	if len(args) != 1 || args[0] != "sprites" {
-		return fail("usage", "plan takes one provider: sprites, aws-nitro, baseten, e2b, vercel or cloudflare (the others aren't built yet)", "sandprobe plan sprites", exitUsage)
+		return fail("usage", "plan takes one provider; sandprobe providers lists them", "sandprobe plan sprites", exitUsage)
 	}
 	org, choice, err := r.resolve()
 	if err != nil {
@@ -572,6 +580,9 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 	if len(args) == 1 && args[0] == "baseten" {
 		return runBaseten(o, r, false, stderr)
 	}
+	if len(args) == 1 && args[0] == "modal" {
+		return runModal(o, r, false, stderr)
+	}
 	if len(args) == 1 && args[0] == "e2b" {
 		return runE2B(o, r, false, stderr)
 	}
@@ -585,7 +596,7 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 		return runNitro(o, r, false, stderr)
 	}
 	if len(args) != 1 || args[0] != "sprites" {
-		return 0, fail("usage", "run takes one provider: sprites, aws-nitro, baseten, e2b, vercel or cloudflare (the others aren't built yet)", "sandprobe run sprites -y", exitUsage)
+		return 0, fail("usage", "run takes one provider; sandprobe providers lists them", "sandprobe run sprites -y", exitUsage)
 	}
 	org, choice, err := r.resolve()
 	if err != nil {

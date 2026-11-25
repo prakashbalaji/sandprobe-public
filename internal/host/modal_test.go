@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -191,4 +193,118 @@ func TestModalTokenNeverLeaks(t *testing.T) {
 func sha256sum(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// journalModal checks what is on disk at each step of a recorded run (PRV-18).
+type journalModal struct {
+	fakeModal
+	t           *testing.T
+	dir         string
+	lockOnMake  bool // the journal's directory stops being writable during the create
+	sawAtCreate modalJournal
+}
+
+func (f *journalModal) Create(ctx context.Context, spec ModalSpec, tags map[string]string) (string, error) {
+	f.sawAtCreate = readModalJournal(f.t, f.dir)
+	if f.sawAtCreate.Tag != tags["sandprobe-run"] {
+		f.t.Errorf("the create's tag %q isn't the journal's %q", tags["sandprobe-run"], f.sawAtCreate.Tag)
+	}
+	if f.lockOnMake {
+		os.Chmod(f.dir, 0o500)
+	}
+	return f.fakeModal.Create(ctx, spec, tags)
+}
+
+func readModalJournal(t *testing.T, dir string) (j modalJournal) {
+	t.Helper()
+	found, _ := filepath.Glob(filepath.Join(dir, "modal-*.state"))
+	if len(found) != 1 {
+		t.Fatalf("journals: %v", found)
+	}
+	if st, err := os.Stat(found[0]); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the journal isn't private: %v %v", st, err)
+	}
+	b, _ := os.ReadFile(found[0])
+	if err := json.Unmarshal(b, &j); err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+// PRV-18, AGENTS rule 8: the tag is on disk before the create and the ID after it; nothing is created without the
+// journal, nothing runs in a sandbox whose ID isn't in it, and only a confirmed deletion removes it.
+func TestModalJournal(t *testing.T) {
+	ctx := context.Background()
+	spec, _ := ModalSetup("default", "", "")
+	make1 := func(t *testing.T, f *journalModal) (*ModalBox, error) {
+		f.t, f.dir = t, t.TempDir()
+		t.Cleanup(func() { os.Chmod(f.dir, 0o700) })
+		return CreateModalRecorded(ctx, f, spec, f.dir, "ws-a", "im-1")
+	}
+	t.Run("recorded, then removed", func(t *testing.T) {
+		f := &journalModal{}
+		b, err := make1(t, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := f.sawAtCreate; s.ID != "" || s.Workspace != "ws-a" || s.ImageID != "im-1" || s.App != ModalApp {
+			t.Errorf("before the create: %+v", s)
+		}
+		if j := readModalJournal(t, f.dir); j.ID != "sb-1" {
+			t.Errorf("after the create: %+v", j)
+		}
+		if err := b.Destroy(ctx); err != nil || !slices.Equal(f.terminated, []string{"sb-1"}) {
+			t.Fatalf("destroy: %v %v", err, f.terminated)
+		}
+		if left, _ := os.ReadDir(f.dir); len(left) != 0 {
+			t.Errorf("a confirmed deletion left %v", left)
+		}
+	})
+	t.Run("no journal, no create", func(t *testing.T) {
+		f := &journalModal{}
+		dir := filepath.Join(t.TempDir(), "locked")
+		os.Mkdir(dir, 0o500)
+		b, err := CreateModalRecorded(ctx, f, spec, dir, "ws-a", "im-1")
+		if b != nil || err == nil || len(f.created) != 0 {
+			t.Fatalf("created without a journal: %v %v", b, err)
+		}
+	})
+	t.Run("the ID can't be recorded", func(t *testing.T) {
+		f := &journalModal{lockOnMake: true}
+		b, err := make1(t, f)
+		if err == nil || b == nil || b.SandboxID != "sb-1" || !strings.Contains(err.Error(), "nothing runs") {
+			t.Fatalf("%v %+v", err, b)
+		}
+		os.Chmod(f.dir, 0o700)
+		if err := b.Destroy(ctx); err != nil || !slices.Equal(f.terminated, []string{"sb-1"}) {
+			t.Fatalf("destroy: %v %v", err, f.terminated)
+		}
+	})
+	for name, f := range map[string]*journalModal{
+		"a create with no ID":  {fakeModal: fakeModal{createErr: &ModalError{Op: "create", Category: "timed out or canceled", Code: "DeadlineExceeded"}}},
+		"a failed terminate":   {fakeModal: fakeModal{termErr: &ModalError{Op: "terminate", Category: "failed", Code: "Unavailable"}}},
+		"still running by tag": {fakeModal: fakeModal{running: []string{"sb-9"}}},
+	} {
+		t.Run(name+" keeps the journal", func(t *testing.T) {
+			b, _ := make1(t, f)
+			if err := b.Destroy(ctx); err == nil {
+				t.Fatal("counted as deleted")
+			}
+			if j := readModalJournal(t, f.dir); j.Tag != b.Tags["sandprobe-run"] {
+				t.Errorf("the journal doesn't hold the run's tag: %+v", j)
+			}
+			if slices.Contains(f.terminated, "sb-9") || f.createErr != nil && len(f.terminated) != 0 {
+				t.Errorf("terminated something by tag: %v", f.terminated)
+			}
+		})
+	}
+}
+
+// PRV-18: the workspace name a run may use.
+func TestModalWorkspaceName(t *testing.T) {
+	for name, ok := range map[string]bool{"rc-1": true, "a": true, "": false, "-a": false, "A": false, "a b": false, "a/b": false, strings.Repeat("a", 65): false} {
+		if (ModalWorkspace(name) == nil) != ok {
+			t.Errorf("%q", name)
+		}
+	}
 }

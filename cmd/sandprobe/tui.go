@@ -158,7 +158,7 @@ func livePhasesFor(provider string, noCanary, keepSandbox bool) []livePhase {
 			{ID: "reset", Label: "reset"},
 			{ID: "delete", Label: "delete"},
 		}
-	default: // aws-nitro, kubernetes/recipes, baseten, e2b, vercel, cloudflare, daytona, boat, exe.dev
+	default: // aws-nitro, kubernetes/recipes, baseten, e2b, vercel, cloudflare, daytona, boat, exe.dev, modal
 		if !noCanary {
 			phases = append(phases, livePhase{ID: "canary", Label: "canary"})
 		}

@@ -3,6 +3,14 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- `sandprobe run modal -y` is built in. It makes one Modal Sandbox with Modal's defaults in the workspace
+  `SANDPROBE_MODAL_WORKSPACE` names, probes it through the hosted canary, terminates it by its ID and confirms it's
+  gone. Modal's own SDK, already in the release, reads your token; you don't need Modal's Python SDK for a run. The App
+  `sandprobe` and the built image stay in your workspace (PRV-18). `providers` lists Modal as ready once the workspace
+  is named.
+
 ## 0.3.6 (2026-11-25)
 
 - `run kubernetes` now waits up to 90 seconds for a new node to take `kubectl exec`. A node EKS Auto Mode has just
