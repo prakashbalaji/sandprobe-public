@@ -3,6 +3,7 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -310,7 +311,7 @@ func TestNoLetterGrade(t *testing.T) {
 		d           Doc
 		title, says string
 	}{
-		"valid":      {load("../../demo/reports/vibe.json"), "Sandprobe · docker · score 1/6", "1 of 6 categories clear"},
+		"valid":      {load("../../demo/reports/vibe.json"), "Sandprobe · docker · score 1/6", "1 of 6 categories with no exposure found"},
 		"incomplete": {load("../../test/reports/canary-down.json"), "Sandprobe · docker-fixture · score 2/6", `<p class="status">Incomplete: 6 checks unknown</p>`},
 		"invalid": {Build(invalid, meta()), "Sandprobe · sprites · invalid, no score",
 			`<p class="invalid-h">Invalid run: no score</p>`},
@@ -442,7 +443,7 @@ func TestPlainEnglishRowsAndIdentity(t *testing.T) {
 	for _, want := range []string{
 		"Docker · local container",
 		"sandprobe-demo/vibe",
-		"1 of 6 categories clear",
+		"1 of 6 categories with no exposure found",
 		"5 exposed · 1 unproven",
 		"no_new_privs is off (0) and setuid-root binaries exist in system folders",
 		"· exposure sign, not confirmed",
@@ -464,6 +465,104 @@ func TestPlainEnglishRowsAndIdentity(t *testing.T) {
 		text := dataRE.ReplaceAllString(p, "")
 		if strings.Contains(text, jargon) {
 			t.Errorf("visible page text still holds jargon %q", jargon)
+		}
+	}
+}
+
+// SCR-3, rule 1: the page's plain words never say more than a result proves. A value the box reports that can't be
+// read is unknown, a provider the page doesn't know is never shown as its own label, and a not_found or scoped-out
+// line claims no observation and no block.
+func TestPlainEnglishNeverOverclaims(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "unknown", "zz": "unknown", "10000000000000000": "unknown", "0": "none (0x0)", "0000000000000000": "none (0x0)",
+		"8000000000000000": "capability 63",
+	} {
+		if got := decodeCaps(in); got != want {
+			t.Errorf("decodeCaps(%q) = %q, want %q", in, got, want)
+		}
+	}
+	two, seven := 2, 7
+	if decodeNoNewPrivs(nil) != "unknown" || decodeNoNewPrivs(&two) != "unknown" || decodeSeccomp(seven) != "unknown" ||
+		strings.Contains(decodeSeccomp(0), "disabled") {
+		t.Error("an absent or invalid no_new_privs or seccomp value must read unknown, and seccomp 0 never as disabled")
+	}
+	const unrecognized = "Sandbox · provider not recognized"
+	for _, p := range []string{"docker", "aws-nitro", "modal", "sprites", "daytona", "e2b", "vercel", "cloudflare", "baseten",
+		"exe.dev", "boat", "exec", "recipe"} {
+		if l := providerLabel(p, ""); l == unrecognized || l == p {
+			t.Errorf("provider %q has no label of its own: %q", p, l)
+		}
+	}
+	for _, p := range []string{"Modal Sandbox · verified by Sandprobe", "nope", "<b>docker</b>"} {
+		if l := providerLabel(p, ""); l != unrecognized {
+			t.Errorf("an unrecognized provider %q is shown as %q", p, l)
+		}
+	}
+	for _, id := range catalog.IDs() {
+		nf, so := notFoundDetail(id), scopedOutDetail(id)
+		if !strings.Contains(nf, "doesn't prove") || !strings.Contains(so, "neither a pass nor a failure") {
+			t.Errorf("%s: a not_found or scoped-out line lost its caveat: %q / %q", id, nf, so)
+		}
+		for _, claim := range []string{"Blocked", "Verified", "blocked.", "arrived", "accepted", "answered"} {
+			if strings.Contains(strings.SplitN(nf, ";", 2)[0], claim) || strings.Contains(so, claim) {
+				t.Errorf("%s: a not_found or scoped-out line claims %q: %q / %q", id, claim, nf, so)
+			}
+		}
+	}
+	facts := []string{"faults, misconfiguration, wrappers, and shims", "when the host-shipped probe actually runs as the agent",
+		"substitutes for or tampers with the probe before or during the run", "report the expected digest",
+		"fabricate every in-box observation", "the host cannot tell", "can prove a way out, never a refusal"}
+	for _, fact := range facts {
+		if !strings.Contains(Boundary, fact) {
+			t.Errorf("SBX-10's boundary lost %q", fact)
+		}
+	}
+	// The hardened demo blocks HTTPS (EGR-2 passes), so nothing may say a TLS session was seen (EGR-4 not_found).
+	b, err := os.ReadFile("../../demo/reports/hardened.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d Doc
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	p := dataRE.ReplaceAllString(pageOf(t, d, "light"), "")
+	for _, bad := range []string{"arrived untouched", "clear · unproven", "categories clear", "proves nothing elsewhere"} {
+		if strings.Contains(p, bad) {
+			t.Errorf("the page says %q", bad)
+		}
+	}
+	if strings.Count(p, `<span class="verdict">none found · unproven</span>`) != 1 {
+		t.Error("a green row with no conclusive check must read none found · unproven, never clear")
+	}
+	if l := lead(d); !strings.Contains(l, "or nothing in scope") || !strings.Contains(l, "a verified refusal") || !strings.Contains(l, "which proves nothing.") ||
+		!strings.Contains(l, "say nothing either way") {
+		t.Errorf("the clean lead lost a caveat: %q", l)
+	}
+	// A report saved with the earlier boundary: the page shows the current one, the embedded JSON keeps its own.
+	if d.Boundary != oldBoundary {
+		t.Fatal("the hardened demo no longer carries the earlier boundary")
+	}
+	saved, err := SavedHTML(d, "light")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := dataRE.FindString(string(saved))
+	visible := html.UnescapeString(dataRE.ReplaceAllString(string(saved), ""))
+	for _, fact := range facts {
+		if !strings.Contains(visible, fact) {
+			t.Errorf("the saved page's boundary lost %q", fact)
+		}
+	}
+	if !strings.Contains(visible, SavedNote) || strings.Contains(visible, "for the host-shipped probe run as the agent") ||
+		!strings.Contains(data, "for the host-shipped probe run as the agent") || strings.Contains(data, "actually runs as the agent") {
+		t.Error("a saved page must keep ANL-1's note and its own strings in the embedded JSON, and show the current boundary")
+	}
+	// OUT-1's lead: a chain is the strongest statement there is, and only CHN-2 is left out of the list.
+	for id, gets := range map[string]string{"CHN-1": "can open a credential and send it out", "CHN-3": "reaches the Kubernetes API with a token"} {
+		l := lead(Doc{Grade: Grade{Valid: true, Complete: true}, Findings: []Finding{{ID: id, Class: string(catalog.Proof), Gets: gets}, {ID: "CHN-2", Class: string(catalog.Proof), Gets: "can undo every refusal"}}})
+		if !strings.Contains(l, gets) || strings.Contains(l, "undo every refusal") {
+			t.Errorf("%s: lead %q", id, l)
 		}
 	}
 }

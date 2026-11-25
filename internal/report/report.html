@@ -357,7 +357,7 @@ footer p { margin: 0; color: var(--faint); font: 12px var(--mono); }
       <div class="score-col">
         <p class="score-kicker">Sandbox score</p>
         <p class="score-fig {{if eq .Card.Score .Card.Of}}green{{else}}red{{end}}" role="img" aria-label="Score {{.Card.Score}} of {{.Card.Of}}"><b>{{.Card.Score}}</b><span>/{{.Card.Of}}</span></p>
-        <p class="score-foot"><strong>{{.Card.Score}} of {{.Card.Of}} categories clear</strong>{{.ScoreBreakdown}}</p>
+        <p class="score-foot"><strong>{{.Card.Score}} of {{.Card.Of}} categories with no exposure found</strong>{{.ScoreBreakdown}}</p>
       </div>
       <div class="verdict-col">
         <div>
@@ -375,7 +375,7 @@ footer p { margin: 0; color: var(--faint); font: 12px var(--mono); }
 
     <ol class="cats">{{range .Cats}}
       <li class="cat {{if .Green}}green{{if .GreenNotProven}} gnp{{end}}{{else if .NotApplicable}}na{{else}}red{{end}}" id="cat-{{.Num}}">
-        <div class="cat-top"><span class="cat-title"><span class="dot" aria-hidden="true"></span><b>{{.Name}}</b></span><span class="verdict">{{if .Green}}{{if .GreenNotProven}}clear · unproven{{else}}clear{{end}}{{else if .NotApplicable}}not applicable{{else}}exposed{{end}}</span></div>
+        <div class="cat-top"><span class="cat-title"><span class="dot" aria-hidden="true"></span><b>{{.Name}}</b></span><span class="verdict">{{if .Green}}{{if .GreenNotProven}}none found · unproven{{else}}clear{{end}}{{else if .NotApplicable}}not applicable{{else}}exposed{{end}}</span></div>
         <p class="q">{{.Question}}</p>{{if .Why}}<p class="why">{{.Why}}</p>{{end}}{{if .NotProven}}<p class="why np">{{.NotProven}}</p>{{end}}
         <p class="tl"><span class="ran">{{.Run}}/{{.Total}} run</span>{{range .Tests}}<a class="t {{.Class}}" href="#{{.ID}}" title="{{.ID}}: {{.Result}}">{{.ID}}</a>{{end}}</p></li>{{end}}
     </ol>{{else}}<div class="invalid-box">

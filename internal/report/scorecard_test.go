@@ -275,10 +275,10 @@ func TestGreenNotProven(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := string(page)
-		if strings.Count(p, `<li class="cat green gnp"`) != 1 || strings.Count(p, `<span class="verdict">clear · unproven</span>`) != 1 ||
+		if strings.Count(p, `<li class="cat green gnp"`) != 1 || strings.Count(p, `<span class="verdict">none found · unproven</span>`) != 1 ||
 			!strings.Contains(p, ".cats .green.gnp .dot { background: none; border: 1.5px dashed var(--green); }") ||
 			!strings.Contains(p, ".cat.green.gnp .verdict { padding-bottom: 1px; border-bottom: 1px dashed var(--green-edge); }") {
-			t.Errorf("%s: the page has no dashed clear · unproven label for Cloud access", theme)
+			t.Errorf("%s: the page has no dashed none found · unproven label for Cloud access", theme)
 		}
 	}
 	page, err := HTML(read("../../demo/reports/hardened.json"), "graphite")
@@ -389,7 +389,7 @@ func TestGreenNotProvenNeverStrengthens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p := string(page); flagged(c) || strings.Contains(p, "gnp\"") || strings.Contains(p, "clear · unproven</span>") {
+		if p := string(page); flagged(c) || strings.Contains(p, "gnp\"") || strings.Contains(p, "none found · unproven</span>") {
 			t.Errorf("%s: a not-proven label with no 0-conclusive green row", provider)
 		}
 	}
@@ -420,7 +420,7 @@ func TestGreenNotProvenNeverStrengthens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j, _ := json.Marshal(c); strings.Contains(string(j), "green_not_proven") || strings.Contains(string(page), "clear · unproven</span>") {
+	if j, _ := json.Marshal(c); strings.Contains(string(j), "green_not_proven") || strings.Contains(string(page), "none found · unproven</span>") {
 		t.Error("an invalid run carries the not-proven label")
 	}
 }

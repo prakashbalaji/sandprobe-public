@@ -131,7 +131,7 @@ func providerLabel(provider, declared string) string {
 		return "Cloudflare Sandbox"
 	case "baseten":
 		return "Baseten Sandbox"
-	case "exe-dev", "exedev":
+	case "exe.dev":
 		return "exe.dev VM"
 	case "boat":
 		return "Boat Sandbox"
@@ -149,7 +149,7 @@ func providerLabel(provider, declared string) string {
 	case "":
 		return "Sandbox"
 	}
-	return provider
+	return "Sandbox · provider not recognized" // never the report's own string: it would read as Sandprobe's label
 }
 
 // passDetail explains a verified two-sided pass in plain English from the catalog alone, never from box strings.
@@ -222,13 +222,13 @@ func scopedOutDetail(id string) string {
 func notFoundDetail(id string) string {
 	switch id {
 	case "SEC-4":
-		return "No cloud metadata service answered; doesn't prove metadata is blocked on cloud hosts."
+		return "No metadata service offered a role or identity; doesn't prove metadata is blocked on cloud hosts."
 	case "EGR-1":
 		return "Test DNS lookup did not reach our server; doesn't prove every DNS tunnel is blocked."
 	case "EGR-3":
 		return "Proxy request did not reach our server; doesn't prove all proxy routes are blocked."
 	case "EGR-4":
-		return "Our server's TLS certificate arrived untouched; doesn't prove other hosts aren't intercepted."
+		return "No TLS interception was seen; doesn't prove traffic isn't intercepted."
 	case "EGR-5.53u":
 		return "Test UDP packet on port 53 did not arrive; doesn't prove all UDP is blocked."
 	case "EGR-6":
@@ -238,9 +238,9 @@ func notFoundDetail(id string) string {
 	case "AMP-1":
 		return "sudo did not allow passwordless commands; doesn't prove sudo cannot be invoked another way."
 	case "AMP-6":
-		return "No host vsock service accepted a connection; doesn't prove vsock is disabled."
+		return "No vsock path to the host was found; doesn't prove there is none."
 	case "AMP-7":
-		return "No reachable Kubernetes API answered; doesn't prove cluster network access is blocked."
+		return "No Kubernetes API completed a TLS handshake; doesn't prove cluster network access is blocked."
 	}
 	return "Nothing turned up, though that doesn't prove a hard block."
 }
@@ -514,11 +514,11 @@ func scoreSummary(c Card) (breakdown, second string) {
 	case c.Score == c.Of && unproven > 0:
 		second = "No exposures surfaced, though unproven categories still lack a hard block proof."
 	case c.Score == c.Of:
-		second = "Every applicable category was tested with verified blocks or absences."
+		second = "No exposures surfaced, and every applicable category has at least one conclusive check."
 	case c.Score == 1 && unproven == 1:
 		second = "Only " + lastGreen + " showed no issue, and couldn't be proven blocked."
 	default:
-		second = fmt.Sprintf("%d of %d applicable categories are clear, with no finding above Info.", c.Score, c.Of)
+		second = fmt.Sprintf("%d of %d applicable categories have no finding above Info.", c.Score, c.Of)
 	}
 	return breakdown, second
 }
@@ -529,8 +529,8 @@ func decodeCaps(hexStr string) string {
 		return "unknown"
 	}
 	v, err := strconv.ParseUint(s, 16, 64)
-	if err != nil {
-		return hexStr
+	if err != nil { // malformed or wider than 64 bits: never echoed, never "none"
+		return "unknown"
 	}
 	if v == 0 {
 		return "none (0x0)"
@@ -552,19 +552,21 @@ func decodeNoNewPrivs(p *int) string {
 	case 0:
 		return "disabled (0, setuid escalation allowed)"
 	}
-	return fmt.Sprint(*p)
+	return "unknown"
 }
 
+// decodeSeccomp reads the identity's seccomp mode. The report can't tell a reported 0 from a mode the probe never
+// read, so 0 claims neither.
 func decodeSeccomp(s int) string {
 	switch s {
 	case 0:
-		return "disabled (0)"
+		return "no filter reported (0)"
 	case 1:
 		return "strict mode (1)"
 	case 2:
 		return "bpf filter active (2)"
 	}
-	return fmt.Sprint(s)
+	return "unknown"
 }
 
 func probeDigestLabel(sha string) string {

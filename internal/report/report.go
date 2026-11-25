@@ -65,10 +65,11 @@ func SchemaFor(m obs.Manifest) string {
 }
 
 // Boundary is SBX-10, which every report states beside the grade.
-const Boundary = "Sandprobe's \"no false passes\" rule holds against misconfiguration, faults, and wrapper scripts inside " +
-	"the agent's environment. It cannot catch a hostile sandbox runtime that tampers with the probe binary itself: " +
-	"a modified probe could fake in-box results without the host knowing. Only external canary network receipts come " +
-	"from outside the sandbox, and those can prove data escaped, never that outbound traffic was blocked."
+const Boundary = "Sandprobe's \"no false passes\" rule covers faults, misconfiguration, wrappers, and shims in the agent's " +
+	"environment when the host-shipped probe actually runs as the agent. It does not cover a box that substitutes for " +
+	"or tampers with the probe before or during the run: that box can report the expected digest, fabricate every " +
+	"in-box observation, and the host cannot tell. Only the canary's network receipts come from outside the box; they " +
+	"can prove a way out, never a refusal."
 
 // oldBoundary is the pre-0.3.5 wording of Boundary, mapped to Boundary when rendering saved reports to HTML.
 const oldBoundary = "No false passes holds against faults, misconfiguration, wrappers and shims in the agent's environment, " +
@@ -81,7 +82,7 @@ var NotTested = []string{
 	"Kernel or hypervisor-level interception",
 	"Container or VM escapes below the Linux user-space boundary",
 	"CPU, memory, or disk exhaustion (denial of service)",
-	"Behavior that targets only other processes and not this probe",
+	"Sandbox behavior applied only to other processes, not to this probe",
 }
 
 var oldNotTested = []string{
@@ -371,7 +372,7 @@ func Build(r *host.Run, m Meta) Doc {
 		}
 		d.Checks = append(d.Checks, c)
 	}
-	d.Statement = fmt.Sprintf("Graded on %d checks in this sandbox (%s) from our in-box probe; self-reported, not a certification.",
+	d.Statement = fmt.Sprintf("Host-graded on %d checks in this sandbox at %s, using the in-box probe's self-reported observations; not a certification.",
 		graded, m.StartedAt.Local().Format("Jan 2, 2006 3:04 PM MST"))
 	d.Lead = lead(d)
 	d.Contacted, d.Planned = contacted(observed), planned(man)
@@ -405,19 +406,20 @@ func lead(d Doc) string {
 		skipped := ""
 		switch n := len(d.Limits.Skipped); {
 		case n == 1:
-			skipped = " 1 more was skipped."
+			skipped = " 1 more was skipped, so it says nothing either way."
 		case n > 1:
-			skipped = fmt.Sprintf(" %d more were skipped.", n)
+			skipped = fmt.Sprintf(" %d more were skipped, so they say nothing either way.", n)
 		}
-		return "No exposures found among the checks that ran: blockable paths were verified closed or absent, " +
-			"and open-endpoint checks found none (which proves nothing elsewhere)." + skipped
+		return "No finding among the checks that ran: each check that can prove a path closed ended in a verified refusal, " +
+			"a verified absence or nothing in scope, and the checks that can only find an open path found nothing, which " +
+			"proves nothing." + skipped
 	case len(d.Findings) == 0:
 		return "No exposures found, but not every check could be verified, so this is not a clean result."
 	}
 	var proven, exposed []string
 	for _, f := range d.Findings {
 		switch {
-		case f.Gets == "" || strings.HasPrefix(f.ID, "CHN-"):
+		case f.Gets == "" || f.ID == "CHN-2":
 		case f.Class == string(catalog.Proof) && !f.Potential:
 			if len(proven) < 3 {
 				proven = append(proven, f.Gets)

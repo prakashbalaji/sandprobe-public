@@ -5,12 +5,21 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
-- The web report (`OUT-2` and `sandprobe scorecard -out`) now opens with a sharp hairline scorecard sheet that calls out
-  what sandbox service or runtime is under test alongside the box name, Linux user ID, run timestamp, probe version, and
-  trust boundary, paired with a prominent score, two-tone verdict headline, hairline result ledger, and seamless 3×2
-  category matrix. Check outcomes, indicator sign notes, capability bitmasks, `no_new_privs`, `seccomp`, and scope
-  boundaries are written in plain English while preserving Sandprobe's "no false passes" guarantees (`SCR-2`, `SCR-3`,
-  `UX-8`).
+- The web report has a new layout and plainer words. It opens with one sheet: what was tested (the provider, in
+  plain words, and the box's name), the Linux user the probe ran as, when it ran, the probe's version and that the
+  probe is in-box and not attested; then the score beside the headline finding and the counts by result; then the six
+  categories in a grid. A category reads `exposed`, `clear`, `none found · unproven` (dashed: nothing was found, and
+  nothing proves it closed) or `not applicable`. "What to fix" lists failures by severity, and everything else folds
+  under "Other checks". Each result is explained in plain English from the catalog: what was blocked, what was absent,
+  and for a check that found nothing, that this proves nothing. A sign that isn't confirmed says so. "Run details"
+  decodes the process's capabilities, `no_new_privs` and seccomp mode into words; a value that is missing or can't be
+  read shows as unknown. The three palettes, `-theme`, print and the embedded JSON are unchanged in kind, and scoring
+  hasn't changed: the same report gets the same score (SCR-2, SCR-3, UX-8).
+
+- The sentences a JSON report carries in `statement`, `boundary`, `lead` and `limits.not_tested` are reworded in plain
+  English. They say the same things, and no field is added, removed or renamed, so the schema stays `sandprobe/6`
+  (`sandprobe/7` with a recipe). If you match on those sentences, match on `grade`, `findings` or the score instead
+  (GRD-4, SBX-10).
 
 ## 0.3.4 (2026-11-24)
 
