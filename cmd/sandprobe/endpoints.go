@@ -100,7 +100,7 @@ func metadataContacts() []string {
 // checks turned on with -provider-endpoints still make is named (PRV-15): SEC-4's addresses from the catalog list the
 // probe dials (UX-4), and AMP-7's handshake. EGR-3 needs a canary and AMP-6 dials nothing, so neither is named.
 func noCanaryLine(attested []string) string {
-	line := "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run can't grade above C)"
+	line := "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run ends incomplete)"
 	var still []string
 	for _, id := range slices.Sorted(slices.Values(attested)) {
 		switch {

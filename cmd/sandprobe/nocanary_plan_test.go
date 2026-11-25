@@ -22,7 +22,7 @@ import (
 // The -no-canary line says no test traffic goes to any canary, and the help names only the connections that remain.
 func TestNoCanaryPlanWording(t *testing.T) {
 	cliKubectl(t) // a stub kubectl for run kubernetes, and HOME and the canary variables cleared
-	const base = "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run can't grade above C)"
+	const base = "none: you chose -no-canary, so the probe sends no test traffic to any canary, and the exfiltration checks aren't tested (the run ends incomplete)"
 	// A box that names a proxy and a Kubernetes API and has a vsock device, so no survey gate closes a check.
 	survey := &obs.Survey{Schema: obs.SurveySchema, KubeAPI: "10.96.0.1:443", Vsock: true,
 		Proxy: &obs.ProxySetting{Var: "HTTPS_PROXY", Scheme: "http", Addr: "10.0.0.9:3128"}}
