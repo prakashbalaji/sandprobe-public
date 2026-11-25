@@ -106,7 +106,8 @@ Since `sandprobe/6` (AGT-6) no generic output carries the letter (GRD-1), and ev
   <name>; Sandprobe did not verify it".
   A kind is never taken on the report's word: the scorecard derives each
   check's kind from this binary's own policy for the provider the run names (a native adapter's PRV-row exclusions are
-  `provider_terms`; `run exec`'s and a shipped recipe's defaults are `opt_in`, except that on a `run exec` report whose
+  `provider_terms`; `run exec`'s, a shipped recipe's and a person's own recipe's (`recipe`, RCP-4) defaults are `opt_in`,
+  except that on a `run exec` report whose
   manifest declares a provider (PRV-17) the checks that provider's PRV row excludes are `provider_terms`; any other
   provider has none), uses it
   only when the manifest records the same, and ANL-1 refuses a saved report whose recorded kinds disagree with it, so
@@ -1363,7 +1364,7 @@ HCN-1 to HCN-4 is built (`internal/canary`, `internal/canarycontrol`), and so ar
 (`host.HTTPSCanary`), PRV-15's `run exec`, and the hosted canary itself (HCN-7: deployed 21 Nov 2026 at
 `pub.probe.ac0.dev`, verified end to end with `run exec` through `docker exec`), HCN-5's choice of canary for every run, including native adapters (22 Nov 2026), and `-no-canary`, and RCP's
 runner with its first shipped recipe, Kubernetes (PRV-16), and PRV-15's `-provider-endpoints` for `run exec` and
-shipped recipes. `-recipe <file>` and recipe resets aren't built yet.
+shipped recipes, and RCP-4's `-recipe <file>` for a person's own recipe (24 Nov 2026). Recipe resets aren't built yet.
 Each piece needs AGENTS rule 2's two reviews before it lands. Where a rule below amends an existing
 one, the amended text lands in place only after review.
 
@@ -1448,7 +1449,7 @@ one, the amended text lands in place only after review.
   attestation line says so. EGR-3 carries its nonce to a canary, so under `-no-canary` it never runs: the plan says
   so, names no proxy for it, and its local-proxy line reads excluded. The plan's destinations are exactly the ones the
   probe's input lets it contact. The help says the same in short. `-no-canary` is for `run exec`, a shipped recipe (`run
-  kubernetes`) and their plans only, and is refused with any canary flag.
+  kubernetes`), a person's own recipe (`run -recipe`) and their plans only, and is refused with any canary flag.
 - **HCN-8 Private maintenance.** The existing private Unix control socket supports `maintenance`, `drain`
   and `resume`. Their answers alone carry `maintenance {draining, active_runs, reservations}` after expired
   entries are purged; they carry no run names, sources, nonces, secrets or receipt contents. `drain` atomically
@@ -1520,7 +1521,7 @@ one, the amended text lands in place only after review.
     approval (AGT-3), and the report records it beside the check. Nothing selects them all at once.
     - The value is a comma-separated list of those four IDs, each named once, exactly as the catalog spells it. An
       empty value, an empty item, `all`, `*`, a duplicate or any other ID is refused before the plan exists, and so is
-      the flag anywhere but `run exec`, a shipped recipe (RCP-4) and their plans: `run docker` already runs these
+      the flag anywhere but `run exec`, a shipped recipe or a person's own (RCP-4) and their plans: `run docker` already runs these
       checks, and a native adapter's PRV row decides them (PRV-5). It has no environment default, so an attestation is
       typed for each run.
     - A selected check leaves the exclusions and runs as it does for a provider whose rules allow it, under every
@@ -1533,7 +1534,8 @@ one, the amended text lands in place only after review.
       row carries a fixed `attestation` sentence, never text from the command line; such a report declares
       `sandprobe/6` (`sandprobe/2` before the letter left OUT-1, AGT-6), and the reader accepts attestations only where this policy allows them. The grader (GRD-5) and ANL-1 refuse an attestation on a check that isn't a provider
       endpoint, is named twice, or still carries a skip kind, and ANL-1 also refuses one where this binary's own policy
-      for the run's provider isn't `opt_in` (SCR-2): only `run exec` and shipped recipes take an attestation.
+      for the run's provider isn't `opt_in` (SCR-2): only `run exec`, shipped recipes and a person's own recipe take an
+      attestation.
     - Every attested check keeps its report row, with its attestation, whether or not the run is valid, since the
       check may already have contacted its endpoint: an invalid run (GRD-5) grades nothing, so its row reads unknown,
       "not graded: the run is invalid", while the grade lists no unknowns. ANL-1 requires a row for every attested check
@@ -1543,7 +1545,8 @@ one, the amended text lands in place only after review.
 - **RCP-1 Recipes.** A recipe is a POSIX shell file with a `# sandprobe-recipe: v1` header (provider, docs, terms with
   the quoted clause, exclusions, `addressed-by: id` or `name`) and the functions `sp_ready`, `sp_create`, `sp_shell`,
   `sp_delete` and `sp_gone`, and optionally `sp_checkpoint` and `sp_restore`, or `sp_recreate`, and `sp_whois` for a
-  name-addressed provider. The host calls one function per `sh` invocation, under the run's deadline. `sp_shell`
+  name-addressed provider. A header value is printable ASCII, at most 400 characters, since plans and reports show
+  it; a recipe with any other is refused. The host calls one function per `sh` invocation, under the run's deadline. `sp_shell`
   keeps PRV-15's contract. Each call is `sh -c` over the recipe's bytes as read once (at most 64 KiB, never read
   again from disk) followed by the function's name, with stdin from `/dev/null` except `sp_shell`'s, which carries
   PRV-15's script; its output is bounded. Its stderr goes to `/dev/null`, since kubectl and an exec plugin write
@@ -1567,14 +1570,23 @@ one, the amended text lands in place only after review.
   Recorded means on disk (AGENTS rule 8): before `sp_create`, the host writes the recipe, its SHA-256, the target and
   the name to `~/.config/sandprobe/recipe-<recipe>-<name>.state` (mode 600), and nothing is created if it can't; the
   ID is added once returned, and if it can't be, nothing runs in the box and it's deleted by that ID; the file is
-  removed only when `sp_gone` says 0, and is named in the error otherwise.
+  removed only when `sp_gone` says 0, and is named in the error otherwise. For a person's own recipe (RCP-4)
+  `<recipe>` is `own-` and the first 12 hex digits of the file's SHA-256, never any part of its path, and the record
+  also holds the file's absolute path; no shipped recipe is named `recipe` or begins `own-`.
   The name and that path go to stderr before the create, even with `-o json`. The cleanup's budgets start when it
   does (the scratch removal, then five minutes for the delete), so a run that used all of its own still asks for the
   delete.
-  Every shipped recipe must address an immutable ID, or a reviewed name exception, and its review checks it.
+  Every shipped recipe must address an immutable ID, or a reviewed name exception, and its review checks it. A
+  person's own recipe may be `addressed-by: name`: the host runs the same `sp_whois` guard and reports the same
+  race, with no review behind either, as its plan says of the whole file.
+  A recipe run's `provider_calls` (PRV-3) list `sp_create`, `sp_delete` and the last `sp_gone`, each as
+  `<recipe> recipe sha256:<64 hex> <function>`, where `<recipe>` is a shipped recipe's name, or `own` for a person's
+  own, with its exit code and the create-returned ID, and nothing the recipe printed. `sp_shell`'s invocations
+  aren't listed, as `run exec`'s aren't.
 - **RCP-3 Reset.** PER-5 runs only through a recipe's TWN-3 reset: `sp_checkpoint` and `sp_restore` (restore in
   place) or `sp_recreate` (recreate). A recipe with neither skips PER-5 under its GRD-3 gate; PER-1 to PER-4 run
-  either way.
+  either way. Resets aren't built yet: none of the three is ever called, PER-5 is skipped, and the plan and report
+  of a recipe that defines one say so.
 - **RCP-4 Shipped and own recipes.** A recipe in `recipes/` is a provider adapter: it has a PRV row citing the
   provider's terms (PRV-5) and its exclusions, and gets the two reviews. Its exclusions default to PRV-15's four;
   its reviewed PRV row may select any of them, citing what allows it. A provider whose terms require written consent
@@ -1584,7 +1596,42 @@ one, the amended text lands in place only after review.
   `sandprobe run -recipe <file>` runs a person's own recipe with the default exclusions, which only PRV-15's per-check
   `-provider-endpoints` attestation lifts; its plan shows the file's SHA-256 and says Sandprobe hasn't reviewed that
   provider's terms. A person's own recipe is trusted host code: it runs with the person's own credentials and
-  permissions, and the plan says so. Built: the shipped recipes (`run kubernetes`); `-recipe <file>` isn't yet.
+  permissions, and the plan says so. Built: the shipped recipes (`run kubernetes`), and `-recipe <file>` (24 Nov
+  2026), which these points settle:
+  - **The command.** `sandprobe plan -recipe <file>` and `sandprobe run -recipe <file> [-as <user>] -y` name no
+    provider: the file takes its place. A provider beside `-recipe`, or `-recipe` on any other command, is a usage
+    error. Every other flag does what it does for a shipped recipe: `-as`, `-scratch`, `-out`, `-min`, `-theme`,
+    `-o json`, the canary flags, `-no-canary`, `-provider-endpoints` and `-allow-local-proxy` work, and what a
+    shipped recipe refuses stays refused, `-provider` (PRV-17) and anything after `--` among them. Approval is
+    AGT-3's. `sandprobe providers` lists no own recipe.
+  - **The file.** It is opened once, without following a symlink at the path's last component and without blocking,
+    and what was opened must be a regular file of at most 64 KiB, read through that bound (ANL-1's care for a
+    file a person names). Anything else is one fixed usage error that echoes nothing from the file. Its header and
+    functions are checked as a shipped recipe's are (RCP-1). Its SHA-256 is over the bytes read, the only bytes
+    any call runs.
+  - **The exclusions** are all four of PRV-15's, whatever the header's `exclusions:` line says: a line naming fewer,
+    or no line, drops none, and one naming any other check is refused as for any recipe. Each skip's kind is
+    `opt_in` (SCR-2), since nobody reviewed any terms, and its reason quotes nothing from the header.
+  - **The provider.** The header's `provider:` line is the recipe's own word. The plan and the report's residual
+    show it as that. It is never matched against the providers Sandprobe has reviewed, so it makes no skip
+    `provider_terms` and no category not applicable. The `docs:` and `terms:` lines are required as for any
+    recipe, and no plan or report shows them.
+  - **The plan** (UX-4) shows what a shipped recipe's does, and first: the file's path as given; its full SHA-256;
+    that it is the person's own recipe, which Sandprobe hasn't reviewed; the provider it names, and that Sandprobe
+    hasn't reviewed that provider's terms; that it is trusted host code, run on this machine with the person's own
+    credentials and permissions; `sp_ready`'s line naming where the box will be made; and the four exclusions.
+    `sp_ready` is part of that code and runs before any plan exists (RCP-1), so `plan -recipe` and an unapproved
+    `run -recipe` run it too: naming the file is what allows that, and the plan says it already ran. The plan also
+    says the delete and the gone answer are the recipe's own `sp_delete` and `sp_gone`, given only the
+    create-returned ID.
+  - **The report.** `run.provider` is `recipe`: the way the box was reached, as `exec` is, never a provider's
+    name, and this binary's own policy for it is the four `opt_in` defaults (SCR-2). `run.box.created_by_sandprobe`
+    is true. `provider_calls` holds the recipe's SHA-256 (RCP-2): a successful create is exactly `own recipe
+    sha256:<64 hex> sp_create`, with `id` equal to `run.box.provider_id`. The residual names the SHA-256 and the
+    header's provider as the recipe's own word, and says the deletion rests on the recipe's `sp_gone`. The file's
+    path is in no report. No field is new, so the report declares the version its manifest already needs (AGT-6).
+    A Sandprobe older than this rule has no `recipe` in its own policy, so its ANL-1 refuses such a report's skip
+    kinds as inconsistent input.
 - **PRV-16 Kubernetes, by recipe.** `sandprobe run kubernetes [-as <user>] -y` makes one throwaway pod in the
   person's own cluster through `recipes/kubernetes.sh` and `kubectl`. Settings: `SANDPROBE_KUBE_CONTEXT` (required:
   the kubeconfig's current context is never used, since a kubeconfig often also holds production clusters),
@@ -3479,7 +3526,8 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | LNC-4 | `internal/probe/wrap_test.go` `TestWrapperHoldsOnlyTheRunsEnvironment` in `test/probe.sh`, as nobody and as root (the test, not the probe, reads both environments, whose values are fake): a dash `sh` given `MY-KEY=sandprobe-fake` and `a.b=sandprobe-fake` `exec`s the wrapper, and neither the wrapper's `/proc/<pid>/environ` nor the run's holds them; a `sh` that changes `FOO_TOKEN` from `sandprobe-fake-a` to `sandprobe-fake-b` and exports it before `exec`: the wrapper's environment holds only `-b`, as the run's does; each time, the wrapper's entries equal the run's minus `SANDPROBE_TWIN`, in order, duplicates and entries without `=` kept; with `SANDPROBE_FIXTURES=1`, `internal/host/exec_docker_test.go` `TestExecWrapper` on `debian:bookworm-slim` with `useradd -m -u 1000 agent`, through `ExecBox` as `agent` and `docker exec -i -u agent <ctr> sh`: the box alone (SEC-2 and SEC-5 pass with twin proof, each reason naming the wrapper's PID); a same-uid decoy from `docker exec -d -u agent <ctr> sleep 300` (SEC-2 a finding on the decoy's PID, and SEC-5 too where Yama allows it, never the wrapper's); the person's `docker exec` given `-e MY-KEY=sandprobe-fake` (dash drops the name before `exec`, so a pass with the wrapper skipped); no scratch left |
 | LNC-5 | `internal/host` `TestOnlyExecMainRunWraps` (`DockerBox.Probe`'s command runs the probe directly, with no wrapper; a recipe's `sp_shell` main run goes through `ExecBox`'s wrapper) |
 | HCN-5 (which canary) | `cmd/sandprobe/canary_test.go`, all offline or on a local stand-in: `TestCanaryPrecedence` (`-canary`, by flag or `SANDPROBE_CANARY`, over `-canary-url` with its pin, over the hosted canary; a stray `canary-*.state` file is chosen only when named; a pin without its URL is refused), `TestStrayCanaryStateIsIgnored` (with one stray state file and nothing named, the plans of `run exec` and of every native adapter, and `providers`, name the hosted canary, who runs it and HCN-4's retention, never the stray file, its address or SSM; named, the same file is the operator canary; a named file that doesn't load isn't ready), `TestNativeRunOnTheHostedCanary` (the seam every native adapter shares: the hosted canary, here a real canary on a local port with its own pin, gives its signed status and holds the run's slot before any box; `Execute` through it is live with its receipts read; `closeCanary` leaves no slot held; a named operator canary that doesn't load stops the run), `TestCanaryFlagsBeatTheEnvironment` (a stale `SANDPROBE_CANARY` beside an explicit `-canary-url` and `-canary-pin`: `plan e2b` names the URL; any canary flag sets every `SANDPROBE_CANARY*` value aside, so an explicit URL never takes the environment's pin and `-no-canary` isn't refused for the environment's canary; with no flag, the environment stands in), `TestDockerRefusesCanaryFlags` (PRV-14: `plan` and `run docker` refuse each canary flag before any Docker call, and never read the environment's canary), `TestExecReleasesTheSlotAfterACancelledCleanup` (run exec's teardown gives the hosted canary's slot back under its own budget after a scratch cleanup that used all of its own), `TestPublicCanaryPlansDiscloseRetention` (on the hosted canary and on one `-canary-url` names, the plans of run exec, the Kubernetes recipe and all nine native adapters end their residual with the one shared HCN-4 sentence, which names both addresses, the box's for at most 30 minutes and the host's in a rate counter for at most an hour, in memory only; on an operator canary every residual is its own alone, and run docker's plan is unchanged); `internal/host`: `TestPublicCanaryThroughAReset` (PER-5's restore model on a real public canary: status, arm, probe, query and disarm, in that order, all before the mark, the reset and the recheck, which ask the canary nothing; one reserved slot covers the run, and Close leaves none held) |
-| RCP-1/RCP-2 | `internal/host/recipe_test.go`: `TestParseRecipe` (the header's keys, the functions, exclusions only from the provider endpoints, `env:` only its own `SANDPROBE_` names, the 64 KiB bound, and the shipped recipe), `TestRecipeLifecycle` (each call gets the host's box, name and target and never the process's own, stdin from `/dev/null`, `sp_shell` carries PRV-15's script), `TestRecipeCreateWithoutID` (empty, two lines, bad characters, too long or failed: the name is reported and nothing deleted; an ID with a failed create is still deleted by it), `TestRecipeGone` (only 0 is gone; 1, 2 or anything else names the ID), `TestRecipeWhoisGuards` (no invocation and no delete once the name holds another box; the residual reports the race), `TestRecipeErrorsWithhold` (an error carries what the recipe wrote to fd 3, and never its stderr, even a line posing as the recipe's), `TestRecipeMessagesCantBeReopened` (a tool with fd 3 closed finds no message file to reopen by name, and none is left); `internal/host/exec_docker_test.go`: `TestRecipeThroughDocker` (`SANDPROBE_FIXTURES=1`: an ID-addressed recipe runs the shipped probe through its `sp_shell` and deletes its container by ID, confirmed gone) |
+| RCP-1/RCP-2 | `internal/host/recipe_test.go`: `TestParseRecipe` (the header's keys, the functions, exclusions only from the provider endpoints, `env:` only its own `SANDPROBE_` names, the 64 KiB bound, a header value that isn't printable ASCII or is over 400 characters, a defined reset noted (RCP-3), and the shipped recipe), `TestRecipeCallsRecorded` (`provider_calls` list `sp_create`, `sp_delete` and the last `sp_gone` in the fixed form with the recipe's SHA-256, the exit code and the create-returned ID, and nothing the recipe printed; a create with no ID is listed without one), `TestRecipeLifecycle` (each call gets the host's box, name and target and never the process's own, stdin from `/dev/null`, `sp_shell` carries PRV-15's script), `TestRecipeCreateWithoutID` (empty, two lines, bad characters, too long or failed: the name is reported and nothing deleted; an ID with a failed create is still deleted by it), `TestRecipeGone` (only 0 is gone; 1, 2 or anything else names the ID), `TestRecipeWhoisGuards` (no invocation and no delete once the name holds another box; the residual reports the race), `TestRecipeErrorsWithhold` (an error carries what the recipe wrote to fd 3, and never its stderr, even a line posing as the recipe's), `TestRecipeMessagesCantBeReopened` (a tool with fd 3 closed finds no message file to reopen by name, and none is left); `internal/host/exec_docker_test.go`: `TestRecipeThroughDocker` (`SANDPROBE_FIXTURES=1`: an ID-addressed recipe runs the shipped probe through its `sp_shell` and deletes its container by ID, confirmed gone) |
+| RCP-4 (own recipe) | `internal/host/recipe_test.go`: `TestOwnRecipe` (named `own-<12 hex>` from its SHA-256; all four exclusions whether the header lists four, one or none; any other check still refused; `provider: modal` stays the recipe's word; the residual names the SHA-256 and says nobody reviewed it; no shipped recipe is named `recipe` or `own-`); `internal/report/scorecard_na_test.go`: `TestOwnRecipePolicy` (the policy for `recipe` is the four as `opt_in`, never `provider_terms`, with or without a declared provider); `internal/analysis/analysis_test.go`: `TestOwnRecipeReport` (a `recipe` report with `opt_in` kinds loads; one with a `provider_terms` kind, or under a provider name the policy lacks, is refused); `cmd/sandprobe/recipe_own_test.go`: `TestOwnRecipeUsage` (`-recipe` beside a provider, on another command or empty; `-provider`, `--`, `-block-device-path`, `-setup`, `-keep-sandbox`, a bad `-as`, a bad `-min`, `-no-canary` with a canary flag and a bad `-provider-endpoints` are refused; `-as`, `-scratch`, `-no-canary`, `-provider-endpoints` and `-allow-local-proxy` plan), `TestOwnRecipeFile` (missing, over 64 KiB, a directory, a FIFO, a symlink, no header, a missing function, an unprintable header value: each a usage error that echoes nothing from the file, and `sp_ready` never runs), `TestOwnRecipePlan` (the path as given, the full SHA-256 of the bytes on disk, own recipe, not reviewed, the provider as the recipe's word, terms not reviewed, trusted host code, `sp_ready` already ran, the target, the four exclusions, in text and JSON; an unapproved run exits 3 with `needs_approval` and creates nothing), `TestOwnRecipeExclusions` (a header that lists one exclusion or none still plans all four off, and `-provider-endpoints` lifts any of them only by name), `TestOwnRecipeCleanupExits` (a create that returns two lines, bad characters or nothing exits 7 naming the box, deletes nothing and keeps a mode-600 record named `recipe-own-<12 hex>-sandprobe-<12 hex>.state` that holds the SHA-256 and no part of the path in its name; a box `sp_gone` never confirms exits 7 naming its ID with the record kept; one it confirms exits 5 with the record removed), `TestExampleRecipe` (`examples/recipes/docker-template.sh` parses as an own recipe and isn't shipped), `TestOwnRecipeDocker` (`SANDPROBE_FIXTURES=1`: the example recipe end to end on local Docker without a canary, as `nobody`: exit 5 incomplete, the saved report loads under ANL-1, `run.provider` `recipe`, created by Sandprobe, the create in `provider_calls` with the SHA-256 and the box's ID, four `opt_in` skips, and the container and the record gone) |
 | PRV-16 | `internal/host/recipe_kube_test.go` with a stub `kubectl`: `TestKubernetesRecipeCalls` (every call names the context, and the namespace where it reaches the cluster; no apply; the overrides are read from their file and never appear on a command line; `get pods` is checked; the delete is the raw API call with the UID precondition and its grace), `TestKubernetesRecipeRefuses` (no context, a bad or capitalised namespace, an unreadable overrides file, a refused permission, an API server URL with a user, query or fragment part (refused without printing it) or that isn't a URL, a proxy's path (shown only as the origin), a changed API server, path or cluster settings, a stub kubectl that writes a message as the recipe on stderr and on fd 3 (never shown), and overrides that make anything but the pod or move it to another namespace), `TestKubernetesRecipeGone` (absent or another UID 0, ours 1, kubectl failing or no target 2), `TestKubernetesRecipeChildrenCantSpeak` (every kubectl in the recipe runs with fd 3 closed); `cmd/sandprobe/recipe_test.go`: `TestRecipePlan` (the plan names the target, the ID-only delete, the whois guard, the exclusions and the skipped PER-5; an unapproved run creates nothing; no context is a login error; passthrough, a canary flag with `-no-canary`, and a bad `-as` are refused), `TestRecipeRunCleanupExits` (a create with no ID exits 7 naming the box, deletes nothing and keeps its record; an ID whose box never became ready exits 7 naming it, after a delete asked though the run had used more than the delete's whole budget, and the record keeps the ID), `TestRecipeRunStopsWithoutRecord` (an ID that can't be written to the record stops the run before anything runs in the box, which is deleted), `TestKubernetesRecipeLive` (with `SANDPROBE_KIND_KUBECONFIG` and a `kind-` context only: a real run without a canary, incomplete, its pod confirmed gone and no pod or record left; `-as nobody` on the default root pod stops before any check, and the pod is deleted) |
 | HCN-8 | `internal/canary/maintenance_test.go`: private drain/status/resume, reservation/arm ordering, receipt preservation, expiry, legacy omission and public refusal; `internal/canarycontrol/maintenance_test.go`: maintenance routes unavailable on public HTTP |
 | HCN-7 | `deploy/canary_test.sh`: the operator canary's service unchanged (the non-public user data was checked byte for byte against main's), the hosted canary's signed control for its own address, its control key made once in its own state directory, its wait for its address, staging only on request, its own domain, state file and namespace, `publicstart` taking only an address before any AWS call, and `publiccheck` running under `set -u` on macOS's bash 3.2 with and without staging (an empty argument array once stopped a production deploy's final check); `TestCanaryCheckRefusals` (a URL without its pin, a pin without its URL, by flag or environment, a URL that isn't `https://control.<domain>`, `-tls-insecure` outside `canary check`); `TestCanaryCheckDefaultsToTheHostedCanary` (with nothing named, beside a stray operator state file, `canary check` asks the hosted canary, here a stand-in on a local port under its own pin, names it in text and JSON, and leaves every slot free; `-canary`, by flag or `SANDPROBE_CANARY`, is refused before anything is asked; `-tls-insecure` without `-canary-url` is refused; under a pin the stand-in doesn't sign with, its status is unproven, exit 4); `TestOperatorCanaryFixRunsAsPasted` (the refusal of an operator canary prints a fix that is a command alone: it passes `sh -n`; run through `sh` where `deploy/canary.sh` is a stub, it hands the stub `AWS_PROFILE`'s value exactly, or an empty `PROFILE` when that is unset, and `status`; with `AWS_PROFILE` unset, the real `canary.sh` refuses before its stubbed `aws` is called) |
