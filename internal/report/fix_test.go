@@ -137,11 +137,11 @@ func TestPageOrder(t *testing.T) {
 	}
 }
 
-// SCR-3: every test appears exactly once, on every report's page, fresh or re-rendered, in both palettes, and every
+// SCR-3: every test appears exactly once, on every report's page, fresh or re-rendered, in every palette, and every
 // link on the page lands on something there.
 func TestEveryTestOnce(t *testing.T) {
 	for name, d := range pages(t) {
-		for _, theme := range []string{"graphite", "mission"} {
+		for _, theme := range themes {
 			for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
 				b, err := render(d, theme)
 				if err != nil {
@@ -274,7 +274,7 @@ var (
 )
 
 // SCR-3 and UX-8: the page shows no letter grade, its title included, for a valid, an incomplete and an invalid run,
-// fresh or re-rendered, in both palettes. The title carries the score, beside which the page says an incomplete run is
+// fresh or re-rendered, in every palette. The title carries the score, beside which the page says an incomplete run is
 // incomplete, and an invalid run says plainly that it is invalid and has no score. The JSON the page embeds carries
 // no letter either (OUT-1, AGT-6): not from a run, and not re-rendered from an older report that has one (ANL-1).
 func TestNoLetterGrade(t *testing.T) {
@@ -310,7 +310,7 @@ func TestNoLetterGrade(t *testing.T) {
 		}
 		fresh := tc.d // as a run writes it: sandprobe/6, no letter
 		fresh.Schema, fresh.Grade.Letter = SchemaNoLetter, nil
-		for _, theme := range []string{"graphite", "mission"} {
+		for _, theme := range themes {
 			for _, r := range []struct {
 				d      Doc
 				render func(Doc, string) ([]byte, error)
@@ -377,7 +377,7 @@ func TestInvalidHasNoCounts(t *testing.T) {
 	}
 }
 
-// SCR-6: scope discovery must not inflate executed-access coverage in either theme.
+// SCR-6: scope discovery must not inflate executed-access coverage in any palette.
 func TestHTMLExecutedCountsExcludeScopeOnlyResults(t *testing.T) {
 	d := doc(obs.Pass, map[string]Check{
 		"AMP-4":     {Result: obs.Unknown},
@@ -393,7 +393,7 @@ func TestHTMLExecutedCountsExcludeScopeOnlyResults(t *testing.T) {
 	}
 	d.Checks = kept
 	before := Score(d)
-	for _, theme := range []string{"graphite", "mission"} {
+	for _, theme := range themes {
 		b, err := HTML(d, theme)
 		if err != nil {
 			t.Fatal(err)

@@ -269,7 +269,7 @@ func TestGreenNotProven(t *testing.T) {
 	if b, _ := json.Marshal(vc); strings.Count(string(b), `"green_not_proven":true`) != 1 {
 		t.Errorf("the card's JSON: %s", b)
 	}
-	for _, theme := range []string{"graphite", "mission"} {
+	for _, theme := range themes {
 		page, err := HTML(vibe, theme)
 		if err != nil {
 			t.Fatal(err)

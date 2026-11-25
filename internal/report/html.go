@@ -306,8 +306,12 @@ func render(d Doc, theme, saved string) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	if theme != "mission" { // UX-8: anything else, the retired "modern" included, is the default
+	switch theme {
+	case "light", "graphite", "mission":
+	case "dark": // UX-8: another name for graphite; the page only ever says graphite
 		theme = "graphite"
+	default: // UX-8: anything else, the retired "modern" included, is the default, which follows the viewer's system
+		theme = "auto"
 	}
 	when, _ := time.Parse(time.RFC3339, d.Run.StartedAt)
 	v := view{Nonce: base64.RawURLEncoding.EncodeToString(nonce), Theme: theme, Provider: d.Run.Provider, Box: d.Run.Box.Name,
