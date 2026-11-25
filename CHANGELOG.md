@@ -20,6 +20,15 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   managed-workload evaluations still report the letter in their legacy fields (GRD-1, OUT-1, AGT-6, ANL-1, ANL-2,
   CAL-3).
 
+- The web report is easier to read and follows your system's light or dark setting. A new `light` palette, a calm
+  off-white page with white panels, shows where the system is light, and `graphite` where it is dark. The browser
+  decides each time the page opens, so one file is right on either machine. `-theme auto` is the new default;
+  `-theme light`, `graphite` or `mission` still pins one. The page's Palette button steps through all four and
+  remembers your choice, which wins over `-theme`. In every palette, text meets WCAG AA contrast (4.5:1) and every
+  result mark 3:1: pill outlines and the fainter severity dots fell short in `graphite` and `mission`. Outside
+  `mission`, no label is under 12px, where some were 10.5px, and the map scrolls sideways before its text shrinks
+  below that. An unknown is still dashed and never green, and the page still prints on white (UX-8, UX-9).
+
 ## 0.3.2 (2026-11-24)
 
 - The workload exposure page never trusts a saved exposure card. Sandprobe rebuilds each row with the same code that
