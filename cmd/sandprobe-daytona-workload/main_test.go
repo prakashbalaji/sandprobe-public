@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
+	"sandprobe/internal/report"
 )
 
 type surveyStopBox struct{ called bool }
@@ -49,6 +52,42 @@ func TestManagedCollectionOptionsReachSurveyWithoutPublicUploads(t *testing.T) {
 		if id == "EGR-6" {
 			t.Fatal("public upload selected")
 		}
+	}
+}
+
+func TestManagedDaytonaPreservesNativeExclusionKind(t *testing.T) {
+	o := collectionOptions("fixture-sha", nil)
+	m, in := host.Plan(o, &obs.Survey{}, "box", host.Storage{}, "192.0.2.1", "canary.invalid", "")
+	for id := range host.DaytonaExclusions() {
+		if m.Skipped[id] == "" || m.SkipKinds[id] != obs.SkipProviderTerms || slices.Contains(in.Selected, id) {
+			t.Fatalf("native exclusion lost or executed: %s", id)
+		}
+	}
+	o.ExcludedKind = ""
+	before, oldInput := host.Plan(o, &obs.Survey{}, "box", host.Storage{}, "192.0.2.1", "canary.invalid", "")
+	if !slices.Equal(before.Selected, m.Selected) || !slices.Equal(oldInput.Selected, in.Selected) || !maps.Equal(before.Skipped, m.Skipped) {
+		t.Fatal("provenance changed check selection")
+	}
+	var d report.Doc
+	d.Manifest, d.Run.Provider, d.Grade.Valid = m, "daytona", true
+	for id := range host.DaytonaExclusions() {
+		d.Checks = append(d.Checks, report.Check{ID: id, Result: obs.Skipped})
+	}
+	card := report.Score(d)
+	if card.Of != 5 || card.Score != 0 {
+		t.Fatalf("native applicability not preserved: %+v", card)
+	}
+	cloudFound := false
+	for _, row := range card.Rows {
+		if row.Name == "Cloud access" {
+			cloudFound = true
+		}
+		if row.Name == "Cloud access" && (!row.NotApplicable || row.Green || row.Coverage.UsableResults != 0 || row.Coverage.Conclusive != 0 || len(row.Coverage.Skipped) != 2) {
+			t.Fatalf("excluded category gained measured credit: %+v", row)
+		}
+	}
+	if !cloudFound {
+		t.Fatal("Cloud access category missing")
 	}
 }
 
