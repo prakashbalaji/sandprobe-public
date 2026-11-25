@@ -5,7 +5,7 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
-- `run kubernetes` now waits up to a minute for a new node to take `kubectl exec`. A node EKS Auto Mode has just
+- `run kubernetes` now waits up to 90 seconds for a new node to take `kubectl exec`. A node EKS Auto Mode has just
   started refuses exec until its certificate is issued, so a first run there could stop with only "the command failed:
   exit status 1". Only that error is retried, and a pod that never takes exec stops the run with a message that says
   so (PRV-16).

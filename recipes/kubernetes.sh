@@ -144,7 +144,7 @@ sp_create() {
 	}
 }
 
-# sp_wait waits until the pod takes exec, for about a minute: a new node's kubelet serves exec only once its serving
+# sp_wait waits until the pod takes exec, for about a minute (the host stops it at 90 seconds): a new node's kubelet serves exec only once its serving
 # certificate is issued, a little after the pod is ready (EKS Auto Mode starts nodes on demand). The host calls it once
 # the create's UID is on disk (RCP-2). Only that error is retried. kubectl's message is matched and never shown, and
 # each try is made only while the name still holds that UID.

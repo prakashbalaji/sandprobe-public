@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ func stubKubectl(t *testing.T) (dir string, calls func() []string) {
 	script := `#!/bin/sh
 d=$(dirname "$0")
 echo "$*" >> "$d/calls"
+if [ -f "$d/stall" ]; then case "$*" in *"$(cat "$d/stall")"*) echo $$ > "$d/stalled"; exec sleep 300 ;; esac; fi
 echo "sandprobe-recipe: SPOOF on stderr" >&2 # a tool posing as the recipe, on both channels (AGENTS rule 3)
 { echo "SPOOF on fd 3" >&3; } 2>/dev/null
 ans() { cat "$d/$1" 2>/dev/null; }
@@ -306,5 +309,58 @@ func TestOwnRecipeNeverWaits(t *testing.T) {
 	}
 	if err := (&RecipeBox{Recipe: r}).Wait(context.Background()); err != nil {
 		t.Errorf("an own recipe's sp_wait was called: %v", err)
+	}
+}
+
+// RCP-1: kubectl has no request timeout, so a stalled one ends with the wait's limit or a cancel, and is dead, not
+// orphaned, when Wait returns.
+func TestKubernetesRecipeWaitStalls(t *testing.T) {
+	defer func(d time.Duration) { RecipeWaitLimit = d }(RecipeWaitLimit)
+	for _, stall := range []string{" get pod ", " exec "} {
+		for _, how := range []string{"limit", "cancel"} {
+			t.Run(strings.TrimSpace(stall)+" "+how, func(t *testing.T) {
+				dir, _ := stubKubectl(t)
+				r := kubeRecipe(t)
+				target, err := r.Ready(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, _ := NewRecipeBox(r, target, "")
+				if err := b.Create(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				os.WriteFile(filepath.Join(dir, "stall"), []byte(stall), 0o600)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				RecipeWaitLimit = time.Minute
+				if how == "limit" {
+					RecipeWaitLimit = 2 * time.Second
+				} else {
+					time.AfterFunc(2*time.Second, cancel)
+				}
+				start := time.Now()
+				if err := b.Wait(ctx); err == nil || !strings.Contains(err.Error(), "was stopped") {
+					t.Errorf("wait: %v", err)
+				}
+				if took := time.Since(start); took > 10*time.Second {
+					t.Errorf("took %s", took)
+				}
+				p, err := os.ReadFile(filepath.Join(dir, "stalled"))
+				if err != nil {
+					t.Fatal("kubectl never stalled, so nothing was tested")
+				}
+				pid, err := strconv.Atoi(strings.TrimSpace(string(p)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; syscall.Kill(pid, 0) == nil; i++ { // init may take a moment to reap the killed child
+					if i == 40 {
+						syscall.Kill(pid, syscall.SIGKILL)
+						t.Fatal("the stalled kubectl outlived the wait")
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			})
+		}
 	}
 }
