@@ -1147,6 +1147,20 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   they freeze the selection in the run intent/journal and forward it to the generic host option. Invalid selectors
   or an ephemeral profile are rejected before resource creation. Cleanup needs no measurement selector. A resumed
   journal must not change its recorded marker mechanism; older journals mean regular-file markers.
+- **EVD-18 Portable metadata retention marker.** An explicit `empty-file-v1` PER-5 mode uses an exclusively
+  created empty regular file at `<root>/.sandprobe-empty-<run id>`. The public run token is carried by its unique
+  name, not file contents. Verify the surveyed root before creation and the created empty regular object before
+  confirming placement; a close failure leaves placement unknown. After reset, pin the entry with `O_PATH` and
+  `O_NOFOLLOW`, require a regular file of size zero, and verify the name still identifies that same pinned object.
+  Never reopen it for reading or inspect contents. Matching metadata proves retention of a run-owned namespace
+  marker; it does not prove regular-file contents or original inode identity. An inode change across reset is
+  allowed only for this explicit metadata protocol. Nonempty, wrong-type, inaccessible or concurrently replaced
+  entries stay unknown and unread. Missing markers stay find-only, never pass. There is no automatic fallback.
+  The existing native reset/volume proof and regular-file content guards remain unchanged. Both managed runners
+  freeze and forward this generic selector like `symlink-v1`. If no planned marker was placed, do not reset or
+  create a replacement merely to obtain an already-inconclusive result; retain all placement gaps in the reason.
+  Host-only reset evidence may additionally retain a closed, fixed failure-stage label. It is diagnostic only,
+  never a provider error string or positive proof; unknown labels are ignored and successful reset evidence clears it.
 - **EVD-14 Bounded policy-readback diagnostics.** EVD-11's optional organization read may report only fixed
   failure categories: authentication, permission, endpoint availability, rate limit, request rejection, service
   availability, timeout, transport or response-schema failure; other errors retain `readback_unavailable`.
@@ -3697,6 +3711,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |
 | EVD-17 | `TestWorkloadExposurePreservesValidatedProvider`: public bundle recomputation retains valid provider scope, matches canonical report scoring and coverage, and invalid contracts never yield a valid score |
+| EVD-18 | Empty-marker Linux positive/negative/type/rename calibration; unchanged content-marker guards; zero-length placement validation; host planning, no-marker reset suppression and explicit managed selector forwarding |
 | EVD-15 | `TestLinkMarkerSurvivesRenumberingWithoutFollowingTarget`, `TestLinkMarkerRejectsWrongTypeAndMetadata`, `TestLinkMarkerRejectsConcurrentReplacementAndUnsupportedRead`, `TestLinkMarkerCreationIsExclusiveAndRootBound`, existing `TestRecheckIdentityDiagnostics`, `TestPlanMetadataPersistenceMarker`, `TestMetadataMarkerStillRequiresResetAndVolumeProof`, and `TestMetadataMarkerChangesComparisonContext` |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |

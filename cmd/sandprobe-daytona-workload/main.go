@@ -380,7 +380,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if o.storageProfile != "ephemeral" && o.storageProfile != "persistent-workspace" && o.storageProfile != "persistent-artifacts" {
 		return errors.New("invalid storage profile")
 	}
-	if (o.persistenceMarker != "" && o.persistenceMarker != obs.LinkMarkerKind) || (o.persistenceMarker != "" && o.storageProfile == "ephemeral") {
+	if !obs.ValidPersistenceMarker(o.persistenceMarker) || (o.persistenceMarker != "" && o.storageProfile == "ephemeral") {
 		return errors.New("unsupported persistence marker or profile")
 	}
 	lock, e := lockManagedFolder(o.folder)

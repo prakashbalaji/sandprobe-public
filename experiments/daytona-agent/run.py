@@ -244,7 +244,7 @@ def main(args):
         raise Failure("unsupported_model")
     storage_profile = getattr(args, "storage_profile", "ephemeral")
     marker = getattr(args, "persistence_marker", "file")
-    if marker not in ("file", "symlink-v1") or (marker != "file" and storage_profile == "ephemeral"):
+    if marker not in ("file", "symlink-v1", "empty-file-v1") or (marker != "file" and storage_profile == "ephemeral"):
         raise Failure("invalid_persistence_marker_or_profile")
     if storage_profile not in ("ephemeral", "persistent-workspace", "persistent-artifacts"):
         raise Failure("unsupported_storage_profile")
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", choices=("mistral.ministral-3-3b-instruct", "mistral.ministral-3-8b-instruct"), default="mistral.ministral-3-3b-instruct")
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     parser.add_argument("--canary-tcp80-protocol", choices=("legacy","http-v1"), default="legacy")
-    parser.add_argument("--persistence-marker", choices=("file","symlink-v1"), default="file")
+    parser.add_argument("--persistence-marker", choices=("file","symlink-v1","empty-file-v1"), default="file")
     parser.add_argument("--storage-profile", choices=("ephemeral", "persistent-workspace", "persistent-artifacts"), default="ephemeral")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{12}", ACCOUNT) or not PROFILE:

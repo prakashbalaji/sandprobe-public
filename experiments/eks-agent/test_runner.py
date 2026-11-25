@@ -38,6 +38,14 @@ class FakeRunner(Runner):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_empty_marker_can_be_selected_for_a_persistent_run(self):
+        with tempfile.TemporaryDirectory() as root:
+            j=Journal(root,'a'*16,create=True)
+            try:
+                r=Runner(j,controller='host',storage_profile='persistent-artifacts',persistence_marker='empty-file-v1')
+                self.assertEqual(r.persistence_marker,'empty-file-v1')
+            finally:j.close()
+
     def test_persistence_marker_is_explicit_and_cannot_change_on_resume(self):
         with tempfile.TemporaryDirectory() as root:
             j=Journal(root,'a'*16,create=True)

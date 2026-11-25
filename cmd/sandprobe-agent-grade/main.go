@@ -38,7 +38,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if err != nil || strictjson.Decode(raw, 65536, &q) != nil {
 		return errors.New("invalid grading request")
 	}
-	if (q.PersistenceMarker != "" && q.PersistenceMarker != obs.LinkMarkerKind) || (q.PersistenceMarker != "" && q.Persistent == nil) {
+	if !obs.ValidPersistenceMarker(q.PersistenceMarker) || (q.PersistenceMarker != "" && q.Persistent == nil) {
 		return errors.New("unsupported persistence marker or profile")
 	}
 	if (q.Pod.Workspace != nil) != (q.Persistent != nil) {

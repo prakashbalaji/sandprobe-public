@@ -34,3 +34,11 @@ a sandbox or proving guest delivery. Repeating the same unsupported exchange doe
 Keep workload success, security findings, measurement completeness and cleanup as separate conclusions. Change
 the workload configuration only for a workload or security requirement, and compare the changed configuration
 explicitly against its baseline.
+
+EVD-18 also offers explicit `empty-file-v1` metadata markers for filesystems that reject symbolic links.
+It creates an empty regular file in a distinct run-owned namespace and rechecks only its pinned type, zero size
+and stable name during measurement. The run token is in the name; no file contents are read. Retained metadata
+is a persistence finding, not a pass or a claim of regular-file content identity. There is no automatic fallback;
+the selected mechanism remains visible in the plan and comparisons. If no marker can be placed, Sandprobe records
+the placement failure and avoids an unnecessary reset. Incomplete resets may report a bounded host-stage label;
+provider error messages and credentials are never used as that label.

@@ -118,6 +118,9 @@ func markerName(root, path, runID string) (string, bool) {
 	if path == filepath.Join(root, obs.LinkMarkerPrefix+runID) {
 		name = obs.LinkMarkerPrefix + runID
 	}
+	if path == filepath.Join(root, obs.EmptyMarkerPrefix+runID) {
+		name = obs.EmptyMarkerPrefix + runID
+	}
 	return name, runIDShape.MatchString(runID) && filepath.IsAbs(root) && path == filepath.Join(root, name)
 }
 
@@ -164,6 +167,9 @@ func place(m obs.PlannedMark, runID string) (uint64, int64, string) {
 			return 0, 0, why
 		}
 		return ino, int64(len(runID)), ""
+	}
+	if name == obs.EmptyMarkerPrefix+runID {
+		return placeEmptyMarker(dfd, name)
 	}
 	fd, err := syscall.Openat(dfd, name, syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_WRONLY|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
@@ -235,6 +241,9 @@ func recheck(m obs.Placed, runID string) (string, string) {
 		return "unknown", "the root can't be opened: " + errName(errnoOf(err))
 	}
 	defer syscall.Close(dfd)
+	if name == obs.EmptyMarkerPrefix+runID {
+		return emptyMarkerProof(dfd, name)
+	}
 	if name == obs.LinkMarkerPrefix+runID {
 		_, why, absent := linkMarkerProof(dfd, name, runID)
 		if absent {
@@ -316,3 +325,50 @@ func linkMarkerProof(dfd int, name, runID string) (uint64, string, bool) {
 }
 
 var readMarkerLink = func(fd int, buf []byte) (int, error) { return unix.Readlinkat(fd, "", buf) }
+
+func placeEmptyMarker(dfd int, name string) (ino uint64, size int64, why string) {
+	fd, err := syscall.Openat(dfd, name, syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_WRONLY|syscall.O_CLOEXEC, 0600)
+	if err != nil {
+		return 0, 0, "the empty metadata marker can't be created: " + errName(errnoOf(err))
+	}
+	defer func() {
+		if err := syscall.Close(fd); err != nil && why == "" {
+			ino = 0
+			why = "the empty metadata marker couldn't be closed"
+		}
+	}()
+	var st syscall.Stat_t
+	if syscall.Fstat(fd, &st) != nil || st.Ino == 0 || st.Mode&syscall.S_IFMT != syscall.S_IFREG || st.Size != 0 {
+		return 0, 0, "the new metadata marker isn't an identifiable empty regular file"
+	}
+	var after unix.Stat_t
+	if unix.Fstatat(dfd, name, &after, unix.AT_SYMLINK_NOFOLLOW) != nil || after.Ino != st.Ino || uint64(after.Dev) != uint64(st.Dev) || after.Mode&unix.S_IFMT != unix.S_IFREG || after.Size != 0 {
+		return 0, 0, "the empty metadata marker changed during placement"
+	}
+	return st.Ino, 0, ""
+}
+
+func emptyMarkerProof(dfd int, name string) (string, string) {
+	fd, err := syscall.Openat(dfd, name, unixOPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if errnoOf(err) == syscall.ENOENT {
+		return "absent", ""
+	}
+	if err != nil {
+		return "unknown", "the empty metadata marker can't be pinned: " + errName(errnoOf(err))
+	}
+	defer syscall.Close(fd)
+	var st syscall.Stat_t
+	if statEmptyMarker(fd, &st) != nil || st.Ino == 0 || st.Mode&syscall.S_IFMT != syscall.S_IFREG || st.Size != 0 {
+		return "unknown", "the metadata marker isn't an empty regular file; contents unread"
+	}
+	if !emptyMarkerUnchanged(dfd, name, &st) {
+		return "unknown", "the empty metadata marker changed during measurement; contents unread"
+	}
+	return "survived", ""
+}
+
+var emptyMarkerUnchanged = func(dfd int, name string, st *syscall.Stat_t) bool {
+	var after unix.Stat_t
+	return unix.Fstatat(dfd, name, &after, unix.AT_SYMLINK_NOFOLLOW) == nil && after.Mode&unix.S_IFMT == unix.S_IFREG && after.Size == 0 && after.Ino == st.Ino && uint64(after.Dev) == uint64(st.Dev)
+}
+var statEmptyMarker = syscall.Fstat

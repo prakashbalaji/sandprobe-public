@@ -573,7 +573,10 @@ func metadataMarkerRoots(m obs.Manifest) []string {
 	var roots []string
 	for _, mark := range m.Marks {
 		if mark.Path == filepath.Join(mark.Root, obs.LinkMarkerPrefix+m.RunID) {
-			roots = append(roots, mark.Root)
+			roots = append(roots, mark.Root+":"+obs.LinkMarkerKind)
+		}
+		if mark.Path == filepath.Join(mark.Root, obs.EmptyMarkerPrefix+m.RunID) {
+			roots = append(roots, mark.Root+":"+obs.EmptyMarkerKind)
 		}
 	}
 	slices.Sort(roots)

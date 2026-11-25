@@ -160,25 +160,34 @@ func (p *DaytonaPersistentBox) verifyOriginal(ctx context.Context) error {
 }
 
 func (p *DaytonaPersistentBox) Reset(ctx context.Context) (Box, *obs.ResetEvidence, error) {
-	ev := &obs.ResetEvidence{Model: "recreate", OperationID: token("recreate-"), BoxBefore: p.original.ID(), Volumes: map[string][2]obs.Volume{}}
+	ev := &obs.ResetEvidence{Model: "recreate", OperationID: token("recreate-"), BoxBefore: p.original.ID(), Volumes: map[string][2]obs.Volume{}, FailureStage: "precondition"}
+	defer func() {
+		if ev.Done {
+			ev.FailureStage = ""
+		}
+	}()
 	if p.resetStarted {
 		return p, ev, errors.New("persistent reset cannot be repeated")
 	}
 	p.resetStarted = true
 	p.originalVerified = false
+	ev.FailureStage = "verify_original"
 	if err := p.verifyOriginal(ctx); err != nil {
 		return p, ev, err
 	}
+	ev.FailureStage = "verify_storage"
 	if err := p.volume.Verify(ctx); err != nil {
 		return p, ev, err
 	}
 	before := p.binding()
+	ev.FailureStage = "delete_original"
 	if err := p.original.Destroy(ctx); err != nil {
 		return p, ev, errors.New("original sandbox deletion unconfirmed before recreation")
 	}
 	if err := p.original.ConfirmWorkloadGone(ctx); err != nil {
 		return p, ev, err
 	}
+	ev.FailureStage = "create_replacement"
 	next, err := p.original.client.CreateDaytonaWorkload(ctx, filepath.Dir(p.volume.StatePath()), p.original.journal.SnapshotID, p.original.journal.NetworkAllowList, p.volume)
 	if next != nil {
 		p.boxes = append(p.boxes, next)
@@ -191,12 +200,14 @@ func (p *DaytonaPersistentBox) Reset(ctx context.Context) (Box, *obs.ResetEviden
 	if next.ID() == p.original.ID() {
 		return p, ev, errors.New("recreation did not return a new sandbox ID")
 	}
+	ev.FailureStage = "detect_architecture"
 	if err = next.DetectArch(ctx); err != nil {
 		return p, ev, err
 	}
 	if next.Arch != p.original.Arch {
 		return p, ev, errors.New("replacement architecture changed")
 	}
+	ev.FailureStage = "verify_configuration"
 	configuration, err := next.WorkloadConfiguration(ctx)
 	if err != nil {
 		return p, ev, err
@@ -205,21 +216,26 @@ func (p *DaytonaPersistentBox) Reset(ctx context.Context) (Box, *obs.ResetEviden
 	if configuration != p.configuration {
 		return p, ev, errors.New("replacement workload configuration changed")
 	}
+	ev.FailureStage = "prepare_workload"
 	if err = next.prepareWorkload(ctx, before.MountPath == "/workspace"); err != nil {
 		return p, ev, err
 	}
+	ev.FailureStage = "upload_probe"
 	if err = next.Upload(ctx, p.binary); err != nil {
 		return p, ev, err
 	}
+	ev.FailureStage = "verify_probe"
 	if err = next.WorkloadProbeReady(ctx); err != nil {
 		return p, ev, err
 	}
 	// The replacement has a new root filesystem: validate its protected fixture
 	// structurally, without equating its device/inode hash to the original's.
+	ev.FailureStage = "verify_fixture"
 	_, err = next.WorkloadFixture(ctx)
 	if err != nil {
 		return p, ev, errors.New("replacement protected home invalid")
 	}
+	ev.FailureStage = "verify_storage_after_reset"
 	if err = p.volume.Verify(ctx); err != nil {
 		return p, ev, err
 	}

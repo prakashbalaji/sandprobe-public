@@ -133,7 +133,7 @@ func armWants(m obs.Manifest) []canary.Want {
 // Execute runs the probe in a box and grades it. An error means no run happened; a run that happened but can't be
 // graded comes back with an invalid report.
 func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
-	if o.PersistenceMarker != "" && o.PersistenceMarker != obs.LinkMarkerKind {
+	if !obs.ValidPersistenceMarker(o.PersistenceMarker) {
 		return nil, fmt.Errorf("unsupported persistence marker")
 	}
 	if err := catalog.ValidateBlockDevicePaths(o.BlockDevicePaths); err != nil {
@@ -299,6 +299,10 @@ func persist(ctx context.Context, rs Resettable, r *Run) *obs.ResetEvidence {
 		placed[i] = obs.Placed{Root: pm.Root, Path: pm.Path, Placed: p.Placed, Ino: p.Ino, Size: p.Size}
 		r.Markers[i].Confirmed = p.Placed
 	}
+	if !slices.ContainsFunc(placed, func(p obs.Placed) bool { return p.Placed }) {
+		// EVD-18: no reset can complete a check whose every placement failed.
+		return &obs.ResetEvidence{Model: m.Reset, BoxBefore: m.BoxID, Mark: markOut}
+	}
 	after, ev, err := rs.Reset(ctx)
 	if after != nil {
 		r.Box = after // whatever the reset created is what teardown must delete, even when the reset then failed
@@ -420,6 +424,11 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 	if o.PersistenceMarker == obs.LinkMarkerKind {
 		for i := range marks {
 			marks[i].Path = filepath.Join(marks[i].Root, obs.LinkMarkerPrefix+runID)
+		}
+	}
+	if o.PersistenceMarker == obs.EmptyMarkerKind {
+		for i := range marks {
+			marks[i].Path = filepath.Join(marks[i].Root, obs.EmptyMarkerPrefix+runID)
 		}
 	}
 	switch {
