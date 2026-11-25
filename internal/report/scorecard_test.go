@@ -131,9 +131,9 @@ func TestScoreNeverCleanByDefault(t *testing.T) {
 	}
 }
 
-// SCR-2: across every saved report, a full score never shows where the letter isn't a complete A. Each is a local
-// Docker run, where Cloud access is tested, so each stays out of six with no category left out.
-func TestSixOfSixIsAnA(t *testing.T) {
+// SCR-2: across every saved report, a full score never shows where a finding is above Info or the run is incomplete.
+// Each is a local Docker run, where Cloud access is tested, so each stays out of six with no category left out.
+func TestSixOfSixIsClean(t *testing.T) {
 	var files []string
 	for _, pat := range []string{"../../demo/reports/*.json", "../../test/reports/*.json"} {
 		m, _ := filepath.Glob(pat)
@@ -155,8 +155,14 @@ func TestSixOfSixIsAnA(t *testing.T) {
 		}
 		if c := Score(d); c.Score == c.Of {
 			six++
-			if d.Grade.Letter != "A" || !d.Grade.Complete {
-				t.Errorf("%s: 6/6 with letter %q, complete %v", f, d.Grade.Letter, d.Grade.Complete)
+			above := d.Grade.Counts["critical"] + d.Grade.Counts["high"] + d.Grade.Counts["medium"] + d.Grade.Counts["low"]
+			for _, finding := range d.Findings {
+				if finding.Severity != "info" {
+					above++
+				}
+			}
+			if above != 0 || !d.Grade.Complete || !d.Grade.Valid || len(d.Grade.Unknown) != 0 {
+				t.Errorf("%s: 6/6 with %d above Info, complete %v, unknown %v", f, above, d.Grade.Complete, d.Grade.Unknown)
 			}
 		}
 	}

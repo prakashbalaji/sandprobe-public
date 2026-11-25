@@ -225,7 +225,7 @@ func TestFixLoopDocker(t *testing.T) {
 }
 
 // With Docker (SANDPROBE_FIXTURES=1): PRV-17 end to end. run exec -provider modal -no-canary into a local container
-// writes a sandprobe/5 report; fix reads it, lists no Cloud access, and takes its platform only from -platform. The
+// writes a sandprobe/6 report; fix reads it, lists no Cloud access, and takes its platform only from -platform. The
 // test starts the container and removes it by the ID docker returned.
 func TestFixDeclaredProviderDocker(t *testing.T) {
 	if os.Getenv("SANDPROBE_FIXTURES") == "" {
@@ -253,8 +253,8 @@ func TestFixDeclaredProviderDocker(t *testing.T) {
 			DeclaredProvider string `json:"declared_provider"`
 		}
 	}
-	if json.Unmarshal(b, &d) != nil || d.Schema != "sandprobe/5" || d.Manifest.DeclaredProvider != "modal" {
-		t.Fatalf("want a sandprobe/5 report declaring modal: %.300s", b)
+	if json.Unmarshal(b, &d) != nil || d.Schema != "sandprobe/6" || d.Manifest.DeclaredProvider != "modal" {
+		t.Fatalf("want a sandprobe/6 report declaring modal: %.300s", b)
 	}
 	m, _ := filepath.Glob(filepath.Join(out, "*.json"))
 	if len(m) != 1 {

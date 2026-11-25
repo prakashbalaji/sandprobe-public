@@ -11,7 +11,9 @@ provider; each box is a fixture in `test/fixtures`, run beside a local canary by
 | `canary-down.json` | the same box with the canary paused: no network result counts, and the run is incomplete |
 
 `bundles/` holds what each run produced: its manifest, the probe's own observations and the canary's evidence.
-The reports are built from them by the grader and `report.Build`, as a run builds its own.
+The reports are built from them by the grader and `report.BuildLegacy`, as a run built its own before `sandprobe/6`:
+they declare `sandprobe/1` and carry a letter on purpose, so the tests read older reports. The tests build
+`sandprobe/6` reports from the bundles.
 
 ## Rebuilding
 

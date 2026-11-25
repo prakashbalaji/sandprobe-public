@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -86,7 +87,8 @@ var natives = map[string]map[string]string{"e2b": host.E2BExclusions(), "daytona
 	"modal": host.ModalExcluded}
 
 // SCR-2: a native adapter's PRV row makes Cloud access not applicable: grey, never green, out of the score (x/5),
-// named on one line with the run's own skip reasons, and the letter is the one the same run gets without the rule.
+// named on one line with the run's own skip reasons, and the findings, their counts and completeness are the ones the
+// same run gets without the rule.
 func TestScoreNotApplicable(t *testing.T) {
 	for provider, excluded := range natives {
 		d := replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipProviderTerms})
@@ -109,8 +111,8 @@ func TestScoreNotApplicable(t *testing.T) {
 			}
 		}
 		plain := replanned(t, provider, host.Options{Mode: "exec", Excluded: excluded}) // the same skips, no kind
-		if d.Grade.Letter != plain.Grade.Letter || d.Grade.Complete != plain.Grade.Complete || Score(plain).Of != 6 {
-			t.Errorf("%s: letter %s against %s without the rule", provider, d.Grade.Letter, plain.Grade.Letter)
+		if !reflect.DeepEqual(d.Findings, plain.Findings) || !reflect.DeepEqual(d.Grade, plain.Grade) || len(d.Findings) == 0 || Score(plain).Of != 6 {
+			t.Errorf("%s: findings %+v and grade %+v, against %+v and %+v without the rule", provider, d.Findings, d.Grade, plain.Findings, plain.Grade)
 		}
 		b, _ := json.Marshal(c)
 		if !strings.Contains(string(b), `"of":5`) || !strings.Contains(string(b), `"not_applicable":true`) {
@@ -271,24 +273,58 @@ func TestCleanBoxReadsFiveOfFive(t *testing.T) {
 	}
 }
 
-// AGT-6: a report declares the lowest version its fields need: one with skip kinds is sandprobe/2, one without stays
-// sandprobe/1, so a 0.2.1 reader still reads every report that needs nothing new.
+// AGT-6, OUT-1 and GRD-1: every report Build writes declares sandprobe/6 and marshals no letter, whatever its
+// manifest carries (skip kinds, attestations, a declared provider or none) and whether the run is valid or not.
+// BuildLegacy, the one writer left for the earlier versions, declares the lowest of them the manifest's fields need
+// and writes the grader's letter, empty on an invalid run, as before.
 func TestReportSchemaVersions(t *testing.T) {
-	native := replanned(t, "e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms})
-	optIn := replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
-	plain := replanned(t, "e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions()})
-	if native.Schema != SchemaSkipKinds || optIn.Schema != SchemaSkipKinds || plain.Schema != Schema || Schema != "sandprobe/1" {
-		t.Errorf("schemas: native %s, opt-in %s, no kind %s", native.Schema, optIn.Schema, plain.Schema)
-	}
-	if b, _ := json.Marshal(plain); strings.Contains(string(b), "SkipKinds") {
-		t.Error("a sandprobe/1 report carries SkipKinds")
-	}
 	off := host.ExecExclusions()
 	delete(off, "AMP-7")
-	attested := replanned(t, "exec", host.Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"AMP-7"}, Existing: true})
-	all := replanned(t, "exec", host.Options{Mode: "exec", ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "EGR-3", "AMP-6", "AMP-7"}, Existing: true})
-	if attested.Schema != SchemaSkipKinds || all.Schema != SchemaSkipKinds || len(all.Manifest.SkipKinds) != 0 {
-		t.Errorf("attested reports declare %s, and with every check attested (no kinds) %s", attested.Schema, all.Schema)
+	for name, tc := range map[string]struct {
+		provider string
+		o        host.Options
+		legacy   string
+	}{
+		"skip kinds, provider terms": {"e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions(), ExcludedKind: obs.SkipProviderTerms}, SchemaSkipKinds},
+		"skip kinds, opt-in":         {"exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}, SchemaSkipKinds},
+		"no kind":                    {"e2b", host.Options{Mode: "exec", Excluded: host.E2BExclusions()}, Schema},
+		"one attested":               {"exec", host.Options{Mode: "exec", Excluded: off, ExcludedKind: obs.SkipOptIn, Attested: []string{"AMP-7"}, Existing: true}, SchemaSkipKinds},
+		"all attested, no kinds":     {"exec", host.Options{Mode: "exec", ExcludedKind: obs.SkipOptIn, Attested: []string{"SEC-4", "EGR-3", "AMP-6", "AMP-7"}, Existing: true}, SchemaSkipKinds},
+		"a declared provider":        {"exec", declared("modal"), SchemaDeclaredProvider},
+	} {
+		m, pd, ev := replan(t, tc.o)
+		b, _ := json.Marshal(pd)
+		for _, invalid := range []bool{false, true} {
+			r := &host.Run{Manifest: m, Doc: b, Evidence: ev, Report: grade.GradeBytes(m, b, &ev)}
+			if invalid {
+				r.Report = grade.Report{Invalid: "a duplicate check ID"}
+			}
+			if r.Report.Valid == invalid || r.Report.Valid && r.Report.Letter == "" {
+				t.Fatalf("%s: the grader's run: valid %v, letter %q", name, r.Report.Valid, r.Report.Letter)
+			}
+			d := Build(r, Meta{Provider: tc.provider})
+			out, _ := json.Marshal(d)
+			if d.Schema != SchemaNoLetter || SchemaNoLetter != "sandprobe/6" || d.Grade.Letter != nil || strings.Contains(string(out), `"letter"`) ||
+				!strings.Contains(string(out), `"schema":"sandprobe/6"`) {
+				t.Errorf("%s, invalid %v: Build declares %s with a letter in %s", name, invalid, d.Schema, out[:min(len(out), 200)])
+			}
+			old := BuildLegacy(r, Meta{Provider: tc.provider})
+			out, _ = json.Marshal(old)
+			if old.Schema != tc.legacy || old.Grade.Letter == nil || *old.Grade.Letter != r.Report.Letter ||
+				!strings.Contains(string(out), `"grade":{"letter":"`+r.Report.Letter+`",`) {
+				t.Errorf("%s, invalid %v: BuildLegacy declares %s, want %s with the letter %q", name, invalid, old.Schema, tc.legacy, r.Report.Letter)
+			}
+			old.Schema, old.Grade.Letter = d.Schema, nil
+			if !reflect.DeepEqual(old, d) {
+				t.Errorf("%s, invalid %v: the two differ in more than the version and the letter", name, invalid)
+			}
+		}
+		if strings.Contains(name, "no kind") && len(m.SkipKinds) != 0 {
+			t.Error("a report with no kind carries SkipKinds")
+		}
+	}
+	if Schema != "sandprobe/1" || !slices.Equal(Schemas, []string{"sandprobe/1", "sandprobe/2", "sandprobe/3", "sandprobe/4", "sandprobe/5", "sandprobe/6"}) {
+		t.Errorf("the versions this build reads: %v", Schemas)
 	}
 }
 

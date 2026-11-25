@@ -16,7 +16,8 @@ import (
 	"sandprobe/internal/obs"
 )
 
-// Schema is OUT-1's first version, which every report declares that needs none of a later version's fields (AGT-6).
+// Schema is OUT-1's first version, which a report with a letter declares when it needs none of a later version's
+// fields (AGT-6).
 const Schema = "sandprobe/1"
 
 // SchemaSkipKinds is OUT-1's version that adds the manifest's SkipKinds (SCR-2), and its Attested with a check's
@@ -33,11 +34,16 @@ const SchemaCanaryHTTP = "sandprobe/4"
 // SchemaDeclaredProvider adds PRV-17's manifest declared_provider, which only run exec writes.
 const SchemaDeclaredProvider = "sandprobe/5"
 
-// Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider}
+// SchemaNoLetter is OUT-1 without grade.letter (GRD-1). Removing a field is breaking, and every earlier version
+// defines the letter, so every report Build writes declares it, whatever earlier fields its manifest carries (AGT-6).
+const SchemaNoLetter = "sandprobe/6"
 
-// SchemaFor is AGT-6: the lowest version whose fields a report with this manifest needs. Build declares it, and a
-// reader requires a report to declare exactly it, so older readers keep reading every report that needs nothing new.
+// Schemas are the versions this build reads, oldest first.
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider, SchemaNoLetter}
+
+// SchemaFor is AGT-6 for a report that carries a letter: the lowest of sandprobe/1 to sandprobe/5 whose fields a
+// report with this manifest needs. BuildLegacy declares it, and a reader requires a report of those versions to
+// declare exactly it.
 func SchemaFor(m obs.Manifest) string {
 	if m.DeclaredProvider != "" {
 		return SchemaDeclaredProvider
@@ -130,7 +136,9 @@ type Box struct {
 }
 
 type Grade struct {
-	Letter   string         `json:"letter"`
+	// Letter is GRD-1's letter, which only sandprobe/1 to sandprobe/5 carry (AGT-6): nil in a report Build writes,
+	// and in an older report checked on reading, then never printed or copied (ANL-1).
+	Letter   *string        `json:"letter,omitempty"`
 	Complete bool           `json:"complete"`
 	Valid    bool           `json:"valid"`
 	Invalid  string         `json:"invalid,omitempty"`
@@ -234,10 +242,20 @@ type Cleanup struct {
 	Residual  string     `json:"residual,omitempty"`
 }
 
-// Build makes OUT-1 from a run.
+// BuildLegacy is Build as it was before sandprobe/6: the version SchemaFor gives and the grader's letter, empty on
+// an invalid run. Only the managed-workload evaluations' legacy standard report uses it (WGR-4, RUN-17, EVD-10), until
+// that path drops the letter too (GRD-1), and the test fixtures that stand for older reports.
+func BuildLegacy(r *host.Run, m Meta) Doc {
+	d := Build(r, m)
+	letter := r.Report.Letter
+	d.Schema, d.Grade.Letter = SchemaFor(r.Manifest), &letter
+	return d
+}
+
+// Build makes OUT-1 from a run: sandprobe/6, with no letter (GRD-1, AGT-6).
 func Build(r *host.Run, m Meta) Doc {
 	rep, man := r.Report, r.Manifest
-	d := Doc{Schema: SchemaFor(man), Statement: "", Boundary: Boundary, Manifest: man,
+	d := Doc{Schema: SchemaNoLetter, Statement: "", Boundary: Boundary, Manifest: man,
 		Probe: Probe{Version: m.Version, SHA256: man.ProbeSHA256, HostShipped: true},
 		Run: Run{ID: man.RunID, Nonce: man.Nonce, StartedAt: m.StartedAt.UTC().Format(time.RFC3339), DurationMS: m.Duration.Milliseconds(),
 			Mode: man.Mode, Provider: m.Provider, Box: Box{ProviderID: man.BoxID, Name: m.BoxName, CreatedBySandprobe: m.CreatedBySandprobe},
@@ -267,7 +285,7 @@ func Build(r *host.Run, m Meta) Doc {
 		}
 	}
 
-	d.Grade = Grade{Letter: rep.Letter, Complete: rep.Complete, Valid: rep.Valid, Invalid: rep.Invalid, Unknown: rep.Unknown,
+	d.Grade = Grade{Complete: rep.Complete, Valid: rep.Valid, Invalid: rep.Invalid, Unknown: rep.Unknown,
 		Notes: rep.Notes, Counts: map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}}
 	if d.Grade.Unknown == nil {
 		d.Grade.Unknown = []string{}

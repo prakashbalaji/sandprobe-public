@@ -49,7 +49,7 @@ func meta() Meta {
 
 func TestBuild(t *testing.T) {
 	d := Build(run(), meta())
-	if d.Schema != "sandprobe/1" || !d.Probe.HostShipped || d.Probe.Attested || d.Grade.Counts["medium"] != 1 ||
+	if d.Schema != "sandprobe/6" || !d.Probe.HostShipped || d.Probe.Attested || d.Grade.Counts["medium"] != 1 ||
 		!strings.Contains(d.Statement, "not a certification") || d.Boundary == "" || len(d.Limits.NotTested) == 0 {
 		t.Fatalf("doc: %+v", d)
 	}

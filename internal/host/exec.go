@@ -399,7 +399,7 @@ func DeclaredExclusions(name string) map[string]string {
 }
 
 // checkDeclared is PRV-17 before anything runs: a declared provider is a key of this binary's table, only on run
-// exec (opt_in defaults, no workload contract or TCP/80 protocol, so the report needs exactly sandprobe/5), and each
+// exec (opt_in defaults, no workload contract or TCP/80 protocol), and each
 // check its entry excludes is excluded with the entry's own reason and never attested.
 func checkDeclared(o Options) error {
 	if o.DeclaredProvider == "" {

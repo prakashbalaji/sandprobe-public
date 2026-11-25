@@ -113,7 +113,7 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	if persistent != nil {
 		calls = persistent.Calls()
 	}
-	doc := report.Build(r, report.Meta{Version: "0.1.0", Provider: "aws-nitro", BoxName: q.Pod.Name,
+	doc := report.BuildLegacy(r, report.Meta{Version: "0.1.0", Provider: "aws-nitro", BoxName: q.Pod.Name,
 		CreatedBySandprobe: true, StartedAt: start, Duration: time.Since(start), Calls: calls, Cleanup: "pending",
 		Residual: residual + "UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	html, err := report.HTML(doc, "dark")

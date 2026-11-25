@@ -17,7 +17,7 @@ import (
 )
 
 func docWith(findings ...report.Finding) report.Doc {
-	return report.Doc{Grade: report.Grade{Letter: "F", Valid: true, Complete: true}, Findings: findings}
+	return report.Doc{Grade: report.Grade{Valid: true, Complete: true}, Findings: findings}
 }
 
 // POC-7, POC-8: every finding bucketed by the table and by setup; an unbucketed one refused; no letter grade; hostile

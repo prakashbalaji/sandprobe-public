@@ -40,8 +40,8 @@ func TestAssessmentCalibration(t *testing.T) {
 		if a.Outcome != tc.outcome || a.DirectTCP != tc.tcp || a.Counts[ReportedRefusal] != tc.refused || a.Counts[ReportedDelivery] != tc.delivered || a.Counts[Inconclusive] != tc.unknown || len(a.Routes) != 6 {
 			t.Fatalf("unexpected interpretation: %+v", a)
 		}
-		if !slices.Equal(a.LegacyDrivers, tc.drivers) || a.ObservedUID == nil || *a.ObservedUID != 0 || !a.SourceComplete || len(a.Coverage.Areas) != 5 || a.Coverage.ReportedGrade != "F" || d.Grade.Letter != "F" {
-			t.Fatal("root context, source coverage or legacy grade lost")
+		if !slices.Equal(a.TopFindings, tc.drivers) || a.ObservedUID == nil || *a.ObservedUID != 0 || !a.SourceComplete || len(a.Coverage.Areas) != 5 {
+			t.Fatal("root context, source coverage or highest-severity finding IDs lost")
 		}
 	}
 }
@@ -169,7 +169,7 @@ func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
 	d = loadReport(t, refusedReport)
 	d.Grade.Valid = false
 	d.Grade.Complete = false
-	d.Grade.Letter = ""
+	*d.Grade.Letter = ""
 	if _, err = Assess(d, CanaryDenyProfile); err == nil { // GRD-5: an invalid run grades nothing, so graded rows are refused
 		t.Fatal("an invalid report carrying graded rows was assessed")
 	}

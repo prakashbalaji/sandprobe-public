@@ -24,7 +24,7 @@ func TestAssessmentCLI(t *testing.T) {
 	}{
 		{[]string{"assess", assessOpen, analysis.CanaryDenyProfile, "-o", "json"}, 6, `"reported_delivery": 6`},
 		{[]string{"assess", assessRefused, analysis.CanaryDenyProfile, "-o", "json"}, 5, `"reported_refusal": 4`},
-		{[]string{"assess", assessRefused, analysis.CanaryDenyProfile}, 5, `Saved grade "F" (unverified)`},
+		{[]string{"assess", assessRefused, analysis.CanaryDenyProfile}, 5, `Highest-severity finding IDs ["AMP-2"] (unverified).`},
 		{[]string{"assess", assessRefused, "custom", "-o", "json"}, 2, "usage"},
 		{[]string{"assess", assessRefused, "-o", "json"}, 2, "usage"},
 		{[]string{"assess", "/dev/null", analysis.CanaryDenyProfile, "-o", "json"}, 2, "report.input"},

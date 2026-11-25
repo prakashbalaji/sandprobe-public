@@ -27,7 +27,7 @@ func offline(o opts, args []string, compare bool) (int, error) {
 		if o.json() {
 			o.emit(p)
 		} else {
-			fmt.Fprintf(o.stdout, "Provider %q; reported grade %q (unverified). Structural analysis only; no attestation.\n", p.Provider, p.ReportedGrade)
+			fmt.Fprintf(o.stdout, "Provider %q. Structural analysis only; no attestation.\n", p.Provider)
 			for _, area := range p.Areas {
 				fmt.Fprintf(o.stdout, "%s: %v; finding IDs %q\n", area.Name, area.Counts, area.Findings)
 			}

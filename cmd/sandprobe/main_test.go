@@ -16,7 +16,7 @@ import (
 
 func doc(letter string, valid, complete bool) report.Doc {
 	d := report.Doc{Schema: report.Schema, Run: report.Run{ID: "r1", Provider: "sprites", StartedAt: "2026-11-10T08:50:00Z"},
-		Grade:   report.Grade{Letter: letter, Valid: valid, Complete: complete, Counts: map[string]int{}},
+		Grade:   report.Grade{Valid: valid, Complete: complete, Counts: map[string]int{}},
 		Cleanup: report.Cleanup{Outcome: "NOT confirmed deleted: delete sprite sandprobe-x (sprite-1) in org o by hand"}}
 	if !valid {
 		return d

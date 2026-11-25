@@ -260,7 +260,7 @@ func TestUnknownIsNeverAPass(t *testing.T) {
 		}
 	}
 	d := doc(obs.Pass, map[string]Check{"AMP-2": {Result: obs.Unknown}}) // incomplete, with nothing found
-	d.Grade = Grade{Valid: true, Letter: "C", Unknown: []string{"AMP-2"}}
+	d.Grade = Grade{Valid: true, Unknown: []string{"AMP-2"}}
 	p = pageOf(t, d, "graphite")
 	if !strings.Contains(p, `<p class="status">Incomplete: 1 check unknown</p>`) || !strings.Contains(p, `<b class="unk">1</b><span>unknown</span>`) ||
 		!strings.Contains(p, `.status { display: table; margin: 10px 0 0; padding: 5px 12px 6px; border: 1px dashed var(--unk-edge);`) {
@@ -275,7 +275,8 @@ var (
 
 // SCR-3 and UX-8: the page shows no letter grade, its title included, for a valid, an incomplete and an invalid run,
 // fresh or re-rendered, in both palettes. The title carries the score, beside which the page says an incomplete run is
-// incomplete, and an invalid run says plainly that it is invalid and has no score. The JSON keeps the grade (OUT-1).
+// incomplete, and an invalid run says plainly that it is invalid and has no score. The JSON the page embeds carries
+// no letter either (OUT-1, AGT-6): not from a run, and not re-rendered from an older report that has one (ANL-1).
 func TestNoLetterGrade(t *testing.T) {
 	load := func(f string) Doc {
 		b, err := os.ReadFile(f)
@@ -300,12 +301,21 @@ func TestNoLetterGrade(t *testing.T) {
 			`<p class="kicker"><em>Invalid run: no score</em></p>
   <p class="banner unk">Why this run is invalid: a duplicate check ID</p>`},
 	} {
-		if tc.d.Grade.Letter == "" && tc.d.Grade.Valid {
-			t.Fatalf("%s: the report has no letter to hide", name)
+		letter := ""
+		if tc.d.Schema != SchemaNoLetter {
+			if tc.d.Grade.Letter == nil || *tc.d.Grade.Letter == "" {
+				t.Fatalf("%s: the older report has no letter to leave out", name)
+			}
+			letter = *tc.d.Grade.Letter
 		}
+		fresh := tc.d // as a run writes it: sandprobe/6, no letter
+		fresh.Schema, fresh.Grade.Letter = SchemaNoLetter, nil
 		for _, theme := range []string{"graphite", "mission"} {
-			for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
-				b, err := render(tc.d, theme)
+			for _, r := range []struct {
+				d      Doc
+				render func(Doc, string) ([]byte, error)
+			}{{fresh, HTML}, {tc.d, SavedHTML}} {
+				b, err := r.render(r.d, theme)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -314,11 +324,11 @@ func TestNoLetterGrade(t *testing.T) {
 					t.Errorf("%s, %s: want the title %q and %q beside the score", name, theme, tc.title, tc.says)
 				}
 				text := codeRE.ReplaceAllString(styleRE.ReplaceAllString(dataRE.ReplaceAllString(p, ""), ""), "") // what a reader sees
-				if m := gradeRE.FindString(text); m != "" || tc.d.Grade.Letter != "" && strings.Contains(text, ">"+tc.d.Grade.Letter+"<") {
+				if m := gradeRE.FindString(text); m != "" || letter != "" && strings.Contains(text, ">"+letter+"<") {
 					t.Errorf("%s, %s: the page shows a letter grade (%q)", name, theme, m)
 				}
-				if !strings.Contains(dataRE.FindString(p), `"letter":`) {
-					t.Errorf("%s, %s: the JSON lost its grade", name, theme)
+				if data := dataRE.FindString(p); !strings.Contains(data, `"grade":{`) || strings.Contains(data, `"letter"`) {
+					t.Errorf("%s, %s: the embedded JSON carries a letter, or no grade", name, theme)
 				}
 			}
 		}

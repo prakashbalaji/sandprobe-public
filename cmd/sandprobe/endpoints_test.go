@@ -160,6 +160,13 @@ func TestProviderEndpointsAttestationRecord(t *testing.T) {
 		if _, err := analysis.Parse(raw); (err == nil) != tc.ok {
 			t.Errorf("%s: accepted %v, want %v", name, err == nil, tc.ok)
 		}
+		if name == "declared sandprobe/1" {
+			continue
+		}
+		raw, _ = json.Marshal(noLetter(d)) // AGT-6: the same under sandprobe/6, where no version stands in for the rule
+		if _, err := analysis.Parse(raw); (err == nil) != tc.ok {
+			t.Errorf("%s, as sandprobe/6: accepted %v, want %v", name, err == nil, tc.ok)
+		}
 	}
 }
 
@@ -192,7 +199,7 @@ func TestRunExecProviderEndpointsDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the saved report doesn't load: %v", err)
 	}
-	if d.Schema != report.SchemaSkipKinds || !slices.Equal(d.Manifest.Attested, []string{"AMP-7", "SEC-4"}) || len(d.Manifest.SkipKinds) != 2 ||
+	if d.Schema != report.SchemaNoLetter || !slices.Equal(d.Manifest.Attested, []string{"AMP-7", "SEC-4"}) || len(d.Manifest.SkipKinds) != 2 ||
 		d.Manifest.SkipKinds["EGR-3"] != obs.SkipOptIn || d.Manifest.SkipKinds["AMP-6"] != obs.SkipOptIn {
 		t.Errorf("attested %v, kinds %v", d.Manifest.Attested, d.Manifest.SkipKinds)
 	}

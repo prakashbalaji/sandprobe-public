@@ -681,7 +681,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if !r.Report.Valid {
 		r.Report.Invalid = "standard observation evidence invalid or incomplete"
 	}
-	d := report.Build(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
+	d := report.BuildLegacy(r, report.Meta{Version: "0.1.0", Provider: "daytona", BoxName: b.ID(), CreatedBySandprobe: true, StartedAt: time.Now(), Cleanup: "pending; see sandbox-cleanup.json and managed cleanup record", Residual: "RUN-10 external model controller; native snapshot UUID does not verify image content or private process namespaces. No provider-control endpoints or reset assessment. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
 	if persistent != nil {
 		d.Statement = o.storageProfile + " profile: other checks observed the original workload; PER-5 uses the separately proven recreation. RC exposure and coverage remain separate from the workload configuration assessment."
 	}

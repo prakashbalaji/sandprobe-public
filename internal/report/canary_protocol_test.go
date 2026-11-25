@@ -21,7 +21,7 @@ func TestHTTPMarkerNeedsNewReportSchema(t *testing.T) {
 	}
 	r := run()
 	r.Manifest.CanaryTCP80Protocol = canary.HTTPMarkerV1
-	d := Build(r, meta())
+	d := BuildLegacy(r, meta()) // EVD-10's writer is the workload evaluations' legacy report (AGT-6)
 	if d.Schema != SchemaCanaryHTTP || len(d.Toolchain) == 0 {
 		t.Fatal("protocol choice not disclosed")
 	}

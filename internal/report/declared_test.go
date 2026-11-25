@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"html"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -21,9 +22,9 @@ func declared(name string) host.Options {
 }
 
 // PRV-17 and SCR-2: for every key of this binary's PRV-row table, a run exec report declaring it declares
-// sandprobe/5 and reads out of five; Cloud access is not applicable, never green, its terms from that key's entry, its
+// sandprobe/6 and reads out of five; Cloud access is not applicable, never green, its terms from that key's entry, its
 // row carrying the name, and the row, the line beside the score, the JSON and the page each say the operator declared
-// it and Sandprobe did not verify it. The letter is the undeclared run's.
+// it and Sandprobe did not verify it. The findings and completeness are the undeclared run's.
 func TestScoreDeclaredProvider(t *testing.T) {
 	undeclared := replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, Existing: true})
 	for name, entry := range natives {
@@ -31,7 +32,7 @@ func TestScoreDeclaredProvider(t *testing.T) {
 		c := Score(d)
 		r := row(t, c, "Cloud access")
 		unverified := DeclaredUnverified(name)
-		if d.Schema != SchemaDeclaredProvider || d.Manifest.DeclaredProvider != name || c.Of != 5 || !r.NotApplicable || r.Green ||
+		if d.Schema != SchemaNoLetter || d.Manifest.DeclaredProvider != name || c.Of != 5 || !r.NotApplicable || r.Green ||
 			r.Why != NotApplicableWhy(name, true) || r.Scope != name || r.DeclaredProvider != name ||
 			r.Terms != entry["SEC-4"]+"; "+entry["AMP-7"] && r.Terms != entry["SEC-4"] {
 			t.Errorf("%s: %s %d/%d %+v", name, d.Schema, c.Score, c.Of, r)
@@ -48,8 +49,8 @@ func TestScoreDeclaredProvider(t *testing.T) {
 		if !strings.Contains(string(b), `"declared_provider":"`+name+`"`) || !strings.Contains(html.UnescapeString(string(page)), unverified) {
 			t.Errorf("%s: the card's JSON or the page doesn't carry the declaration", name)
 		}
-		if d.Grade.Letter != undeclared.Grade.Letter || d.Grade.Complete != undeclared.Grade.Complete {
-			t.Errorf("%s: letter %s against %s undeclared", name, d.Grade.Letter, undeclared.Grade.Letter)
+		if !reflect.DeepEqual(d.Findings, undeclared.Findings) || !reflect.DeepEqual(d.Grade, undeclared.Grade) || len(d.Findings) == 0 {
+			t.Errorf("%s: findings %+v and grade %+v, against %+v and %+v undeclared", name, d.Findings, d.Grade, undeclared.Findings, undeclared.Grade)
 		}
 	}
 }
