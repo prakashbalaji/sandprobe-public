@@ -615,7 +615,7 @@ var keyframeColors = map[string]string{"flash | background": "sel"}
 
 var (
 	keyframesRE = regexp.MustCompile(`@keyframes ([a-z-]+) \{((?:[^{}]*\{[^{}]*\})*)\s*\}`)
-	frameDeclRE = regexp.MustCompile(`([a-z-]+):\s*([^;{}]+);`)
+	frameDeclRE = regexp.MustCompile(`([a-z-]+):\s*([^;{}]+)[;}]`) // a frame's last declaration may end at its brace
 )
 
 // UX-9: TestContrast's audit leaves keyframes out, so a keyframe's colors are held here. One may set only the token
@@ -933,8 +933,11 @@ func TestTypeSizes(t *testing.T) {
 			t.Logf("%6.2fpx at the least  %s { %s }%s", least, s.sel, s.expr, unit)
 		}
 		floor := 12.0
-		if s.sel == missionCapitals {
+		if s.sel == missionCapitals { // held at exactly 10.5px (UX-8), not only kept from going under it
 			floor = 10.5
+			if size != (span{10.5, 10.5}) {
+				t.Errorf("%s: font size %s isn't mission's 10.5px capitals", s.sel, s.expr)
+			}
 		}
 		if least < floor {
 			t.Errorf("%s: font size %s can come to %.2fpx%s, under %gpx", s.sel, s.expr, least, unit, floor)
