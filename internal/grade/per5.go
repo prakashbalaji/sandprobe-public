@@ -82,7 +82,11 @@ func samePlaces(plan []obs.PlannedMark, n int, at func(int) (root, path string))
 // reason given; not placed means a reason, and no inode or size.
 func PlacedSound(p obs.Placed, runID string) bool {
 	if p.Placed {
-		return p.Ino != 0 && p.Size == int64(len(runID)) && p.Why == ""
+		size := int64(len(runID))
+		if p.Path == filepath.Join(p.Root, obs.EmptyMarkerPrefix+runID) {
+			size = 0
+		}
+		return p.Ino != 0 && p.Size == size && p.Why == ""
 	}
 	return p.Ino == 0 && p.Size == 0 && p.Why != ""
 }
@@ -165,8 +169,22 @@ func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.Rechec
 		return unknown("the reset didn't run, so nothing about persistence is proven")
 	case md == nil:
 		return unknown("no marks were placed")
-	case rd == nil:
-		return unknown("there was no recheck after the reset")
+	}
+	var placementGaps []string
+	for _, p := range md.Marks {
+		if !p.Placed {
+			placementGaps = append(placementGaps, p.Root+" took no marker: "+boxText(p.Why))
+		}
+	}
+	if len(placementGaps) == len(m.Marks) {
+		return unknown("not every root was marked and rechecked: " + strings.Join(placementGaps, "; "))
+	}
+	if rd == nil {
+		why := "there was no recheck after the reset"
+		if stage := obs.ResetFailureStage(c.Reset.FailureStage); stage != "" {
+			why += "; incomplete host stage: " + stage
+		}
+		return unknown(why)
 	}
 	r := c.Reset
 	notProven := resetProven(m, r, md, rd)
@@ -207,6 +225,10 @@ func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.Rechec
 				"(TWN-3); which filesystem held it is unproven", strings.Join(survived, ", "))
 		}
 		for _, mark := range m.Marks {
+			if slices.Contains(survived, mark.Root) && mark.Path == filepath.Join(mark.Root, obs.EmptyMarkerPrefix+m.RunID) {
+				claim += "; retained empty-file namespace metadata was verified without reading file contents (EVD-18)"
+				break
+			}
 			if slices.Contains(survived, mark.Root) && mark.Path == filepath.Join(mark.Root, obs.LinkMarkerPrefix+m.RunID) {
 				claim += "; retained symbolic-link metadata was verified without following its target (EVD-15)"
 				break
@@ -243,7 +265,7 @@ func marksSound(m obs.Manifest, selected bool) error {
 	roots, dirs := map[string]bool{}, map[dir]bool{}
 	for _, pm := range m.Marks {
 		switch {
-		case !filepath.IsAbs(pm.Root) || (pm.Path != filepath.Join(pm.Root, obs.MarkerPrefix+m.RunID) && pm.Path != filepath.Join(pm.Root, obs.LinkMarkerPrefix+m.RunID)):
+		case !filepath.IsAbs(pm.Root) || (pm.Path != filepath.Join(pm.Root, obs.MarkerPrefix+m.RunID) && pm.Path != filepath.Join(pm.Root, obs.LinkMarkerPrefix+m.RunID) && pm.Path != filepath.Join(pm.Root, obs.EmptyMarkerPrefix+m.RunID)):
 			return fmt.Errorf("%q isn't this run's marker path in its root", pm.Path)
 		case roots[pm.Root] || pm.Ino != 0 && dirs[dir{pm.Dev, pm.Ino}]: // no identity: missing from the survey, its mark refuses
 			return fmt.Errorf("root %s is planned twice", pm.Root)

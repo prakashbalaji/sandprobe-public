@@ -24,7 +24,7 @@ func TestInvalidBridgeRequestsNeverEmitAssessment(t *testing.T) {
 }
 
 func TestInvalidPersistenceMarkerNeverStartsBridge(t *testing.T) {
-	for _, selector := range []string{"other", obs.LinkMarkerKind} {
+	for _, selector := range []string{"other", obs.LinkMarkerKind, obs.EmptyMarkerKind} {
 		var out bytes.Buffer
 		err := run(context.Background(), strings.NewReader(`{"persistence_marker":"`+selector+`"}`), &out)
 		if err == nil || !strings.Contains(err.Error(), "unsupported persistence marker") || out.Len() != 0 {

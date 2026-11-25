@@ -125,6 +125,38 @@ func TestMetadataMarkerStillRequiresResetAndVolumeProof(t *testing.T) {
 	}
 }
 
+func TestEmptyMarkerGradingAndPlacementGaps(t *testing.T) {
+	pc := per5Base("recreate")
+	for i := range pc.m.Marks {
+		pc.m.Marks[i].Path = pc.m.Marks[i].Root + "/" + obs.EmptyMarkerPrefix + pc.m.RunID
+		pc.mark.Marks[i].Path = pc.m.Marks[i].Path
+		pc.mark.Marks[i].Size = 0
+	}
+	if r := pc.grade(); !r.Valid || outcome(r, "PER-5").Result != obs.Finding || !strings.Contains(outcome(r, "PER-5").Evidence, "empty-file namespace metadata") {
+		t.Fatal("metadata finding lost or mislabeled", r.Invalid)
+	}
+	pc.mark.Marks[0].Size = 1
+	if r := pc.grade(); r.Valid {
+		t.Fatal("nonempty placement accepted")
+	}
+	pc.mark.Marks[0].Size = 0
+	pc.noRe = true
+	pc.reset.Done = false
+	pc.reset.FailureStage = "verify_configuration"
+	if r := pc.grade(); !r.Valid || !strings.Contains(outcome(r, "PER-5").Reason, "verify_configuration") {
+		t.Fatal("bounded reset stage lost")
+	}
+	pc.reset.FailureStage = "NEVER_EXPORT_SECRET"
+	if r := pc.grade(); strings.Contains(outcome(r, "PER-5").Reason, "NEVER_EXPORT") {
+		t.Fatal("raw stage exported")
+	}
+	pc.refuse(0)
+	pc.refuse(1)
+	if r := pc.grade(); !r.Valid || !strings.Contains(outcome(r, "PER-5").Reason, "took no marker") || outcome(r, "PER-5").Result != obs.Unknown {
+		t.Fatal("placement failure hidden by missing recheck")
+	}
+}
+
 func TestPER5(t *testing.T) {
 	for _, tc := range []struct {
 		name, model     string

@@ -88,6 +88,8 @@ class RunnerTests(unittest.TestCase):
   self.completed_run('persistent-artifacts')
  def test_metadata_marker_reaches_collector_and_frozen_intent(self):
   self.completed_run('persistent-artifacts','symlink-v1')
+ def test_empty_marker_reaches_collector_and_frozen_intent(self):
+  self.completed_run('persistent-artifacts','empty-file-v1')
  def test_invalid_marker_stops_before_any_resource_or_model_call(self):
   for marker,profile in [('other','persistent-artifacts'),('symlink-v1','ephemeral')]:
    with patch.object(r,'call') as call,patch.object(r,'sdk') as sdk,patch.object(r,'aws') as aws:

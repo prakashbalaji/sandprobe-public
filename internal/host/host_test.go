@@ -100,11 +100,14 @@ func TestExecuteRejectsInvalidBlockDevicePaths(t *testing.T) {
 func TestPlanMetadataPersistenceMarker(t *testing.T) {
 	s := &obs.Survey{Roots: []obs.Root{{Path: "/data", Dev: 1, Ino: 2}}}
 	st := Storage{Model: "recreate", Volumes: []obs.Volume{{ID: "owned-volume", MountPath: "/data"}}}
-	for _, kind := range []string{"", obs.LinkMarkerKind} {
+	for _, kind := range []string{"", obs.LinkMarkerKind, obs.EmptyMarkerKind} {
 		m, _ := Plan(Options{PersistenceMarker: kind}, s, "box-1", st, "203.0.113.10", "canary.test", "pin")
 		prefix := obs.MarkerPrefix
 		if kind == obs.LinkMarkerKind {
 			prefix = obs.LinkMarkerPrefix
+		}
+		if kind == obs.EmptyMarkerKind {
+			prefix = obs.EmptyMarkerPrefix
 		}
 		if len(m.Marks) != 1 || m.Marks[0].Path != "/data/"+prefix+m.RunID || m.Marks[0].Volume.ID != "owned-volume" {
 			t.Fatal("marker mechanism not frozen in the plan", m.Marks)

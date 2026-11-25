@@ -152,7 +152,7 @@ func TestDaytonaPersistentRecreatePreservesVolumeAndAllCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if box != p || !ev.Done || ev.BoxBefore != original || ev.BoxAfter == original || ev.BoxAfter != p.ID() || !p.originalVerified {
+	if box != p || !ev.Done || ev.FailureStage != "" || ev.BoxBefore != original || ev.BoxAfter == original || ev.BoxAfter != p.ID() || !p.originalVerified {
 		t.Fatal("reset evidence incomplete")
 	}
 	if ev.Volumes["/workspace"][0] != st.Volumes[0] || ev.Volumes["/workspace"][1] != st.Volumes[0] {
@@ -187,6 +187,9 @@ func TestDaytonaPersistentFailureRetainsReplacementAndUnknownCreate(t *testing.T
 			box, ev, err := p.Reset(context.Background())
 			if err == nil || ev.Done || box != p {
 				t.Fatal("failed reset became proven")
+			}
+			if obs.ResetFailureStage(ev.FailureStage) == "" {
+				t.Fatal("failed reset lost its bounded stage")
 			}
 			if fault == "original-config" && (f.creates != 1 || len(f.deleted) != 0) {
 				t.Fatal("original drift did not stop recreation")

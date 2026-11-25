@@ -3,12 +3,18 @@ package obs
 // PER-5 and TWN-3: what crosses the box boundary for the marks, the reset and the recheck.
 
 const (
-	MarkSchema       = "sandprobe.mark/1"
-	RecheckSchema    = "sandprobe.recheck/1"
-	MarkerPrefix     = ".sandprobe-"      // a marker is <root>/.sandprobe-<run id>, holding only the run id (SBX-1)
-	LinkMarkerPrefix = ".sandprobe-link-" // EVD-15: explicit metadata-only marker namespace.
-	LinkMarkerKind   = "symlink-v1"
+	MarkSchema        = "sandprobe.mark/1"
+	RecheckSchema     = "sandprobe.recheck/1"
+	MarkerPrefix      = ".sandprobe-"      // a marker is <root>/.sandprobe-<run id>, holding only the run id (SBX-1)
+	LinkMarkerPrefix  = ".sandprobe-link-" // EVD-15: explicit metadata-only marker namespace.
+	LinkMarkerKind    = "symlink-v1"
+	EmptyMarkerPrefix = ".sandprobe-empty-"
+	EmptyMarkerKind   = "empty-file-v1"
 )
+
+func ValidPersistenceMarker(kind string) bool {
+	return kind == "" || kind == LinkMarkerKind || kind == EmptyMarkerKind
+}
 
 // Root is a storage root the agent can write, from the survey's read-only inventory: nothing is created to find it.
 // Its device and inode let the mark confirm the directory is still the one surveyed; they are never its identity
@@ -104,6 +110,7 @@ type Startup struct {
 // ResetEvidence is the reset as the provider reported it to the host, never the box (TWN-3), with the probe's mark
 // and recheck documents for the grader to parse.
 type ResetEvidence struct {
+	FailureStage                string               `json:"FailureStage,omitempty"` // EVD-18: host-only fixed stage, never a provider error.
 	Model                       string               // restore or recreate
 	OperationID                 string               // the reset operation the host issued
 	Checkpoint                  string               // restore: the checkpoint it names
@@ -114,6 +121,15 @@ type ResetEvidence struct {
 	Volumes                     map[string][2]Volume // recreate: per root, the volume before and after
 	Mark, Recheck               []byte               // the probe's documents; nil when that step didn't run
 	Cleanup                     []Cleanup            // each marker's fate
+}
+
+// ResetFailureStage returns a closed host diagnostic label, never arbitrary text.
+func ResetFailureStage(stage string) string {
+	switch stage {
+	case "precondition", "verify_original", "verify_storage", "delete_original", "create_replacement", "detect_architecture", "verify_configuration", "prepare_workload", "upload_probe", "verify_probe", "verify_fixture", "verify_storage_after_reset":
+		return stage
+	}
+	return ""
 }
 
 // Cleanup is what became of one marker: gone with its box or volume once the provider confirmed the deletion, or an

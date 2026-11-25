@@ -21,4 +21,8 @@ func TestMetadataMarkerChangesComparisonContext(t *testing.T) {
 	if slices.Contains(Compare(a, b).ContextChanges, "declared_configuration") {
 		t.Fatal("different run names misclassified as a marker mechanism change")
 	}
+	b.Manifest.Marks[0].Path = filepath.Join("/data", obs.EmptyMarkerPrefix+b.Manifest.RunID)
+	if !slices.Contains(Compare(a, b).ContextChanges, "declared_configuration") {
+		t.Fatal("different metadata protocols hidden")
+	}
 }

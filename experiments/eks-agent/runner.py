@@ -137,7 +137,7 @@ class Runner:
         # EVD-15: old journals used regular files; a resumed assessment cannot switch mechanisms.
         recorded_marker = journal.data.get("persistence_marker", "file")
         persistence_marker = recorded_marker if persistence_marker is None else persistence_marker
-        if persistence_marker not in {"file", "symlink-v1"} or (persistence_marker != "file" and storage_profile == "ephemeral"):
+        if persistence_marker not in {"file", "symlink-v1", "empty-file-v1"} or (persistence_marker != "file" and storage_profile == "ephemeral"):
             raise Failure("invalid_persistence_marker_or_profile")
         if recorded_marker != persistence_marker and ("persistence_marker" in journal.data or "source_commit" in journal.data):
             raise Failure("persistence_marker_changed")
@@ -1346,7 +1346,7 @@ def main():
     parser.add_argument("--storage-profile", choices=["ephemeral", "persistent-artifacts"], default=None)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     parser.add_argument("--canary-tcp80-protocol", choices=["legacy", "http-v1"], default=None)
-    parser.add_argument("--persistence-marker", choices=["file", "symlink-v1"], default=None)
+    parser.add_argument("--persistence-marker", choices=["file", "symlink-v1", "empty-file-v1"], default=None)
     journal = None
     try:
         args = parser.parse_args()
