@@ -35,7 +35,7 @@ case "$*" in
 *" exec "*)
 	n=$(($(ans exec-tries || echo 0) + 1)); echo "$n" > "$d/exec-tries"
 	if [ "$n" -le "$(ans exec-refusals || echo 0)" ]; then ans exec-error >&2; exit 1; fi ;;
-*" get pod "*) [ -f "$d/get-exit" ] && exit "$(ans get-exit)"; ans uid ;;
+*" get pod "*) [ -f "$d/get-exit" ] && { [ -f "$d/get-partial" ] && ans uid; exit "$(ans get-exit)"; }; ans uid ;;
 *"delete --raw"*) cat >> "$d/calls"; echo >> "$d/calls" ;;
 *) echo "unexpected: $*" >&2; exit 99 ;;
 esac
@@ -260,6 +260,8 @@ func TestKubernetesRecipeWait(t *testing.T) {
 		"never ready":     {"99", dialing, "uid-1", "12", "still doesn't take kubectl exec"},
 		"another failure": {"99", "exec: sh: not found TOKEN-MARKER", "uid-1", "1", "can't start sh"},
 		"another pod":     {"0", "", "uid-2", "", "no longer holds the pod"},
+		"no pod":          {"0", "", "", "", "no longer holds the pod"},
+		"a failed lookup": {"0", "", "uid-1", "", "can't say which pod"}, // the right UID printed, then a nonzero exit
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir, _ := stubKubectl(t)
@@ -278,6 +280,10 @@ func TestKubernetesRecipeWait(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(dir, "exec-tries")); err == nil {
 				t.Fatal("the create ran a command in the pod, before its ID could be recorded")
+			}
+			if name == "a failed lookup" {
+				os.WriteFile(filepath.Join(dir, "get-partial"), nil, 0o600)
+				os.WriteFile(filepath.Join(dir, "get-exit"), []byte("1"), 0o600)
 			}
 			err = b.Wait(context.Background())
 			if (err == nil) != (c.want == "") || err != nil && (!strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "MARKER")) {

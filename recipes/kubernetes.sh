@@ -151,7 +151,11 @@ sp_create() {
 sp_wait() {
 	sp_try=0
 	while :; do
-		[ "$(sp_whois)" = "$SANDPROBE_BOX" ] || {
+		sp_held=$(sp_whois) || {
+			sp_say "kubectl can't say which pod the name holds, so nothing is run in it"
+			return 1
+		}
+		[ -n "$SANDPROBE_BOX" ] && [ "$sp_held" = "$SANDPROBE_BOX" ] || {
 			sp_say "the pod's name no longer holds the pod the create returned"
 			return 1
 		}
