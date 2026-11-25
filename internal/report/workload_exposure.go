@@ -28,7 +28,13 @@ func WorkloadExposureScore(m obs.Manifest, raw []byte, evidence *obs.CanaryEvide
 	if evidence != nil {
 		r.Evidence = *evidence
 	}
-	return exposureFromDoc(Build(r, Meta{}))
+	meta := Meta{}
+	// EVD-17: the frozen host contract supplies context only after validation.
+	// Guest observations and an invalid contract cannot create provider scope.
+	if r.Report.Valid && m.WorkloadContract != nil {
+		meta.Provider = m.WorkloadContract.Provider
+	}
+	return exposureFromDoc(Build(r, meta))
 }
 
 // exposureFromDoc is the workload card for a report this process just graded, with the severity evidence its own

@@ -1119,6 +1119,11 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
   the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
   it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
+- **EVD-17 Workload score provider context.** RC recomputation from workload evidence must preserve the provider
+  named by a structurally valid, host-frozen workload contract, after the standard evidence grades valid. Never
+  infer a provider from guest prose or treat an invalid contract as scope evidence. Without a provider declaration,
+  retain the historical unqualified context. This preserves SCR-2 applicability and native exclusion provenance;
+  it adds no measured result and changes no scoring rule. Saved source artifacts remain unchanged when recomputed.
 - **EVD-16 Native exclusion provenance in managed reports.** The managed Daytona collector uses the same
   PRV-12 exclusion map as the native adapter and must preserve its `provider_terms` kind in the frozen manifest.
   This selects no additional check, changes no observation, and gives skipped checks no measured or conclusive
@@ -3691,6 +3696,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |
+| EVD-17 | `TestWorkloadExposurePreservesValidatedProvider`: public bundle recomputation retains valid provider scope, matches canonical report scoring and coverage, and invalid contracts never yield a valid score |
 | EVD-15 | `TestLinkMarkerSurvivesRenumberingWithoutFollowingTarget`, `TestLinkMarkerRejectsWrongTypeAndMetadata`, `TestLinkMarkerRejectsConcurrentReplacementAndUnsupportedRead`, `TestLinkMarkerCreationIsExclusiveAndRootBound`, existing `TestRecheckIdentityDiagnostics`, `TestPlanMetadataPersistenceMarker`, `TestMetadataMarkerStillRequiresResetAndVolumeProof`, and `TestMetadataMarkerChangesComparisonContext` |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |
