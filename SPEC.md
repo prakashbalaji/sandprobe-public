@@ -1132,6 +1132,10 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   Regular-file markers retain their exact inode/length guards. Existing wire fields keep their meaning (marker
   payload length and placement inode); the distinct planned namespace freezes the selected mechanism. Old graders
   reject the new namespace rather than treating it as a regular-file proof. Defaults remain regular-file markers.
+  Both managed runners may select it explicitly with `--persistence-marker symlink-v1` for a persistent profile;
+  they freeze the selection in the run intent/journal and forward it to the generic host option. Invalid selectors
+  or an ephemeral profile are rejected before resource creation. Cleanup needs no measurement selector. A resumed
+  journal must not change its recorded marker mechanism; older journals mean regular-file markers.
 - **EVD-14 Bounded policy-readback diagnostics.** EVD-11's optional organization read may report only fixed
   failure categories: authentication, permission, endpoint availability, rate limit, request rejection, service
   availability, timeout, transport or response-schema failure; other errors retain `readback_unavailable`.

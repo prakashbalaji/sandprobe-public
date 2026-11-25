@@ -268,6 +268,13 @@ cases and network intent. Nitro's existing read-only root and native seccomp
 controls remain enabled. This comparison measures a configured deployment;
 Daytona object storage and Nitro block storage have different filesystem semantics.
 
+For an explicit metadata-only PER-5 measurement, add `--persistence-marker symlink-v1` to this profile.
+The same selector is supported by Daytona. It creates and checks a run-owned symbolic link without following or
+opening its target; the original regular-file marker remains the default. Unsupported link operations remain
+unknown, with no fallback. The journal and planned marker path freeze the choice, and a resumed assessment cannot
+change it. Workload, storage/reset ownership and cleanup guards stay unchanged; comparisons identify a change
+of marker mechanism.
+
 Nitro explicitly creates an encrypted 1GiB gp3 volume in the recorded receiver
 node's zone and records its returned ID before a static Auto Mode PV references
 it. Both PV and PVC use `ReadWriteOncePod`, following

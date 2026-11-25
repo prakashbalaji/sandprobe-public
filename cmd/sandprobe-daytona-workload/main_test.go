@@ -17,6 +17,18 @@ import (
 
 type surveyStopBox struct{ called bool }
 
+func TestInvalidPersistenceMarkerStopsBeforeResources(t *testing.T) {
+	for _, o := range []options{{persistenceMarker: "other", storageProfile: "persistent-artifacts"}, {persistenceMarker: obs.LinkMarkerKind, storageProfile: "ephemeral"}} {
+		o.folder = t.TempDir()
+		if err := os.Chmod(o.folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := execute(context.Background(), o); err == nil || !strings.Contains(err.Error(), "unsupported persistence marker") {
+			t.Fatal("invalid marker reached resource setup", err)
+		}
+	}
+}
+
 func (b *surveyStopBox) ID() string { return "fixture" }
 func (b *surveyStopBox) Probe(context.Context, []string, []byte) ([]byte, error) {
 	b.called = true

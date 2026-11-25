@@ -12,6 +12,24 @@ from runner import Runner, HOSTNAME
 
 
 class StandardGradeTests(unittest.TestCase):
+    def test_metadata_marker_reaches_standard_bridge(self):
+        with tempfile.TemporaryDirectory() as root:
+            j=Journal(root,'a'*16,create=True)
+            try:
+                r=Runner(j,controller='host',storage_profile='persistent-artifacts',persistence_marker='symlink-v1')
+                r.kubeconfig=j.folder/'eks.kubeconfig';r.cluster='recorded';r.image='recorded-image'
+                j.data.update(context={'pod_uid':'original-uid'},task_container_id='original-container',workload_contract={'frozen':'before-release'})
+                r.delegated_state=lambda:{'endpoint':'https://recorded-endpoint'}
+                report={'schema':'sandprobe/3','run':{'box':{'provider_id':'original-uid'},'provider':'aws-nitro','id':'standard-run'},'grade':{'letter':'C','valid':True,'complete':False,'unknown':[]}}
+                r.ops.call=Mock(return_value=json.dumps({'report':report,'html':'<html></html>','input':{},'evidence':{},'observations':'{}'}).encode())
+                with patch('runner.persistent_assessment.binding',return_value={'owned':'volume'}),patch('runner.persistent_assessment.reset_request',return_value={'owned':'reset'}),patch('runner.persistent_assessment.import_reset'):
+                    r.standard_grade('original-pod','original-job','b'*64)
+                payload=json.loads(r.ops.call.call_args.kwargs['payload'])
+                self.assertEqual(payload['persistence_marker'],'symlink-v1')
+                self.assertEqual(payload['persistent'],{'owned':'reset'})
+                r.ops.call.assert_called_once()
+            finally:j.close()
+
     def test_http_measurement_requires_new_schema_and_reaches_bridge(self):
         for schema in ("sandprobe/1", "sandprobe/4"):
             with self.subTest(schema=schema), tempfile.TemporaryDirectory() as root:

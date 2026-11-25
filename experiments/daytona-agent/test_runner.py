@@ -17,13 +17,14 @@ spec=importlib.util.spec_from_file_location('daytona_runner',Path(__file__).with
 r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 
 class RunnerTests(unittest.TestCase):
- def completed_run(self,storage_profile='ephemeral'):
+ def completed_run(self,storage_profile='ephemeral',marker='file'):
   with tempfile.TemporaryDirectory() as d:
    home=Path(d);(home/'.config/sandprobe').mkdir(parents=True)
    helper=home/'cf';helper.write_text('fixture')
    key=home/'key';key.write_text('synthetic-not-a-secret');key.chmod(0o600)
    args=argparse.Namespace(cleanup_run='',model_python='/fixture/model-python',go='/fixture/go',sdk_python='/fixture/python',key_file=str(key),cf_helper=str(helper),dns_reference='fixture',storage_profile=storage_profile)
    args.model='mistral.ministral-3-8b-instruct'
+   args.persistence_marker=marker
    def call(argv,env,timeout=90,data=None):
     if argv[0]=='/fixture/model-python':return b'{"ready":true,"client_version":"1.44.6"}'
     if argv[:2]==['git','rev-parse']:return b'a'*40
@@ -36,6 +37,9 @@ class RunnerTests(unittest.TestCase):
      self.assertEqual(argv[argv.index('--model')+1],args.model)
      self.assertEqual(json.loads((folder/'intent.json').read_text())['model'],args.model)
      self.assertEqual(json.loads((folder/'intent.json').read_text())['storage_profile'],storage_profile)
+     self.assertEqual(json.loads((folder/'intent.json').read_text())['persistence_marker'],marker)
+     if marker=='file':self.assertNotIn('--persistence-marker',argv)
+     else:self.assertEqual(argv[argv.index('--persistence-marker')+1],marker)
      assessment={'run_id':'rfixture123','box_id':'original-box','configuration_grade':'C','complete':False,'benchmark_requirements_met':False}
      exposure={'schema':'sandprobe.workload-exposure/1','run_id':'rfixture123','box_id':'original-box','valid':True,'score':3,'of':6}
      r.persist(folder/'evaluation.json',{'source_commit':'a'*40,'managed_run_id':run,'primary_assessment':'rc_exposure_scorecard','configuration_assessment':assessment,'exposure_scorecard':exposure,'functional_workload':{'independent_verification':'passed','functional_tests':9,'model_requests':2,'model':args.model}})
@@ -82,6 +86,14 @@ class RunnerTests(unittest.TestCase):
   self.completed_run('persistent-workspace')
  def test_artifact_profile_reaches_same_managed_workload(self):
   self.completed_run('persistent-artifacts')
+ def test_metadata_marker_reaches_collector_and_frozen_intent(self):
+  self.completed_run('persistent-artifacts','symlink-v1')
+ def test_invalid_marker_stops_before_any_resource_or_model_call(self):
+  for marker,profile in [('other','persistent-artifacts'),('symlink-v1','ephemeral')]:
+   with patch.object(r,'call') as call,patch.object(r,'sdk') as sdk,patch.object(r,'aws') as aws:
+    with self.assertRaisesRegex(r.Failure,'invalid_persistence_marker_or_profile'):
+     r.main(argparse.Namespace(storage_profile=profile,persistence_marker=marker))
+    call.assert_not_called();sdk.assert_not_called();aws.assert_not_called()
  def test_persistent_recovery_keeps_box_and_storage_outcomes_separate(self):
   with tempfile.TemporaryDirectory() as d:
    folder=Path(d);(folder/'workspace-volume.state').write_text('fixture')

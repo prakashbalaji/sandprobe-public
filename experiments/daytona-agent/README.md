@@ -111,6 +111,13 @@ Deleted volume tombstones may remain under a changed name. Cleanup accepts only
 exact-ID absence or terminal `deleted` with the original birth/organization, and
 retains pending/error states without treating a DELETE request as confirmation.
 
+To measure PER-5 using only a run-owned symbolic link's metadata, add
+`--persistence-marker symlink-v1` to a persistent-profile run. This explicitly selects EVD-15's generic marker;
+the default remains a regular file with its original inode guard. The probe never follows or opens the link's
+target. A filesystem that cannot create or read this metadata remains unknown, without fallback. The intent and
+planned marker path record the choice; comparisons identify a marker-mechanism change. Workload cases, identity,
+storage ownership, reset proof, endpoint exclusions and cleanup remain unchanged.
+
 [Daytona volumes](https://www.daytona.io/docs/en/volumes/) use FUSE over object storage;
 [Nitro EBS volumes](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing-storage.html)
 are block-backed filesystems. These are comparable persistence intentions, not

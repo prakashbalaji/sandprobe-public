@@ -114,7 +114,7 @@ def trust_policy(cluster_arn, namespace):
 
 
 class Runner:
-    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None, canary_tcp80_protocol=None):
+    def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None, canary_tcp80_protocol=None, persistence_marker=None):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
             raise Failure("invalid_profile")
         if controller not in {"guest", "host"}:
@@ -134,6 +134,14 @@ class Runner:
         if journal.data.get("storage_profile", storage_profile) != storage_profile:
             raise Failure("storage_profile_changed")
         self.storage_profile, self.account_id = storage_profile, ACCOUNT
+        # EVD-15: old journals used regular files; a resumed assessment cannot switch mechanisms.
+        recorded_marker = journal.data.get("persistence_marker", "file")
+        persistence_marker = recorded_marker if persistence_marker is None else persistence_marker
+        if persistence_marker not in {"file", "symlink-v1"} or (persistence_marker != "file" and storage_profile == "ephemeral"):
+            raise Failure("invalid_persistence_marker_or_profile")
+        if recorded_marker != persistence_marker and ("persistence_marker" in journal.data or "source_commit" in journal.data):
+            raise Failure("persistence_marker_changed")
+        self.persistence_marker = persistence_marker
         if storage_profile != "ephemeral":
             journal.data["storage_profile"] = storage_profile
             journal.save()
@@ -257,7 +265,7 @@ class Runner:
         self.journal.data.update(model=model, profile=self.profile, account=ACCOUNT,
             approval_reference_sha256=hashlib.sha256(approval.encode()).hexdigest(),
             endpoint_resolution={"hostname": HOSTNAME, "ipv4": ips, "resolved_at": int(time.time())},
-            source_commit=source_commit, controller=self.controller, canary_tcp80_protocol=self.canary_tcp80_protocol,
+            source_commit=source_commit, controller=self.controller, canary_tcp80_protocol=self.canary_tcp80_protocol, persistence_marker=self.persistence_marker,
             deployment_pattern="host_controller_no_guest_credentials" if self.controller == "host" else "guest_assigned_identity", phase="preflight_passed")
         self.journal.save()
 
@@ -881,6 +889,8 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
                    "job_uid": job_uid, "image": self.image, "container_id": self.journal.data["task_container_id"], "config_sha256": config_sha},
                    "canary_state": str(self.journal.folder / "canary.state"),
                    "contract": self.journal.data["workload_contract"], "upload_hosts": self.upload_hosts}
+        if self.persistence_marker != "file":
+            request["persistence_marker"] = self.persistence_marker
         if self.canary_tcp80_protocol == "http-v1":
             request["canary_tcp80_protocol"] = "tcp80-http-marker-v1"
         # MEAS-7: the same literal address the workload used, from its frozen policy.
@@ -1336,6 +1346,7 @@ def main():
     parser.add_argument("--storage-profile", choices=["ephemeral", "persistent-artifacts"], default=None)
     parser.add_argument("--upload-hosts", default="", help="explicit shipped workload names for TLS-only EGR-6")
     parser.add_argument("--canary-tcp80-protocol", choices=["legacy", "http-v1"], default=None)
+    parser.add_argument("--persistence-marker", choices=["file", "symlink-v1"], default=None)
     journal = None
     try:
         args = parser.parse_args()
@@ -1354,7 +1365,7 @@ def main():
                 raise Failure("aws_eks_testing_approval_reference_required")
             journal = Journal(STATE_ROOT, secrets.token_hex(8), create=True)
         selected_controller = journal.data.get("controller", args.controller) if args.command == "cleanup" else args.controller
-        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=selected_controller, model_python=args.model_python, storage_profile=args.storage_profile, canary_tcp80_protocol=args.canary_tcp80_protocol)
+        runner = Runner(journal, args.profile, upload_hosts=approved_hosts, controller=selected_controller, model_python=args.model_python, storage_profile=args.storage_profile, canary_tcp80_protocol=args.canary_tcp80_protocol, persistence_marker=args.persistence_marker)
         if args.command == "cleanup":
             clean = runner.cleanup()
             print(json.dumps({"run_id": runner.run_id, "cleanup_confirmed": clean}))
