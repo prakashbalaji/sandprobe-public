@@ -440,7 +440,7 @@ func TestOwnRecipeDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the saved report doesn't load: %v", err)
 	}
-	if !d.Grade.Valid || d.Run.Provider != "recipe" || d.Run.Mode != "exec" || !d.Run.Box.CreatedBySandprobe || d.Schema != report.SchemaSkipKinds ||
+	if !d.Grade.Valid || d.Run.Provider != "recipe" || d.Run.Mode != "exec" || !d.Run.Box.CreatedBySandprobe || d.Schema != report.SchemaNoLetter ||
 		len(d.Manifest.SkipKinds) != 4 || len(d.Manifest.Attested) != 0 || d.Manifest.DeclaredProvider != "" {
 		t.Errorf("run %+v, schema %s, valid %v (%s), kinds %v", d.Run, d.Schema, d.Grade.Valid, d.Grade.Invalid, d.Manifest.SkipKinds)
 	}
