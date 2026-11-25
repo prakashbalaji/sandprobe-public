@@ -74,7 +74,7 @@ is absent from probe stdin and is not proof of enforcement. Existing saved runs
 retain missing context; none is reconstructed from their names or findings.
 
 Offline assessment exports this declaration as unauthenticated context; comparison
-flags addition, removal or changes. Legacy letters, findings and gates remain
+flags addition, removal or changes. Findings and gates remain
 unchanged. This is the first grading prerequisite, not the completed grading fix:
 controlled agent-owned versus protected-resource fixtures and independent
 calibration still precede a replacement overall assessment (SPEC BND-1–5).
