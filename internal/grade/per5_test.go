@@ -118,6 +118,9 @@ func TestMetadataMarkerStillRequiresResetAndVolumeProof(t *testing.T) {
 			if !r.Valid || outcome(r, "PER-5").Result != tc.want {
 				t.Fatalf("metadata changed proof requirements: valid=%v outcome=%+v", r.Valid, outcome(r, "PER-5"))
 			}
+			if tc.want == obs.Finding && !strings.Contains(outcome(r, "PER-5").Evidence, "symbolic-link metadata") {
+				t.Fatal("metadata evidence mislabeled as a regular-file measurement")
+			}
 		})
 	}
 }

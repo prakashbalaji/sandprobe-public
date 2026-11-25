@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"sandprobe/internal/catalog"
@@ -204,6 +205,12 @@ func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.Rechec
 		if m.Reset == "restore" {
 			claim = fmt.Sprintf("run data written after the checkpoint was present at %s after the provider's proven restore "+
 				"(TWN-3); which filesystem held it is unproven", strings.Join(survived, ", "))
+		}
+		for _, mark := range m.Marks {
+			if slices.Contains(survived, mark.Root) && mark.Path == filepath.Join(mark.Root, obs.LinkMarkerPrefix+m.RunID) {
+				claim += "; retained symbolic-link metadata was verified without following its target (EVD-15)"
+				break
+			}
 		}
 		return Outcome{Result: obs.Finding, Variant: v, Evidence: claim + why}
 	case len(survived) > 0:
