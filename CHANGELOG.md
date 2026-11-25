@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.4 (2026-11-24)
 
 - `sandprobe run -recipe <file>` and `sandprobe plan -recipe <file>` run a recipe of your own: a small shell file,
   kept in your repository, that creates one box on your provider, opens `sh` in it as your agent, and deletes it by
