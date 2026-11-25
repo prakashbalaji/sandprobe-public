@@ -217,7 +217,7 @@ func per5(m obs.Manifest, c *obs.CanaryEvidence, md *obs.MarkDoc, rd *obs.Rechec
 		"something other than the reset may have removed it, so this proves nothing (KND-2)"}
 }
 
-// marksSound: PER-5 selected needs a reset model and planned marks, each exactly <root>/.sandprobe-<run id>, one per
+// marksSound: PER-5 selected needs a reset model and planned marks in the exact file or EVD-15 link namespace, one per
 // root and per directory, every one on a volume Sandprobe created when the reset recreates the box; skipped, none.
 func marksSound(m obs.Manifest, selected bool) error {
 	if !selected {
@@ -236,7 +236,7 @@ func marksSound(m obs.Manifest, selected bool) error {
 	roots, dirs := map[string]bool{}, map[dir]bool{}
 	for _, pm := range m.Marks {
 		switch {
-		case !filepath.IsAbs(pm.Root) || pm.Path != filepath.Join(pm.Root, obs.MarkerPrefix+m.RunID):
+		case !filepath.IsAbs(pm.Root) || (pm.Path != filepath.Join(pm.Root, obs.MarkerPrefix+m.RunID) && pm.Path != filepath.Join(pm.Root, obs.LinkMarkerPrefix+m.RunID)):
 			return fmt.Errorf("%q isn't this run's marker path in its root", pm.Path)
 		case roots[pm.Root] || pm.Ino != 0 && dirs[dir{pm.Dev, pm.Ino}]: // no identity: missing from the survey, its mark refuses
 			return fmt.Errorf("root %s is planned twice", pm.Root)

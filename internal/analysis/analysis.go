@@ -4,6 +4,7 @@ package analysis
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -522,6 +523,7 @@ func Compare(a, b *report.Doc) Comparison {
 	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup;
 	// so does any change to a declared provider (PRV-17), even with the same skips.
 	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) || a.Manifest.DeclaredProvider != b.Manifest.DeclaredProvider ||
+		!slices.Equal(metadataMarkerRoots(a.Manifest), metadataMarkerRoots(b.Manifest)) ||
 		!reflect.DeepEqual(a.Run.Recipe, b.Run.Recipe) { // RCP-4: different host code made and deleted the boxes
 		out.ContextChanges = append(out.ContextChanges, "declared_configuration")
 	}
@@ -564,4 +566,16 @@ func Compare(a, b *report.Doc) Comparison {
 	}
 	out.NoObservedChange = !changed && !out.Incomplete && len(out.ContextChanges) == 0 && len(out.CoverageLoss) == 0
 	return out
+}
+
+// EVD-15: compare marker mechanisms without treating per-run names as changes.
+func metadataMarkerRoots(m obs.Manifest) []string {
+	var roots []string
+	for _, mark := range m.Marks {
+		if mark.Path == filepath.Join(mark.Root, obs.LinkMarkerPrefix+m.RunID) {
+			roots = append(roots, mark.Root)
+		}
+	}
+	slices.Sort(roots)
+	return roots
 }

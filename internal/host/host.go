@@ -60,6 +60,7 @@ type Canary interface {
 }
 
 type Options struct {
+	PersistenceMarker   string                // EVD-15: empty uses a regular file; symlink-v1 measures link metadata only.
 	BlockDevicePaths    []string              // EVD-13: host-declared metadata-only paths, supplementing discovery.
 	CanaryTCP80Protocol string                // EVD-10: explicit opt-in; empty preserves legacy traffic.
 	UploadAddresses     map[string]string     // MEAS-7: host-frozen addresses for selected names only
@@ -132,6 +133,9 @@ func armWants(m obs.Manifest) []canary.Want {
 // Execute runs the probe in a box and grades it. An error means no run happened; a run that happened but can't be
 // graded comes back with an invalid report.
 func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
+	if o.PersistenceMarker != "" && o.PersistenceMarker != obs.LinkMarkerKind {
+		return nil, fmt.Errorf("unsupported persistence marker")
+	}
 	if err := catalog.ValidateBlockDevicePaths(o.BlockDevicePaths); err != nil {
 		return nil, err
 	}
@@ -413,6 +417,11 @@ func Plan(o Options, s *obs.Survey, boxID string, st Storage, canaryIP, domain, 
 		s = &own
 	}
 	marks := planMarks(s, st, runID)
+	if o.PersistenceMarker == obs.LinkMarkerKind {
+		for i := range marks {
+			marks[i].Path = filepath.Join(marks[i].Root, obs.LinkMarkerPrefix+runID)
+		}
+	}
 	switch {
 	case st.Model == "":
 		skip["PER-5"] = "the provider's reset leaves no storage to test: the adapter can't reset this box"
