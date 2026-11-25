@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -127,12 +128,13 @@ func TestHTMLIsSafe(t *testing.T) {
 	}
 }
 
-// UX-8: graphite is the default and mission the alternative; the retired modern, and any other value, render graphite.
-// The page's button cycles exactly the two, and reads a remembered modern as graphite.
+// UX-8: -theme takes auto, light, graphite and mission; auto is the default, and what the retired modern and any other
+// value render. Every page carries all three palettes and the rule that gives auto graphite on a dark system, so one
+// file is right on either machine. The page's button steps through the four, and a remembered modern reads as graphite.
 func TestThemes(t *testing.T) {
 	d := Build(run(), meta())
-	for in, want := range map[string]string{"": "graphite", "graphite": "graphite", "modern": "graphite", "Mission": "graphite",
-		evil: "graphite", "mission": "mission"} {
+	for in, want := range map[string]string{"": "auto", "auto": "auto", "light": "light", "graphite": "graphite", "mission": "mission",
+		"modern": "auto", "dark": "auto", "Mission": "auto", evil: "auto"} {
 		for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
 			b, err := render(d, in)
 			if err != nil {
@@ -142,18 +144,69 @@ func TestThemes(t *testing.T) {
 			if !strings.Contains(p, `<html lang="en" data-theme="`+want+`">`) || !strings.Contains(p, `<span id="themeName">`+want+`</span>`) {
 				t.Errorf("-theme %q: want %s", in, want)
 			}
-			if !strings.Contains(p, `themes = ["graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern") saved = "graphite";`) {
-				t.Errorf("-theme %q: the button doesn't cycle graphite and mission, or a remembered modern is lost", in)
+			if !strings.Contains(p, `themes = ["auto", "light", "graphite", "mission"]`) || !strings.Contains(p, `if (saved === "modern") saved = "graphite";`) ||
+				!strings.Contains(p, `if (themes.indexOf(saved) >= 0) root.setAttribute("data-theme", saved);`) ||
+				!strings.Contains(p, `var next = themes[(themes.indexOf(root.getAttribute("data-theme")) + 1) % themes.length];`) ||
+				!strings.Contains(p, `localStorage.setItem("sandprobe-theme", next);`) {
+				t.Errorf("-theme %q: the button doesn't step through and remember the four, a remembered modern is lost, or an unknown one is used", in)
 			}
-			for _, rule := range []string{`:root, [data-theme="graphite"] {`, `[data-theme="mission"] {`, "@media print {", "@media (prefers-reduced-motion: reduce) {",
-				`--sans: Geist, Inter, `, `--mono: "Geist Mono", "JetBrains Mono", `} {
-				if !strings.Contains(p, rule) {
+			css := styleRE.FindStringSubmatch(p)[1]
+			for name, open := range paletteAt {
+				if strings.Count(css, open) != 1 {
+					t.Errorf("-theme %q: the page doesn't carry %s once", in, name)
+				}
+			}
+			for _, rule := range []string{"@media print {", "@media (prefers-reduced-motion: reduce) {", `--sans: Geist, Inter, `, `--mono: "Geist Mono", "JetBrains Mono", `} {
+				if !strings.Contains(css, rule) {
 					t.Errorf("-theme %q: the page has no %s", in, rule)
 				}
 			}
 			if narrow := p[strings.Index(p, "@media (max-width: 900px) {"):]; !strings.Contains(narrow[:strings.Index(narrow, "\n}")], ".toc, .crumbs, .wide { display: none; }") {
 				t.Errorf("-theme %q: the contents rail stays under 900px", in)
 			}
+		}
+	}
+}
+
+// UX-8: the dark system scheme gives auto exactly graphite's tokens, light is what auto shows anywhere else, and every
+// palette sets the same tokens. UX-11: print's own palette comes after them all, so a page prints on white whatever
+// the screen shows.
+func TestSystemScheme(t *testing.T) {
+	css := stylesheet(t)
+	light, dark, graphite, mission := tokens(t, css, "light"), tokens(t, css, "autoDark"), tokens(t, css, "graphite"), tokens(t, css, "mission")
+	if len(graphite) < 20 || !maps.Equal(dark, graphite) {
+		t.Errorf("auto on a dark system isn't graphite: %v, %v", dark, graphite)
+	}
+	if !strings.Contains(css, "\n:root, [data-theme=\"light\"] {") || strings.Contains(css, "prefers-color-scheme: light") {
+		t.Error("light isn't what auto shows wherever the system isn't dark")
+	}
+	for name := range graphite {
+		if light[name] == "" || mission[name] == "" {
+			t.Errorf("--%s: set by graphite, missing from light or mission", name)
+		}
+	}
+	for name := range light {
+		if graphite[name] == "" {
+			t.Errorf("--%s: set by light, missing from graphite", name)
+		}
+	}
+	at := strings.Index(css, "@media print {\n  :root, [data-theme] { --bg: #fff;")
+	if at < 0 {
+		t.Fatal("no print palette on white")
+	}
+	for name, open := range paletteAt {
+		if strings.Index(css, open) > at {
+			t.Errorf("%s comes after the print palette, so it would print", name)
+		}
+	}
+	block := css[at:]
+	block = block[:strings.Index(block, "}")]
+	for name := range graphite {
+		if strings.HasPrefix(name, "pill") || name == "on-pill" { // unused in print: the buttons are hidden
+			continue
+		}
+		if !strings.Contains(block, "--"+name+":") {
+			t.Errorf("--%s isn't set for print, so print would take the screen's", name)
 		}
 	}
 }
@@ -165,7 +218,7 @@ var (
 	urlRE   = regexp.MustCompile(`(?i)url\(\s*['"]?([^)'"]*)`)
 )
 
-// OUT-2: the page fetches nothing, on every saved report, in both palettes, fresh or re-rendered. html/template
+// OUT-2: the page fetches nothing, on every saved report, in every palette, fresh or re-rendered. html/template
 // escapes every "<" in box text, so each tag found is a real one; the data block is JSON text, checked in
 // TestHTMLIsSafe, and box text may hold any word, so only tags and the style block are read.
 func TestHTMLLoadsNothing(t *testing.T) {
@@ -188,7 +241,7 @@ func TestHTMLLoadsNothing(t *testing.T) {
 	}
 	const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-`
 	for name, d := range docs {
-		for _, theme := range []string{"graphite", "mission"} {
+		for _, theme := range themes {
 			for _, render := range []func(Doc, string) ([]byte, error){HTML, SavedHTML} {
 				b, err := render(d, theme)
 				if err != nil {
