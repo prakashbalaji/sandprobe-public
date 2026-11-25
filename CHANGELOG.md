@@ -31,6 +31,12 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 - The cap on a command's captured output now holds in memory. It was applied only to writes made one at a time, so
   a recipe, a box or a provider CLI that printed without end could grow Sandprobe's memory.
 
+- Managed Daytona runs: when the optional organization network-policy read fails, the artifact now says why, from a
+  fixed list (authentication, permission, endpoint availability, rate limit, request rejection, service availability,
+  timeout, transport, or a response the pinned SDK can't read), where it said `readback_unavailable` for almost every
+  failure. No error text, response body, URL, header or credential enters the artifact, and every failure still
+  leaves the policy unknown, with no enforcement claim (EVD-14).
+
 ## 0.3.3 (2026-11-24)
 
 - The letter grade is gone from the JSON report, `profile` and `assess`; the terminal, the page and `-min` had already
