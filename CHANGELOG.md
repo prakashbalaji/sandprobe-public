@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.3 (2026-11-24)
 
 - The letter grade is gone from the JSON report, `profile` and `assess`; the terminal, the page and `-min` had already
   dropped it, and the six-category score is the headline. A new JSON report has no `grade.letter` and declares
