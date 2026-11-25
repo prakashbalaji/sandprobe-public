@@ -177,12 +177,12 @@ func ModalUnplacedNames(doc []byte, image []string) []string {
 		if o.ID != "SEC-1" || o.Result != obs.Finding {
 			continue
 		}
-		_, list, ok := strings.Cut(o.Evidence, "values never read: ")
-		if !ok {
+		list, ok := strings.CutPrefix(o.Evidence, "secret-shaped names in the agent's environment, values never read: ")
+		if !ok || list == "" { // exactly the probe's own sentence, or the gate can't clear
 			out = append(out, "(the evidence couldn't be read)")
 		}
 		for n := range strings.SplitSeq(list, ", ") {
-			if n != "" && !slices.Contains(image, n) && n != "SANDPROBE_TWIN" {
+			if !slices.Contains(image, n) && n != "SANDPROBE_TWIN" {
 				out = append(out, n)
 			}
 		}
@@ -206,7 +206,11 @@ func ModalUnexpectedCreds(doc []byte) []string {
 		if o.ID != "SEC-3" || o.Result != obs.Finding {
 			continue
 		}
-		list := strings.TrimSuffix(strings.TrimPrefix(o.Evidence, "the agent can read "), " (opened, never read)")
+		list, pre := strings.CutPrefix(o.Evidence, "the agent can read ")
+		list, suf := strings.CutSuffix(list, " (opened, never read)")
+		if !pre || !suf || list == "" {
+			out = append(out, "(the evidence couldn't be read)")
+		}
 		for p := range strings.SplitSeq(list, ", ") {
 			if p != "/etc/shadow" {
 				out = append(out, p)

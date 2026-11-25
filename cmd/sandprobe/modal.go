@@ -216,7 +216,8 @@ func modalStopped(run *host.Run, tag string, started time.Time, cleanup string, 
 		return code, true, fail("stopped", "the sandbox held a credential surface that neither the image nor Sandprobe put there, which may be Modal's own, so no report was written; "+kept+"; "+cleanup,
 			"don't run it again; report it privately to Modal, as its security page says", code)
 	}
-	why := host.ModalUnsound(run.Evidence, run.Report.Valid, run.Report.Invalid)
+	// The grader's own reason quotes the probe's document, which the box returned, so the public error never repeats it.
+	why := host.ModalUnsound(run.Evidence, run.Report.Valid, "its reason isn't shown")
 	if perr != nil {
 		why = "the probe's document doesn't parse"
 	}

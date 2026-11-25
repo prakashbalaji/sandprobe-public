@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,12 +118,18 @@ func TestModalStopped(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			os.MkdirAll(configDir(), 0o700)
-			code, stopped, err := modalStopped(&host.Run{Doc: c.doc, Evidence: c.ev, Report: grade.Report{Valid: c.valid}}, "tag1", time.Now(), "the cleanup", c.cleaned, io.Discard)
+			code, stopped, err := modalStopped(&host.Run{Doc: c.doc, Evidence: c.ev, Report: grade.Report{Valid: c.valid, Invalid: "target /MARKER/token wasn't planned"}}, "tag1", time.Now(), "the cleanup", c.cleaned, io.Discard)
 			if stopped != (c.code != 0) || code != c.code || (err != nil) != stopped {
 				t.Fatalf("exit %d, stopped %v, %v", code, stopped, err)
 			}
-			if err != nil && strings.Contains(fmt.Sprintf("%+v %s", err, err), "MARKER") {
-				t.Errorf("the error repeats what was seen: %v", err)
+			if err != nil { // as text and as -o json, on both streams
+				var out, errs bytes.Buffer
+				for _, o := range []opts{{stdout: &out}, {stdout: &out, out: "json"}} {
+					reportErr(o, &errs, err)
+				}
+				if all := out.String() + errs.String(); strings.Contains(all, "MARKER") || all == "" {
+					t.Errorf("the error repeats what was seen, or wasn't printed: %q", all)
+				}
 			}
 			path := filepath.Join(configDir(), "modal-tag1.incident.json")
 			b, rerr := os.ReadFile(path)
