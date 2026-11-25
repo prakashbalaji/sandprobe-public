@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"sandprobe/internal/obs"
@@ -29,6 +30,9 @@ type Recipe struct {
 	// Reset says the recipe defines sp_checkpoint, sp_restore or sp_recreate. Resets aren't built, so none is ever
 	// called, and the plan and report say so (RCP-3).
 	Reset bool
+	// Waits says a shipped recipe defines sp_wait, called once the create's ID is on disk (RCP-1, RCP-2). A person's own
+	// recipe has no such call: its sp_create returns only when the box is ready for a shell.
+	Waits bool
 	// Own marks a person's own recipe file (run -recipe, RCP-4): nobody reviewed it, so it always carries all four
 	// default exclusions, and its header is only its own word. File is its path as given, for the plan and the record
 	// alone: never a report, and never the record's name.
@@ -50,6 +54,8 @@ var (
 	recipeLine = regexp.MustCompile(`^[\x20-\x7e]{1,400}$`)
 	// RecipeCallLimit bounds one function call; sp_create waits for the box to be ready inside it.
 	RecipeCallLimit = 5 * time.Minute
+	// RecipeWaitLimit bounds sp_wait whatever its commands do: kubectl has no request timeout of its own.
+	RecipeWaitLimit = 90 * time.Second
 	// RecipeGoneLimit bounds the wait for sp_gone's 0 after the delete, asked every RecipeGonePoll; tests shorten both.
 	RecipeGoneLimit = 2 * time.Minute
 	RecipeGonePoll  = 2 * time.Second
@@ -73,7 +79,7 @@ func ParseOwnRecipe(text []byte) (*Recipe, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.Name, r.Own, r.Exclusions = "own-"+r.SHA256[:12], true, slices.Clone(RecipeDefaultExclusions)
+	r.Name, r.Own, r.Waits, r.Exclusions = "own-"+r.SHA256[:12], true, false, slices.Clone(RecipeDefaultExclusions)
 	return r, nil
 }
 
@@ -160,6 +166,7 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 			return nil, fmt.Errorf("the recipe has no %s() (RCP-1)", fn)
 		}
 	}
+	r.Waits = regexp.MustCompile(`(?m)^sp_wait\(\) *\{`).Match(text)
 	r.Reset = regexp.MustCompile(`(?m)^sp_(checkpoint|restore|recreate)\(\) *\{`).Match(text)
 	return r, nil
 }
@@ -175,6 +182,12 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, RecipeCallLimit)
 	defer cancel()
+	return r.callIn(ctx, fn, env, false)
+}
+
+// callIn is call under ctx alone. With group, the recipe runs in its own process group and the end of ctx kills all
+// of it: killing only the sh would leave a command below it, a stalled kubectl say, running into the cleanup.
+func (r *Recipe) callIn(ctx context.Context, fn string, env []string, group bool) ([]byte, int, error) {
 	listen, speak, err := os.Pipe()
 	if err != nil {
 		return nil, -1, fmt.Errorf("%s didn't run: no pipe for its messages: %w", fn, err)
@@ -188,6 +201,10 @@ func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int
 	cmd.Env, cmd.WaitDelay = recipeEnviron(env), 5*time.Second
 	out := &capped{max: 64 << 10}
 	cmd.Stdout, cmd.ExtraFiles = out, []*os.File{speak} // fd 3
+	if group {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	}
 	err = cmd.Run()
 	// The recipe has exited. Once the host's own end is closed the drain ends, unless a child the recipe left behind
 	// still holds fd 3: that gets a moment and no more, and closing the reading end stops the drain either way.
@@ -340,6 +357,22 @@ func (b *RecipeBox) Create(ctx context.Context) error {
 	b.BoxID = id
 	b.ExecBox.Env = recipeEnviron(b.env())
 	b.record(at, "sp_create", code, err)
+	return err
+}
+
+// Wait runs a shipped recipe's sp_wait, if it defines one: the box takes sp_shell, or the recipe says why not. It may
+// run a command in the box, so the caller records the ID first (RCP-2). RecipeWaitLimit or a cancel kills it and
+// everything it started, so no cluster client is left running when the cleanup begins.
+func (b *RecipeBox) Wait(ctx context.Context) error {
+	if !b.Recipe.Waits {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, RecipeWaitLimit)
+	defer cancel()
+	_, _, err := b.Recipe.callIn(ctx, "sp_wait", b.env(), true)
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("sp_wait was stopped before the box took a shell (%w); its limit is %s", ctx.Err(), RecipeWaitLimit)
+	}
 	return err
 }
 

@@ -316,6 +316,9 @@ func runRecipe(o opts, r runFlags, name string, planOnly bool, stderr io.Writer)
 	var run *host.Run
 	err = func() error {
 		lv.phase("box", "asking the box which probe it runs")
+		if err := box.Wait(ctx); err != nil {
+			return err
+		}
 		arch, err := box.Arch(ctx)
 		if err != nil {
 			return err

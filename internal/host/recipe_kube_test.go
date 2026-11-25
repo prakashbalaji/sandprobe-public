@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ func stubKubectl(t *testing.T) (dir string, calls func() []string) {
 	script := `#!/bin/sh
 d=$(dirname "$0")
 echo "$*" >> "$d/calls"
+if [ -f "$d/stall" ]; then case "$*" in *"$(cat "$d/stall")"*) echo $$ > "$d/stalled"; exec sleep 300 ;; esac; fi
 echo "sandprobe-recipe: SPOOF on stderr" >&2 # a tool posing as the recipe, on both channels (AGENTS rule 3)
 { echo "SPOOF on fd 3" >&3; } 2>/dev/null
 ans() { cat "$d/$1" 2>/dev/null; }
@@ -32,7 +35,10 @@ case "$*" in
 *"create --dry-run=client"*) cat >/dev/null; printf 'v1/%s/%s/%s' "$(ans kind)" "$(ans ns)" "$SANDPROBE_NAME" ;;
 *" create -f -"*) cat >/dev/null; printf 'Pod/%s/uid-1' "$SANDPROBE_NAME" ;;
 *" wait "*) ;;
-*" get pod "*) [ -f "$d/get-exit" ] && exit "$(ans get-exit)"; ans uid ;;
+*" exec "*)
+	n=$(($(ans exec-tries || echo 0) + 1)); echo "$n" > "$d/exec-tries"
+	if [ "$n" -le "$(ans exec-refusals || echo 0)" ]; then ans exec-error >&2; exit 1; fi ;;
+*" get pod "*) [ -f "$d/get-exit" ] && { [ -f "$d/get-partial" ] && ans uid; exit "$(ans get-exit)"; }; ans uid ;;
 *"delete --raw"*) cat >> "$d/calls"; echo >> "$d/calls" ;;
 *) echo "unexpected: $*" >&2; exit 99 ;;
 esac
@@ -241,5 +247,120 @@ func TestKubernetesRecipeChildrenCantSpeak(t *testing.T) {
 	}
 	if !strings.Contains(string(text), "} 3>&-\n") || strings.Count(string(text), "fi | cut -c1-12\n} 3>&-") != 1 {
 		t.Error("sp_sha12 runs its tools with fd 3 open")
+	}
+}
+
+// PRV-16: a new node refuses exec until its serving certificate is issued, so sp_wait retries that error alone,
+// and only after the create: RCP-2 records the ID first.
+func TestKubernetesRecipeWait(t *testing.T) {
+	const dialing = "Error from server: error dialing backend: remote error: tls: internal error TOKEN-MARKER"
+	for name, c := range map[string]struct {
+		refusals, errText, uid string
+		tries, want            string // how many execs were tried, and the message ("" is success)
+	}{
+		"ready at once":   {"0", "", "uid-1", "1", ""},
+		"a new node":      {"2", dialing, "uid-1", "3", ""},
+		"never ready":     {"99", dialing, "uid-1", "12", "still doesn't take kubectl exec"},
+		"another failure": {"99", "exec: sh: not found TOKEN-MARKER", "uid-1", "1", "can't start sh"},
+		"another pod":     {"0", "", "uid-2", "", "no longer holds the pod"},
+		"no pod":          {"0", "", "", "", "no longer holds the pod"},
+		"a failed lookup": {"0", "", "uid-1", "", "can't say which pod"}, // the right UID printed, then a nonzero exit
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir, _ := stubKubectl(t)
+			os.WriteFile(filepath.Join(dir, "sleep"), []byte("#!/bin/sh\n"), 0o755)
+			for f, v := range map[string]string{"exec-refusals": c.refusals, "exec-error": c.errText, "uid": c.uid} {
+				os.WriteFile(filepath.Join(dir, f), []byte(v), 0o600)
+			}
+			r := kubeRecipe(t)
+			target, err := r.Ready(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := NewRecipeBox(r, target, "")
+			if err := b.Create(context.Background()); err != nil || b.BoxID != "uid-1" {
+				t.Fatalf("create: %q %v", b.BoxID, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "exec-tries")); err == nil {
+				t.Fatal("the create ran a command in the pod, before its ID could be recorded")
+			}
+			if name == "a failed lookup" {
+				os.WriteFile(filepath.Join(dir, "get-partial"), nil, 0o600)
+				os.WriteFile(filepath.Join(dir, "get-exit"), []byte("1"), 0o600)
+			}
+			err = b.Wait(context.Background())
+			if (err == nil) != (c.want == "") || err != nil && (!strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "MARKER")) {
+				t.Errorf("wait: %v", err)
+			}
+			got, _ := os.ReadFile(filepath.Join(dir, "exec-tries"))
+			if strings.TrimSpace(string(got)) != c.tries {
+				t.Errorf("%s tries, not %s", got, c.tries)
+			}
+		})
+	}
+}
+
+// RCP-1: only a shipped recipe's sp_wait is called.
+func TestOwnRecipeNeverWaits(t *testing.T) {
+	text, _ := recipes.Get("kubernetes")
+	r, err := ParseOwnRecipe(text)
+	if err != nil || r.Waits {
+		t.Fatalf("waits %v, %v", r != nil && r.Waits, err)
+	}
+	if err := (&RecipeBox{Recipe: r}).Wait(context.Background()); err != nil {
+		t.Errorf("an own recipe's sp_wait was called: %v", err)
+	}
+}
+
+// RCP-1: kubectl has no request timeout, so a stalled one ends with the wait's limit or a cancel, and is dead, not
+// orphaned, when Wait returns.
+func TestKubernetesRecipeWaitStalls(t *testing.T) {
+	defer func(d time.Duration) { RecipeWaitLimit = d }(RecipeWaitLimit)
+	for _, stall := range []string{" get pod ", " exec "} {
+		for _, how := range []string{"limit", "cancel"} {
+			t.Run(strings.TrimSpace(stall)+" "+how, func(t *testing.T) {
+				dir, _ := stubKubectl(t)
+				r := kubeRecipe(t)
+				target, err := r.Ready(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, _ := NewRecipeBox(r, target, "")
+				if err := b.Create(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				os.WriteFile(filepath.Join(dir, "stall"), []byte(stall), 0o600)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				RecipeWaitLimit = time.Minute
+				if how == "limit" {
+					RecipeWaitLimit = 2 * time.Second
+				} else {
+					time.AfterFunc(2*time.Second, cancel)
+				}
+				start := time.Now()
+				if err := b.Wait(ctx); err == nil || !strings.Contains(err.Error(), "was stopped") {
+					t.Errorf("wait: %v", err)
+				}
+				if took := time.Since(start); took > 10*time.Second {
+					t.Errorf("took %s", took)
+				}
+				p, err := os.ReadFile(filepath.Join(dir, "stalled"))
+				if err != nil {
+					t.Fatal("kubectl never stalled, so nothing was tested")
+				}
+				pid, err := strconv.Atoi(strings.TrimSpace(string(p)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; syscall.Kill(pid, 0) == nil; i++ { // init may take a moment to reap the killed child
+					if i == 40 {
+						syscall.Kill(pid, syscall.SIGKILL)
+						t.Fatal("the stalled kubectl outlived the wait")
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			})
+		}
 	}
 }

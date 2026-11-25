@@ -72,6 +72,9 @@ SANDPROBE_KUBE_CONTEXT=my-eks SANDPROBE_KUBE_OVERRIDES=./nitro-overrides.json \
   sandprobe run kubernetes -as "$AGENT_USER" -y
 ```
 
+On EKS Auto Mode the first run may start a node. Sandprobe waits up to three minutes for the pod to be ready, then up
+to 90 seconds for the node to take `kubectl exec`. If it still isn't ready, run again: the node may be up by then.
+
 The cluster must offer that runtime class: `kubectl get runtimeclass isolated-sandbox` names it. For the cluster that
 `deploy/eks.sh up` makes, `PROFILE="$AWS_PROFILE" deploy/eks.sh status` prints its kubeconfig and its
 cluster name. Set `KUBECONFIG` to that kubeconfig and `SANDPROBE_KUBE_CONTEXT` to the cluster name, which is also
