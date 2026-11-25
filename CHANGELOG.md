@@ -3,6 +3,23 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- The letter grade is gone from the JSON report, `profile` and `assess`; the terminal, the page and `-min` had already
+  dropped it, and the six-category score is the headline. A new JSON report has no `grade.letter` and declares
+  `sandprobe/6`. The rest of `grade` (`complete`, `valid`, `invalid`, `unknown`, `counts`, `notes`), the score, the
+  findings and every exit code are unchanged. Reports saved by earlier versions (`sandprobe/1` to `sandprobe/5`) still
+  load in `scorecard`, `profile`, `assess`, `compare`, `fix` and `feedback`: their letter is checked, then ignored, a
+  page re-rendered with `scorecard -out` embeds the report as `sandprobe/6` without it, and an older report compares
+  against a new one as before. A Sandprobe older than this one refuses a `sandprobe/6` report. `profile` no longer
+  prints "reported grade", and its JSON, now `sandprobe.profile/2`, has no `reported_grade_unverified`. `assess` no
+  longer prints "Saved grade", and its JSON, now `sandprobe.assessment/2`, lists the highest-severity finding IDs as
+  `highest_severity_finding_ids_unverified` (it was `reported_grade_driver_ids_unverified`). The `-no-canary` plan
+  line says the run ends incomplete, where it said the run couldn't grade above C. If you gate on the letter, gate on
+  `findings`, `grade.counts`, the score (`scorecard -o json`), `sandprobe compare` or `-min` instead. The experimental
+  managed-workload evaluations still report the letter in their legacy fields (GRD-1, OUT-1, AGT-6, ANL-1, ANL-2,
+  CAL-3).
+
 ## 0.3.2 (2026-11-24)
 
 - The workload exposure page never trusts a saved exposure card. Sandprobe rebuilds each row with the same code that

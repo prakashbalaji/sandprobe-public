@@ -35,7 +35,7 @@ type Assessment struct {
 	SourceComplete   bool                  `json:"source_complete"`
 	Counts           map[string]int        `json:"counts"`
 	Routes           []RouteAssessment     `json:"routes"`
-	LegacyDrivers    []string              `json:"reported_grade_driver_ids_unverified"`
+	TopFindings      []string              `json:"highest_severity_finding_ids_unverified"`
 	ObservedUID      *int                  `json:"observed_uid"`
 	Coverage         Profile               `json:"coverage"`
 	Limits           []string              `json:"limits"`
@@ -49,21 +49,21 @@ func Assess(d *report.Doc, profile string) (Assessment, error) {
 		return Assessment{}, ErrInput
 	}
 	a := Assessment{
-		Schema: "sandprobe.assessment/1", Verification: "retrospective_structural_only_unauthenticated",
+		Schema: "sandprobe.assessment/2", Verification: "retrospective_structural_only_unauthenticated",
 		Profile: profile, Provider: d.Run.Provider, RunID: d.Run.ID,
 		Outcome: Inconclusive, DirectTCP: Inconclusive,
 		SourceComplete: d.Grade.Valid && d.Grade.Complete && d.Identity != nil,
 		Counts:         map[string]int{ReportedRefusal: 0, ReportedDelivery: 0, Inconclusive: 0},
-		Routes:         []RouteAssessment{}, LegacyDrivers: []string{}, Coverage: Summarize(d),
+		Routes:         []RouteAssessment{}, TopFindings: []string{}, Coverage: Summarize(d),
 		Limits: []string{
 			"Hypothetical six-route deny-canary requirement, not a provider promise or evidence of policy bypass.",
 			"Unauthenticated saved results only; raw observations, receipts and health controls are not reverified. No attestation or CI security verdict.",
-			"DNS and UDP are find-only: silence cannot prove refusal. All-six requirements cannot be met by the current catalog; no overall sandbox letter is assigned.",
+			"DNS and UDP are find-only: silence cannot prove refusal. All-six requirements cannot be met by the current catalog; no overall sandbox verdict is assigned.",
 			"Four direct TCP routes are a subset, not all egress. Other destinations, proxies and host/hypervisor isolation are not assessed.",
 			"Guest root/capabilities describe the agent's guest privileges; they alone do not establish a host escape. Namespace and process trust roles remain unverified.",
 			"Process/file openability plus independent marker delivery does not prove that secret contents were read or exfiltrated.",
 			"Writable startup files alone do not establish persistence across a reset. See PER-5 coverage separately.",
-			"Saved legacy grades and run -min gates are unchanged; reported grade drivers are unverified, not recomputed severity judgments.",
+			"Saved reports and run -min gates are unchanged; highest-severity finding IDs are unverified, not recomputed severity judgments.",
 		},
 	}
 	// BND-3: copied declared context, not authenticated role attribution.
@@ -85,9 +85,9 @@ func Assess(d *report.Doc, profile string) (Assessment, error) {
 		s := severity(f.Severity)
 		if s > worst {
 			worst = s
-			a.LegacyDrivers = []string{f.ID}
+			a.TopFindings = []string{f.ID}
 		} else if s == worst {
-			a.LegacyDrivers = append(a.LegacyDrivers, f.ID)
+			a.TopFindings = append(a.TopFindings, f.ID)
 		}
 	}
 	rows := map[string]report.Check{}

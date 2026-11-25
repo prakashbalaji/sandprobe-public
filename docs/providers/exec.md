@@ -103,7 +103,7 @@ about Modal's terms.
 - **It comes from you, never from an agent.** An agent running Sandprobe never infers the provider from the command,
   a hostname, the environment or a report. It never adds `-provider` or changes it to turn a red Cloud access into
   not applicable. If you didn't name the provider, Cloud access stays "Not tested".
-- **It changes no measurement.** The same checks run, nothing more is contacted, and the letter is the same. The
+- **It changes no measurement.** The same checks run, nothing more is contacted, and no finding changes. The
   checks the scope excludes stay skipped, never passed.
 - **`compare` treats it as a changed setup.** Adding, removing or changing it between two runs exits 5, never "no
   change".

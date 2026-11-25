@@ -261,25 +261,41 @@ func TestScorecardRefusesForgedDeclaredProvider(t *testing.T) {
 			d.Manifest.CanaryTCP80Protocol = canary.HTTPMarkerV1
 		}, false},
 	} {
-		d := clone()
-		tc.edit(&d)
-		in := writeDoc(t, d)
-		var out, errs bytes.Buffer
-		if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage || strings.Contains(out.String(), "/5") {
-			t.Errorf("%s: exit %d\n%s", name, code, out.String())
-		}
-		if c := report.Score(d); tc.scored && (c.Of != 6 || c.Rows[4].NotApplicable) {
-			t.Errorf("%s: scored directly %d/%d %+v", name, c.Score, c.Of, c.Rows[4])
+		// AGT-6: each is refused as saved (sandprobe/5, with its letter) and as a run writes it now (sandprobe/6),
+		// where no version stands in for the rule.
+		for _, v6 := range []bool{false, true} {
+			if v6 && name == "under sandprobe/2" {
+				continue
+			}
+			d := clone()
+			tc.edit(&d)
+			if v6 {
+				d = noLetter(d)
+			}
+			in := writeDoc(t, d)
+			var out, errs bytes.Buffer
+			if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage || strings.Contains(out.String(), "/5") {
+				t.Errorf("%s (sandprobe/6 %v): exit %d\n%s", name, v6, code, out.String())
+			}
+			if c := report.Score(d); tc.scored && (c.Of != 6 || c.Rows[4].NotApplicable) {
+				t.Errorf("%s (sandprobe/6 %v): scored directly %d/%d %+v", name, v6, c.Score, c.Of, c.Rows[4])
+			}
 		}
 	}
-	for name, raw := range map[string]string{"empty": `"declared_provider":""`, "null": `"declared_provider":null`} {
-		b, _ := json.Marshal(base)
-		b = bytes.Replace(b, []byte(`"declared_provider":"modal"`), []byte(raw), 1)
-		in := filepath.Join(t.TempDir(), "report.json")
-		os.WriteFile(in, b, 0o644)
+	for form, base := range map[string]report.Doc{"as saved": base, "sandprobe/6": noLetter(base)} {
 		var out, errs bytes.Buffer
-		if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage {
-			t.Errorf("present but %s: exit %d", name, code)
+		if code := run([]string{"scorecard", writeDoc(t, base)}, &out, &errs); code != exitGraded || !strings.Contains(out.String(), "/5") {
+			t.Fatalf("the unedited report, %s: exit %d\n%s%s", form, code, out.String(), errs.String())
+		}
+		for name, raw := range map[string]string{"empty": `"declared_provider":""`, "null": `"declared_provider":null`} {
+			b, _ := json.Marshal(base)
+			b = bytes.Replace(b, []byte(`"declared_provider":"modal"`), []byte(raw), 1)
+			in := filepath.Join(t.TempDir(), "report.json")
+			os.WriteFile(in, b, 0o644)
+			out.Reset()
+			if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage {
+				t.Errorf("present but %s, %s: exit %d", name, form, code)
+			}
 		}
 	}
 }

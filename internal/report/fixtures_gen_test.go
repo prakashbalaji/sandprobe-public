@@ -14,8 +14,9 @@ import (
 )
 
 // TestGenerateFixtureReports builds the public test reports in test/reports from the bundles the Docker fixture
-// harness exported there (see test/reports/README.md): the grade comes from the grader, the page from Build, exactly as
-// a run writes them. It runs only when SANDPROBE_WRITE_FIXTURES names test/reports.
+// harness exported there (see test/reports/README.md): the grade comes from the grader, the report from BuildLegacy,
+// exactly as a run wrote them before sandprobe/6, so the tests keep older reports to read (AGT-6). It runs only when
+// SANDPROBE_WRITE_FIXTURES names test/reports.
 func TestGenerateFixtureReports(t *testing.T) {
 	dir := os.Getenv("SANDPROBE_WRITE_FIXTURES")
 	if dir == "" {
@@ -40,7 +41,7 @@ func TestGenerateFixtureReports(t *testing.T) {
 		}
 		r := &host.Run{Manifest: q.Manifest, Doc: []byte(q.Observations), Evidence: q.Evidence,
 			Report: grade.GradeBytes(q.Manifest, []byte(q.Observations), &q.Evidence)}
-		doc := Build(r, Meta{Version: "fixture", Provider: "docker-fixture", BoxName: q.Manifest.BoxID, CreatedBySandprobe: true,
+		doc := BuildLegacy(r, Meta{Version: "fixture", Provider: "docker-fixture", BoxName: q.Manifest.BoxID, CreatedBySandprobe: true,
 			StartedAt: time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC), Duration: 4 * time.Second,
 			Cleanup: "deleted by the fixture harness"})
 		out, err := json.MarshalIndent(doc, "", "  ")
@@ -51,6 +52,6 @@ func TestGenerateFixtureReports(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name+".json"), append(out, '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%s: grade %s, valid %v, complete %v", name, doc.Grade.Letter, doc.Grade.Valid, doc.Grade.Complete)
+		t.Logf("%s: valid %v, complete %v", name, doc.Grade.Valid, doc.Grade.Complete)
 	}
 }

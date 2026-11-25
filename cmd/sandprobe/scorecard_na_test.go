@@ -224,26 +224,36 @@ func TestScorecardRefusesForgedKinds(t *testing.T) {
 		}
 		d.Manifest.SkipKinds = kinds
 		d.Schema = report.SchemaFor(d.Manifest) // refused for the kind, never for the version
-		out, _ := json.Marshal(d)
-		in := filepath.Join(t.TempDir(), "report.json")
-		os.WriteFile(in, out, 0o644)
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"scorecard", in}, &stdout, &stderr); code != exitUsage || strings.Contains(stdout.String(), "Score") {
-			t.Errorf("%s: exit %d, %s", name, code, stdout.String())
+		// AGT-6: under either version.
+		for form, d := range map[string]report.Doc{"as saved": d, "sandprobe/6": noLetter(d)} {
+			out, _ := json.Marshal(d)
+			in := filepath.Join(t.TempDir(), "report.json")
+			os.WriteFile(in, out, 0o644)
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"scorecard", in}, &stdout, &stderr); code != exitUsage || strings.Contains(stdout.String(), "Score") {
+				t.Errorf("%s, %s: exit %d, %s", name, form, code, stdout.String())
+			}
 		}
 	}
 }
 
-// AGT-6 at the command line: a sandprobe/1 report still reads; a report with skip kinds declares sandprobe/2 and
-// reads; a sandprobe/1 report carrying skip kinds, a sandprobe/2 one without them, and a version this build doesn't
-// know are refused, with a fix that names the versions it reads.
+// AGT-6 at the command line. Older reports still read: a sandprobe/1 report, and one with skip kinds that declares
+// sandprobe/2. So does each as a run writes it now: sandprobe/6, no letter, with skip kinds or without. Refused, with
+// a fix that names the versions this build reads: a sandprobe/1 report carrying skip kinds, a sandprobe/2 one without
+// them, a sandprobe/6 report with a letter, a sandprobe/1 or sandprobe/2 report without one, and a version this build
+// doesn't know.
 func TestReportSchemaVersions(t *testing.T) {
+	v1 := "../../test/reports/egress-refused.json"
 	v2 := skipSaved(t, "sprites", host.Options{Excluded: host.SpritesExclusions(), ExcludedKind: obs.SkipProviderTerms})
-	retag := func(src, schema string) string {
+	// retag rewrites a saved report's version, and drops its letter when asked.
+	retag := func(src, schema string, dropLetter bool) string {
 		b, _ := os.ReadFile(src)
 		var d report.Doc
 		json.Unmarshal(b, &d)
 		d.Schema = schema
+		if dropLetter {
+			d.Grade.Letter = nil
+		}
 		out, _ := json.Marshal(d)
 		path := filepath.Join(t.TempDir(), "report.json")
 		os.WriteFile(path, out, 0o644)
@@ -253,21 +263,30 @@ func TestReportSchemaVersions(t *testing.T) {
 		path string
 		code int
 	}{
-		"sandprobe/1, as before":            {"../../test/reports/egress-refused.json", exitGraded},
+		"sandprobe/1, as before":            {v1, exitGraded},
 		"sandprobe/2 with skip kinds":       {v2, exitGraded},
-		"sandprobe/1 carrying skip kinds":   {retag(v2, "sandprobe/1"), exitUsage},
-		"sandprobe/2 without skip kinds":    {retag("../../test/reports/egress-refused.json", "sandprobe/2"), exitUsage},
-		"a version this build doesn't know": {retag(v2, "sandprobe/9"), exitUsage},
+		"sandprobe/6":                       {retag(v1, "sandprobe/6", true), exitGraded},
+		"sandprobe/6 with skip kinds":       {retag(v2, "sandprobe/6", true), exitGraded},
+		"sandprobe/1 carrying skip kinds":   {retag(v2, "sandprobe/1", false), exitUsage},
+		"sandprobe/2 without skip kinds":    {retag(v1, "sandprobe/2", false), exitUsage},
+		"sandprobe/6 with a letter":         {retag(v1, "sandprobe/6", false), exitUsage},
+		"sandprobe/1 without its letter":    {retag(v1, "sandprobe/1", true), exitUsage},
+		"sandprobe/2 without its letter":    {retag(v2, "sandprobe/2", true), exitUsage},
+		"a version this build doesn't know": {retag(v2, "sandprobe/9", false), exitUsage},
+		"an unknown version, no letter":     {retag(v2, "sandprobe/9", true), exitUsage},
 	} {
 		var out, errs bytes.Buffer
 		code := run([]string{"scorecard", tc.path}, &out, &errs)
-		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 or sandprobe/5 report file") {
+		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 or sandprobe/5 or sandprobe/6 report file") {
 			t.Errorf("%s: exit %d, %s", name, code, errs.String())
 		}
 	}
 	b, _ := os.ReadFile(v2)
-	if !bytes.Contains(b, []byte(`"schema":"sandprobe/2"`)) {
-		t.Error("a report with skip kinds doesn't declare sandprobe/2")
+	if !bytes.Contains(b, []byte(`"schema":"sandprobe/2"`)) || !bytes.Contains(b, []byte(`"letter":"F"`)) {
+		t.Error("the older report with skip kinds doesn't declare sandprobe/2 with its letter")
+	}
+	if b, _ := os.ReadFile(retag(v2, "sandprobe/6", true)); !bytes.Contains(b, []byte(`"schema":"sandprobe/6"`)) || bytes.Contains(b, []byte(`"letter"`)) {
+		t.Error("the sandprobe/6 report carries a letter")
 	}
 }
 
@@ -283,13 +302,16 @@ func TestScorecardRefusesForgedProvenance(t *testing.T) {
 	b, _ := os.ReadFile(honest)
 	var d report.Doc
 	json.Unmarshal(b, &d)
-	d.Manifest.SkipKinds["SEC-4"], d.Manifest.SkipKinds["AMP-7"] = obs.SkipProviderTerms, obs.SkipProviderTerms
-	forged, _ := json.Marshal(d)
-	in := filepath.Join(t.TempDir(), "forged.json")
-	os.WriteFile(in, forged, 0o644)
 	out.Reset()
-	if code := run([]string{"scorecard", in}, &out, &errs); code != exitUsage || strings.Contains(out.String(), "/5") {
-		t.Errorf("the forged report: exit %d\n%s", code, out.String())
+	if code := run([]string{"scorecard", writeDoc(t, noLetter(d))}, &out, &errs); code != exitGraded || !strings.Contains(out.String(), "Score 2/6\n") {
+		t.Fatalf("the honest report as sandprobe/6: exit %d\n%s%s", code, out.String(), errs.String())
+	}
+	d.Manifest.SkipKinds["SEC-4"], d.Manifest.SkipKinds["AMP-7"] = obs.SkipProviderTerms, obs.SkipProviderTerms
+	for form, d := range map[string]report.Doc{"as saved": d, "sandprobe/6": noLetter(d)} { // AGT-6: under either
+		out.Reset()
+		if code := run([]string{"scorecard", writeDoc(t, d)}, &out, &errs); code != exitUsage || strings.Contains(out.String(), "/5") {
+			t.Errorf("the forged report, %s: exit %d\n%s", form, code, out.String())
+		}
 	}
 	if c := report.Score(d); c.Of != 6 || c.Rows[4].NotApplicable || c.Rows[4].Green {
 		t.Errorf("scored directly: %d/%d %+v", c.Score, c.Of, c.Rows[4])

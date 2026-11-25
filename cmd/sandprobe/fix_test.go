@@ -120,6 +120,7 @@ func TestFixInvalidRun(t *testing.T) {
 	if err := json.Unmarshal(b, &d); err != nil {
 		t.Fatal(err)
 	}
+	d.Schema = report.SchemaNoLetter // AGT-6: an invalid run's report has no letter either
 	d.Grade = report.Grade{Invalid: "the probe's digest didn't match", Unknown: []string{},
 		Counts: map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}}
 	d.Findings = []report.Finding{}

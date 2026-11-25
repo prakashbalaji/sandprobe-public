@@ -40,9 +40,14 @@ func Parse(b []byte) (*report.Doc, error) {
 
 // canonicalNewFields is AGT-6 on bytes the strict decode already took: sandprobe/2's fields appear only as the writer
 // gives them, never present but empty or null, which decoding alone can't tell from absent. So a present one always
-// carries content, and Validate's exact version check then refuses it under sandprobe/1.
+// carries content, and Validate's exact version check then refuses it under sandprobe/1. The letter is the other
+// way round: sandprobe/6 has no letter key in any form, empty or null included, which decoding alone can't tell from
+// absent either (GRD-1).
 func canonicalNewFields(b []byte, d *report.Doc) bool {
 	var p struct {
+		Grade struct {
+			Letter json.RawMessage `json:"letter"`
+		} `json:"grade"`
 		Manifest struct {
 			SkipKinds           json.RawMessage `json:"SkipKinds"`
 			Attested            json.RawMessage `json:"Attested"`
@@ -54,6 +59,9 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 		} `json:"checks"`
 	}
 	if json.Unmarshal(b, &p) != nil || len(p.Checks) != len(d.Checks) {
+		return false
+	}
+	if p.Grade.Letter != nil && d.Schema == report.SchemaNoLetter {
 		return false
 	}
 	if p.Manifest.SkipKinds != nil && len(d.Manifest.SkipKinds) == 0 || p.Manifest.Attested != nil && len(d.Manifest.Attested) == 0 {
@@ -93,8 +101,8 @@ func kind(c catalog.Check) string {
 	return "two_sided"
 }
 
-// Validate checks exported consistency only. The saved letter is unverified and
-// never used for profile/comparison decisions (ANL-1); raw proofs are unavailable.
+// Validate checks exported consistency only. A saved letter is checked for its form
+// and never used, printed or copied (ANL-1); raw proofs are unavailable.
 func Validate(d *report.Doc) error {
 	if c := d.Manifest.WorkloadContract; c != nil && c.Schema == "sandprobe.workload-contract/3" && d.Run.Provider != "aws-nitro" {
 		return ErrInput
@@ -117,7 +125,17 @@ func Validate(d *report.Doc) error {
 		}
 	}
 
-	if d.Schema != report.SchemaFor(d.Manifest) || d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
+	// AGT-6: sandprobe/6 has no letter and takes any earlier version's fields, each under its own rules below. An
+	// earlier version is exactly the one its fields need, and carries its letter.
+	legacy := d.Schema != report.SchemaNoLetter
+	if legacy && d.Schema != report.SchemaFor(d.Manifest) || legacy != (d.Grade.Letter != nil) {
+		return ErrInput
+	}
+	letter := ""
+	if legacy {
+		letter = *d.Grade.Letter
+	}
+	if d.Run.ID == "" || d.Run.Provider == "" || d.Run.Mode == "" || d.Manifest.RunID != d.Run.ID || d.Manifest.Nonce != d.Run.Nonce || d.Manifest.Mode != d.Run.Mode || d.Run.Nonce == "" {
 		return ErrInput
 	}
 	if !slices.Contains([]string{"exec", "entrypoint"}, d.Run.Mode) {
@@ -129,10 +147,10 @@ func Validate(d *report.Doc) error {
 	if d.Grade.Valid && len(d.Manifest.Selected) == 0 {
 		return ErrInput
 	}
-	if d.Grade.Valid && (!strings.Contains("ABCDF", d.Grade.Letter) || len(d.Grade.Letter) != 1 || d.Grade.Invalid != "") {
+	if d.Grade.Valid && (legacy && (!strings.Contains("ABCDF", letter) || len(letter) != 1) || d.Grade.Invalid != "") {
 		return ErrInput
 	}
-	if !d.Grade.Valid && (d.Grade.Letter != "" || d.Grade.Complete) {
+	if !d.Grade.Valid && (letter != "" || d.Grade.Complete) {
 		return ErrInput
 	}
 	selected, ok := set(d.Manifest.Selected)
@@ -154,7 +172,7 @@ func Validate(d *report.Doc) error {
 	}
 	policy := report.PolicyFor(d.Run.Provider, d.Manifest.DeclaredProvider)
 	// PRV-17: a declared provider is the operator's recorded word, but what it excludes is this binary's: a key of its
-	// own table, on a run exec report that needs exactly sandprobe/5, with every check that entry excludes skipped
+	// own table, on a run exec report (sandprobe/5, or sandprobe/6), with every check that entry excludes skipped
 	// under kind provider_terms. The kind checks below refuse any other kind, so the two must match exactly.
 	if name := d.Manifest.DeclaredProvider; name != "" {
 		entry := host.DeclaredExclusions(name)
@@ -326,7 +344,6 @@ type Profile struct {
 	WorkloadContext *obs.WorkloadContract `json:"declared_workload_context,omitempty"`
 	Schema          string                `json:"schema"`
 	Verification    string                `json:"verification"`
-	ReportedGrade   string                `json:"reported_grade_unverified"`
 	Provider        string                `json:"provider"`
 	Valid           bool                  `json:"reported_valid"`
 	Complete        bool                  `json:"selected_checks_complete"`
@@ -355,7 +372,7 @@ func area(id string) string {
 
 // Summarize assumes Validate succeeded, and never labels an area secure.
 func Summarize(d *report.Doc) Profile {
-	p := Profile{Schema: "sandprobe.profile/1", Verification: "structural_only_unauthenticated", ReportedGrade: d.Grade.Letter, Provider: d.Run.Provider, Valid: d.Grade.Valid, Complete: d.Grade.Complete && d.Identity != nil, Areas: []Area{}, Limits: []string{"Self-observed saved data; raw proofs and receipts not reverified; no attestation.", "Selected completeness excludes skipped and missing catalog coverage.", "No finding does not establish containment; reported grade is unverified."}}
+	p := Profile{Schema: "sandprobe.profile/2", Verification: "structural_only_unauthenticated", Provider: d.Run.Provider, Valid: d.Grade.Valid, Complete: d.Grade.Complete && d.Identity != nil, Areas: []Area{}, Limits: []string{"Self-observed saved data; raw proofs and receipts not reverified; no attestation.", "Selected completeness excludes skipped and missing catalog coverage.", "No finding does not establish containment."}}
 	if !d.Grade.Valid {
 		return p
 	}

@@ -85,7 +85,7 @@ func TestInvalidRunKeepsAttestedRows(t *testing.T) {
 			t.Errorf("an invalid run graded %s: %s", c.ID, c.Result)
 		}
 	}
-	if len(d.Grade.Unknown) != 0 || d.Schema != report.SchemaSkipKinds {
+	if len(d.Grade.Unknown) != 0 || d.Schema != report.SchemaNoLetter {
 		t.Errorf("unknown %v, schema %s", d.Grade.Unknown, d.Schema)
 	}
 	b, _ := json.Marshal(d)
@@ -98,7 +98,7 @@ func TestInvalidRunKeepsAttestedRows(t *testing.T) {
 	}
 	p := string(page)
 	for _, want := range []string{"Turned on by your attestation (-provider-endpoints, PRV-15)", template.HTMLEscapeString(report.Attestation),
-		template.HTMLEscapeString(report.NotGraded), "Invalid run", "report schema sandprobe/2"} {
+		template.HTMLEscapeString(report.NotGraded), "Invalid run", "report schema sandprobe/6"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("the invalid run's page doesn't say %q", want)
 		}

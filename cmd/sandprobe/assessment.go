@@ -25,7 +25,7 @@ func assessSaved(o opts, args []string) (int, error) {
 		fmt.Fprintf(o.stdout, "Retrospective assessment %s; source provider %q, run %q.\n", a.Profile, a.Provider, a.RunID)
 		fmt.Fprintf(o.stdout, "Hypothetical deny-canary outcome: %s; four direct TCP routes: %s.\n", a.Outcome, a.DirectTCP)
 		fmt.Fprintf(o.stdout, "Reported refusals %d/6; deliveries %d/6; inconclusive %d/6; source complete: %t.\n", a.Counts[analysis.ReportedRefusal], a.Counts[analysis.ReportedDelivery], a.Counts[analysis.Inconclusive], a.SourceComplete)
-		fmt.Fprintf(o.stdout, "Saved grade %q (unverified); highest-severity finding IDs %q.\n", a.Coverage.ReportedGrade, a.LegacyDrivers)
+		fmt.Fprintf(o.stdout, "Highest-severity finding IDs %q (unverified).\n", a.TopFindings)
 		if a.ObservedUID != nil {
 			fmt.Fprintf(o.stdout, "Observed guest UID: %d.\n", *a.ObservedUID)
 		}

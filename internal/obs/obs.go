@@ -30,7 +30,7 @@ const (
 
 // Manifest is fixed by the host before the run (GRD-5).
 type Manifest struct {
-	CanaryTCP80Protocol                    string            `json:"canary_tcp80_protocol,omitempty"` // EVD-10; saved reports require schema4.
+	CanaryTCP80Protocol                    string            `json:"canary_tcp80_protocol,omitempty"` // EVD-10; saved reports require schema4 or schema6.
 	WorkloadContract                       *WorkloadContract `json:"workload_contract,omitempty"`     // WGR-1: frozen host context
 	BoundaryContract                       *BoundaryContract `json:"boundary_contract,omitempty"`     // BND-1: host declaration, not a verdict
 	RunID, Nonce, BoxID, ProbeSHA256, Mode string

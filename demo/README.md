@@ -66,8 +66,8 @@ fails the build, so the box can't quietly get worse.
   data can leave the box.
 - **What it doesn't catch:** the post's own leak, a key baked into the browser bundle. That needs an app scan.
   Sandprobe covers the agent side.
-- **What the score means:** the number of categories where nothing was found and nothing was left unknown, the
-  same bar as an A. Some checks can only look, never prove a block (a DNS lookup is one); a green that rests on one
+- **What the score means:** the number of categories where nothing was found and nothing was left unknown.
+  Some checks can only look, never prove a block (a DNS lookup is one); a green that rests on one
   says "not proven". It's not a certification.
 - **What a plain `docker run` scores:** 2/6 as root (Docker's default), 3/6 as a normal user. An open
   network and setuid programs are red by default.

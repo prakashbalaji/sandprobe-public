@@ -289,8 +289,13 @@ func sevClass(s string) string {
 // SavedNote is ANL-1's plain statement on every offline rendering of a saved report.
 const SavedNote = "From a saved report: structurally checked only. Its observations and canary receipts weren't re-verified, and an edited report can't be told apart (ANL-1)."
 
-// SavedHTML is OUT-2 re-rendered from a saved report (SCR-3's -out): the same page, saying it wasn't re-verified.
-func SavedHTML(d Doc, theme string) ([]byte, error) { return render(d, theme, SavedNote) }
+// SavedHTML is OUT-2 re-rendered from a saved report (SCR-3's -out): the same page, saying it wasn't re-verified. The
+// page embeds an older report as sandprobe/6, with no letter and nothing else changed (ANL-1, AGT-6): without its
+// letter it is no longer a report of the version it declared, and a reader would refuse it.
+func SavedHTML(d Doc, theme string) ([]byte, error) {
+	d.Schema, d.Grade.Letter = SchemaNoLetter, nil
+	return render(d, theme, SavedNote)
+}
 
 // HTML renders OUT-2: one file that loads nothing, with a fresh script nonce, every box string escaped as text by
 // html/template, and the OUT-1 document in a JSON data block.
