@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"sandprobe/internal/catalog"
 	"sandprobe/internal/grade"
 	"sandprobe/internal/obs"
 )
@@ -162,7 +163,7 @@ func TestCoverageVisibleInHTML(t *testing.T) {
 
 // SCR-5: derived display additions cannot make a previously valid v1 record unreadable.
 func TestSavedExposureCoverageWithoutNewDisplayFields(t *testing.T) {
-	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: Score(doc(obs.NotFound, nil))}
+	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: Score(legalNotFound())}
 	// Keep actual coverage in the record: historical coverage-free cases alone
 	// cannot catch a newly required presentation flag on a green/unproven row.
 	found := false
@@ -212,16 +213,23 @@ func TestSavedExposureCoverageWithoutNewDisplayFields(t *testing.T) {
 // SCR-2, SCR-5: a saved workload-exposure/1 card without the display flag gains the label from its validated
 // coverage when rendered, without changing the caller's card; a supplied flag that contradicts coverage is refused.
 func TestHistoricalDisplayFlagIsDerivedWithoutMutatingInput(t *testing.T) {
-	c := Score(doc(obs.NotFound, nil))
+	c := Score(legalNotFound())
+	notProven := 0
 	for i := range c.Rows {
+		if c.Rows[i].GreenNotProven {
+			notProven++
+		}
 		c.Rows[i].GreenNotProven = false
+	}
+	if notProven == 0 {
+		t.Fatal("the fixture needs a green row with no conclusive check")
 	}
 	x := WorkloadExposure{Schema: "sandprobe.workload-exposure/1", InputVerification: "proof_recomputation_unauthenticated_input", Card: c}
 	b, err := WorkloadExposureHTML(grade.WorkloadReport{}, grade.EvidenceCoverage{}, x)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(b), "<td>Green · not proven</td>") != 6 || strings.Contains(string(b), "<td>Green</td>") {
+	if strings.Count(string(b), "<td>Green · not proven</td>") != notProven || strings.Count(string(b), "<td>Green</td>") != 6-notProven {
 		t.Fatal("historical rows did not gain the derived not-proven label")
 	}
 	for _, r := range x.Rows {
@@ -237,4 +245,16 @@ func TestHistoricalDisplayFlagIsDerivedWithoutMutatingInput(t *testing.T) {
 	if validWorkloadExposure(x) {
 		t.Fatal("accepted a supplied flag that contradicts coverage")
 	}
+}
+
+// legalNotFound is a report the grader could write: every find-only check not_found and every two-sided one a pass,
+// since a two-sided check is never not_found (KND). Its find-only-only category reads green with no conclusive check.
+func legalNotFound() Doc {
+	set := map[string]Check{}
+	for _, id := range catalog.IDs() {
+		if ck, _ := catalog.Get(id); ck.Kind != catalog.FindOnly {
+			set[id] = Check{Result: obs.Pass}
+		}
+	}
+	return doc(obs.NotFound, set)
 }

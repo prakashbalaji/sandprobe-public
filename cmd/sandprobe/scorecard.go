@@ -25,7 +25,7 @@ func scorecard(o opts, r runFlags, args []string) (int, error) {
 		return 0, fail("report.input", "unsupported, inconsistent or unsafe report input", reportInputFix, exitUsage)
 	}
 	card := report.Score(*d)
-	card.Verification = "structural_only_unauthenticated" // ANL-1: a saved report is never re-verified
+	card.Verification = report.SavedVerification // ANL-1: a saved report is never re-verified
 	if r.outSet {
 		page, err := report.SavedHTML(*d, r.theme)
 		if err != nil {
