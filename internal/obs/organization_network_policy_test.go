@@ -43,3 +43,23 @@ func TestOrganizationNetworkPolicyKeepsUnknownDistinctFromFalse(t *testing.T) {
 		t.Fatal("unknown gained policy value")
 	}
 }
+
+func TestOrganizationPolicyFailureReasons(t *testing.T) {
+	base := UnknownOrganizationNetworkPolicy(strings.Repeat("a", 16), "fixture-box", strings.Repeat("b", 64))
+	for _, reason := range []string{"authentication_failed", "permission_denied", "endpoint_unavailable", "rate_limited", "request_rejected", "service_unavailable", "request_timeout", "transport_unavailable", "response_schema_invalid", "readback_unavailable"} {
+		e := base
+		e.Reason = reason
+		if ValidateOrganizationNetworkPolicy(e) != nil {
+			t.Fatalf("bounded failure category rejected: %s", reason)
+		}
+		value := false
+		e.LimitedNetworkEgress = &value
+		if ValidateOrganizationNetworkPolicy(e) == nil {
+			t.Fatalf("failure category gained a policy value: %s", reason)
+		}
+	}
+	base.Reason = "response_schema_invalid: NEVER_EXPORT_PROVIDER_DATA"
+	if ValidateOrganizationNetworkPolicy(base) == nil {
+		t.Fatal("raw failure details accepted")
+	}
+}

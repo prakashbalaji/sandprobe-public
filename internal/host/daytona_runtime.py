@@ -66,6 +66,26 @@ def bound(client,req):
     if m['id']!=req['id'] or m['labels'].get('sandprobe_run')!=req['nonce'] or m['born']!=req['born'] or m['organization']!=req['organization'] or m['public'] or m['auto_delete']!=0 or m['auto_stop']!=15 or m['auto_pause']!=0 or not volumes_match(m,req):raise ValueError('identity/policy mismatch')
     return s,m
 
+def organization_policy_failure(error):
+    """EVD-14: fixed labels only; never serialize the exception or its response."""
+    from pydantic import ValidationError
+    from httpx import TimeoutException,TransportError
+    from urllib3.exceptions import TimeoutError as HTTPTimeout, HTTPError
+    from daytona_api_client.exceptions import ApiException
+    if isinstance(error,ValidationError):return 'response_schema_invalid'
+    if isinstance(error,(TimeoutError,HTTPTimeout,TimeoutException)):return 'request_timeout'
+    if isinstance(error,ApiException):
+        status=error.status
+        if type(status) is int:
+            if status==401:return 'authentication_failed'
+            if status==403:return 'permission_denied'
+            if status==404:return 'endpoint_unavailable'
+            if status==429:return 'rate_limited'
+            if 400<=status<500:return 'request_rejected'
+            if 500<=status<600:return 'service_unavailable'
+    if isinstance(error,(HTTPError,TransportError)):return 'transport_unavailable'
+    return 'readback_unavailable'
+
 def organization_network_policy(client,req):
     """EVD-11: one own-sandbox-bound organization read; never a denial verdict."""
     unknown=lambda reason:{'result':'unknown','reason':reason}
@@ -80,7 +100,7 @@ def organization_network_policy(client,req):
         from daytona_api_client.api.organizations_api import OrganizationsApi
         value=OrganizationsApi(client._api_client).get_organization(organization,_request_timeout=15)
     except Exception as error:
-        return unknown('permission_denied' if getattr(error,'status',None)==403 else 'readback_unavailable')
+        return unknown(organization_policy_failure(error))
     if (getattr(value,'id',None)!=organization
             or type(getattr(value,'sandbox_limited_network_egress',None)) is not bool):
         return unknown('response_mismatch')

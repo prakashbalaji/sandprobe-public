@@ -35,7 +35,9 @@ class Tests(unittest.TestCase):
    self.assertEqual(out,{'result':'unknown','reason':'response_mismatch'})
   for value in (types.SimpleNamespace(id='other',sandbox_limited_network_egress=False),types.SimpleNamespace(id=org)):
    out,_,_=run(value);self.assertEqual(out,{'result':'unknown','reason':'response_mismatch'})
-  class Denied(Exception):status=403
+  from daytona_api_client.exceptions import ApiException
+  class Denied(ApiException):
+   def __init__(self,message):super().__init__(status=403,reason=message)
   for error,reason in ((Denied('NEVER_EXPORT_CREDENTIAL'),'permission_denied'),(RuntimeError('NEVER_EXPORT_PROVIDER'),'readback_unavailable')):
    out,_,_=run(error=error);self.assertEqual(out,{'result':'unknown','reason':reason})
   for field,bad in [('id','other'),('organization_id','other'),('created_at','2026-11-23T00:00:00Z'),('labels',{})]:
@@ -43,6 +45,27 @@ class Tests(unittest.TestCase):
    out,native,constructor=run(changed=changed)
    self.assertEqual(out,{'result':'unknown','reason':'binding_unverified'})
    constructor.assert_not_called();native.get_organization.assert_not_called()
+
+ def test_organization_policy_failure_categories_are_bounded(self):
+  from daytona_api_client.exceptions import ApiException
+  from pydantic import BaseModel,ValidationError
+  from urllib3.exceptions import ReadTimeoutError,ProtocolError
+  from httpx import ReadTimeout,ConnectError
+  class Fixture(BaseModel):enabled:bool
+  try:Fixture(enabled='NEVER_EXPORT_CREDENTIAL')
+  except ValidationError as error:schema_error=error
+  cases=[(ApiException(status=status,reason='NEVER_EXPORT_CREDENTIAL',body='NEVER_EXPORT_BODY'),reason)
+      for status,reason in [(401,'authentication_failed'),(403,'permission_denied'),(404,'endpoint_unavailable'),
+          (429,'rate_limited'),(400,'request_rejected'),(409,'request_rejected'),(500,'service_unavailable'),(503,'service_unavailable')]]
+  cases += [(TimeoutError('NEVER_EXPORT_URL'),'request_timeout'),
+      (ReadTimeoutError(None,'https://NEVER_EXPORT_URL','NEVER_EXPORT_BODY'),'request_timeout'),
+      (ProtocolError('NEVER_EXPORT_HEADER'),'transport_unavailable'),(schema_error,'response_schema_invalid'),
+      (ReadTimeout('NEVER_EXPORT_URL'),'request_timeout'),(ConnectError('NEVER_EXPORT_HEADER'),'transport_unavailable'),
+      (RuntimeError('NEVER_EXPORT_PROVIDER'),'readback_unavailable'),
+      (ApiException(status=302,reason='NEVER_EXPORT_LOCATION'),'readback_unavailable')]
+  for error,reason in cases:
+   self.assertEqual(m.organization_policy_failure(error),reason)
+   self.assertNotIn('NEVER_EXPORT',json.dumps({'result':'unknown','reason':m.organization_policy_failure(error)}))
 
  def test_organization_policy_pinned_sdk_uses_explicit_id_path(self):
   from daytona_api_client import ApiClient,Configuration
