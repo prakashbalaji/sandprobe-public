@@ -1,6 +1,7 @@
 # Kubernetes: `run kubernetes`
 
-**Status for 0.3.0, being validated:** Stable target. Last validated: pending. [All providers](README.md)
+**Status:** Stable target. Last validated: 25 Nov 2026, on AWS Nitro Sandboxes (EKS Auto Mode, starting with no node) and a
+local kind cluster, with the code released as 0.3.6. [All providers](README.md)
 
 `run kubernetes` makes one throwaway pod in a cluster you run, probes it and deletes it, through the shipped recipe
 [`recipes/kubernetes.sh`](../../recipes/kubernetes.sh) and `kubectl` (PRV-16).
@@ -74,6 +75,10 @@ SANDPROBE_KUBE_CONTEXT=my-eks SANDPROBE_KUBE_OVERRIDES=./nitro-overrides.json \
 
 On EKS Auto Mode the first run may start a node. Sandprobe waits up to three minutes for the pod to be ready, then up
 to 90 seconds for the node to take `kubectl exec`. If it still isn't ready, run again: the node may be up by then.
+
+A run there is expected to finish incomplete and exit 5: the 25 Nov run ended with SEC-5 unknown, its score and reports
+written and its pod confirmed deleted. [AWS Nitro on EKS](aws-nitro.md#exit-5-incomplete-is-expected) says how to tell
+that from a run that stopped, which prints no score.
 
 The cluster must offer that runtime class: `kubectl get runtimeclass isolated-sandbox` names it. For the cluster that
 `deploy/eks.sh up` makes, `PROFILE="$AWS_PROFILE" deploy/eks.sh status` prints its kubeconfig and its

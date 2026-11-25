@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.6 (2026-11-25)
 
 - `run kubernetes` now waits up to 90 seconds for a new node to take `kubectl exec`. A node EKS Auto Mode has just
   started refuses exec until its certificate is issued, so a first run there could stop with only "the command failed:
