@@ -60,7 +60,7 @@ func modalPlan(c canaryChoice) planDoc {
 }
 
 func runModal(o opts, r runFlags, plan bool, stderr io.Writer) (int, error) {
-	if r.variant != "isolated" { // aws-nitro's default: anything else asks for a sandbox this run wouldn't make
+	if r.variantSet { // it would ask for a sandbox this run doesn't make, aws-nitro's default name included
 		return 0, fail("usage", "run modal makes one default sandbox and takes no -variant (PRV-18)", "sandprobe plan modal; for a sandbox you configure, docs/providers/modal.md", exitUsage)
 	}
 	choice, err := r.chooseCanary() // HCN-5, with no network call

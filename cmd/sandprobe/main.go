@@ -115,6 +115,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	r.providerEndpointsSet = given["provider-endpoints"]
 	r.providerSet = given["provider"]
 	r.recipeSet = given["recipe"]
+	r.variantSet = given["variant"]
 	recipeRun := r.recipeSet && (cmd == "run" || cmd == "plan") && len(positional) == 0
 	if r.recipeSet && !recipeRun { // RCP-4
 		return reportErr(o, stderr, fail("usage", "-recipe <file> takes the provider's place on run and plan, and applies nowhere else (RCP-4)", "sandprobe plan -recipe <file>", exitUsage))

@@ -50,6 +50,7 @@ type runFlags struct {
 	providerSet                                bool     // -provider was given, even empty
 	recipe                                     string   // run and plan: a person's own recipe file, in place of a provider (RCP-4)
 	recipeSet                                  bool     // -recipe was given, even empty
+	variantSet                                 bool     // -variant was given, its default included (PRV-18)
 	canaryFlags                                bool     // -canary, -canary-url or -canary-pin given as a flag (HCN-5)
 	keepSandbox                                bool
 	basetenState                               string

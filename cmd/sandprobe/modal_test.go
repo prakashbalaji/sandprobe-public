@@ -45,7 +45,8 @@ func TestModalPlanAndApproval(t *testing.T) {
 	if left, _ := filepath.Glob(filepath.Join(home, ".config", "sandprobe", "modal-*")); len(left) != 0 {
 		t.Errorf("a run that never started left %v", left)
 	}
-	for _, args := range [][]string{{"plan", "modal", "-variant", "block"}, {"run", "modal", "-variant", "default", "-y"}, {"run", "modal", "-min", "6", "-y"}} {
+	for _, args := range [][]string{{"plan", "modal", "-variant", "block"}, {"run", "modal", "-variant", "default", "-y"},
+		{"plan", "modal", "-variant", "isolated"}, {"run", "modal", "-variant", "isolated", "-y"}, {"run", "modal", "-variant", "isolated"}, {"run", "modal", "-min", "6", "-y"}} {
 		if code := run(args, &out, &errs); code != exitUsage {
 			t.Errorf("%v: exit %d", args, code)
 		}
