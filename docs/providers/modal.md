@@ -1,6 +1,8 @@
 # Modal: a proof of concept
 
-**Status for 0.3.0, being validated:** Beta: a proof of concept, not in the release build. Last validated: pending.
+**Status for 0.3.0, being validated:** Beta. A release probes a Modal sandbox of your own with `run exec` and a bridge
+script ([below](#probe-your-own-modal-sandbox-with-run-exec)); the proof of concept is not in the release build. Last
+validated: pending.
 [All providers](README.md)
 
 The Modal proof of concept probes Modal Sandboxes in your own workspace: a default sandbox, a few locked-down network
