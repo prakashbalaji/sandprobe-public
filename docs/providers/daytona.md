@@ -42,7 +42,8 @@ cost backstop; that isn't deletion. A sandbox that can't be confirmed deleted ke
 
 | Check | Why |
 |-|-|
-| SEC-4, EGR-3, AMP-6, AMP-7 | Each would contact a Daytona-owned endpoint: metadata, a proxy, the host over vsock, a Kubernetes API. PRV-12 excludes them. |
+| SEC-4, EGR-3, AMP-7 | PRV-12 excludes metadata, configured-proxy and Kubernetes API checks that would contact Daytona-owned endpoints. |
+| AMP-6 | PRV-12 excludes host-vsock probing. The current implementation only checks device presence and makes no connection; approval alone does not implement a host-connectivity test. |
 | PER-5 | No reset, and no run-owned storage that survives one. |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 
@@ -60,6 +61,10 @@ a waiver from Daytona.
 - Persistence rests on PER-1 to PER-4. Whether anything survives a reset isn't tested.
 - Before creating anything, the key's API access is checked, but that check doesn't return the organization. The
   organization is pinned from the create's own answer.
+
+These are the native `run daytona` defaults. The managed model workload has a separate, explicit storage and
+network contract; see [measurement gaps](../measurement-gaps.md) and
+the [managed workload documentation](../../experiments/daytona-agent/README.md).
 
 ### Canary and Cloud access (0.3.0)
 

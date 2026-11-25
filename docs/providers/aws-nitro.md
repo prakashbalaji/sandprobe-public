@@ -99,7 +99,10 @@ No check is excluded for this provider. These are skipped:
 | PER-5 | The pod has no persistent volume, so there's nothing a reset could keep. |
 | EGR-6 | Contacting public upload sites isn't approved, on any run. |
 | EGR-3 | Skipped when the pod's environment names no proxy, or names a local one you didn't approve with `-allow-local-proxy`. |
-| AMP-6 | Skipped when the pod's container has no `/dev/vsock`. |
+| AMP-6 | Skipped when the pod's container has no `/dev/vsock`. With the device present, the current implementation still makes no host connection and cannot establish host isolation. |
+
+An absent feature, an assessment exclusion and an unimplemented measurement are different gaps. See
+[measurement gaps](../measurement-gaps.md) before enabling checks or changing a workload just to improve coverage.
 
 ## Terms and consent
 
