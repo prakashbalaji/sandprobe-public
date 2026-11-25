@@ -39,7 +39,7 @@ make test                                      # go vet ./... && go test ./...
 gofmt -l .                                     # must print nothing
 SANDPROBE_FIXTURES=1 go test ./internal/host   # adds the Docker fixture and exec tests
 sh test/probe.sh                               # probe contract tests as root and nobody, without network
-shellcheck -s sh recipes/*.sh                  # when you change a recipe
+shellcheck -s sh recipes/*.sh examples/recipes/*.sh   # when you change a recipe
 ```
 
 Every test runs on public data. Saved reports come from `demo/reports` and `test/reports`, which are runs of local
