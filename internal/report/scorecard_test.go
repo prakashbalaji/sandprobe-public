@@ -187,10 +187,10 @@ func TestScorePage(t *testing.T) {
 	}
 	p := string(page)
 	doc := p[strings.Index(p, `<main class="doc">`):] // the contents rail names the sections too
-	h, s, w, a := strings.Index(doc, `id="summary"`), strings.Index(doc, "Sandbox score"), strings.Index(doc, ">What to fix<"),
-		strings.Index(doc, ">Technical appendix<")
+	h, s, w, a := strings.Index(doc, `id="summary"`), strings.Index(doc, "Sandbox score"), strings.Index(doc, ">What to fix "),
+		strings.Index(doc, ">Run details ")
 	if h < 0 || s < h || w < s || a < w || !strings.Contains(p, "<b>5</b><span>/6</span>") {
-		t.Errorf("want the header, the score, what to fix, then the technical appendix: %d %d %d %d", h, s, w, a)
+		t.Errorf("want the header, the score, what to fix, then run details: %d %d %d %d", h, s, w, a)
 	}
 	for _, cat := range Categories { // every test is asked in plain words, beside its category
 		for _, id := range cat.Checks {
@@ -201,7 +201,7 @@ func TestScorePage(t *testing.T) {
 	}
 	// the failure in its severity above the fold, the passes folded away, and how many of a row's tests ran
 	high, fold, pass := strings.Index(p, `id="sev-high"`), strings.Index(p, `<details class="more">`), strings.Index(p, `id="SEC-1"`)
-	if high < 0 || fold < high || !strings.Contains(p[high:fold], `id="SEC-3"`) || pass < fold || !strings.Contains(p, "4/4 tests run") ||
+	if high < 0 || fold < high || !strings.Contains(p[high:fold], `id="SEC-3"`) || pass < fold || !strings.Contains(p, "4/4 run") ||
 		!strings.Contains(p, "Show 27 passed") {
 		t.Errorf("want SEC-3 under High, then the fold with the passes, and 4/4 run: %d %d %d", high, fold, pass)
 	}
@@ -275,10 +275,10 @@ func TestGreenNotProven(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := string(page)
-		if strings.Count(p, `<li class="cat green gnp"`) != 1 || strings.Count(p, `<span class="verdict">GREEN · NOT PROVEN</span>`) != 1 ||
+		if strings.Count(p, `<li class="cat green gnp"`) != 1 || strings.Count(p, `<span class="verdict">none found · unproven</span>`) != 1 ||
 			!strings.Contains(p, ".cats .green.gnp .dot { background: none; border: 1.5px dashed var(--green); }") ||
-			!strings.Contains(p, ".cat.green.gnp .verdict { border-style: dashed; }") {
-			t.Errorf("%s: the page has no dashed GREEN · NOT PROVEN badge for Cloud access", theme)
+			!strings.Contains(p, ".cat.green.gnp .verdict { padding-bottom: 1px; border-bottom: 1px dashed var(--green-edge); }") {
+			t.Errorf("%s: the page has no dashed none found · unproven label for Cloud access", theme)
 		}
 	}
 	page, err := HTML(read("../../demo/reports/hardened.json"), "graphite")
@@ -286,8 +286,8 @@ func TestGreenNotProven(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p := string(page); strings.Count(p, `<li class="cat green"`) != 5 || strings.Count(p, `<li class="cat green gnp"`) != 1 ||
-		strings.Count(p, `<span class="verdict">GREEN</span>`) != 5 {
-		t.Error("hardened: want five proven GREEN rows and Cloud access not proven")
+		strings.Count(p, `<span class="verdict">clear</span>`) != 5 {
+		t.Error("hardened: want five proven clear rows and Cloud access unproven")
 	}
 
 	// Every row green on not_found alone: all six flagged, and all six still counted.
@@ -389,7 +389,7 @@ func TestGreenNotProvenNeverStrengthens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p := string(page); flagged(c) || strings.Contains(p, "gnp\"") || strings.Contains(p, "NOT PROVEN</span>") {
+		if p := string(page); flagged(c) || strings.Contains(p, "gnp\"") || strings.Contains(p, "none found · unproven</span>") {
 			t.Errorf("%s: a not-proven label with no 0-conclusive green row", provider)
 		}
 	}
@@ -420,7 +420,7 @@ func TestGreenNotProvenNeverStrengthens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j, _ := json.Marshal(c); strings.Contains(string(j), "green_not_proven") || strings.Contains(string(page), "NOT PROVEN</span>") {
+	if j, _ := json.Marshal(c); strings.Contains(string(j), "green_not_proven") || strings.Contains(string(page), "none found · unproven</span>") {
 		t.Error("an invalid run carries the not-proven label")
 	}
 }

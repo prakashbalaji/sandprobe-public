@@ -125,7 +125,7 @@ func TestScoreNotApplicable(t *testing.T) {
 		}
 		p := string(page)
 		if !strings.Contains(p, "<span>/5</span>") || strings.Contains(p, "<span>/6</span>") || !strings.Contains(p, `class="cat na"`) ||
-			!strings.Contains(p, "NOT APPLICABLE") || !strings.Contains(p, "Cloud access isn&#39;t counted: ") || strings.Contains(p, "From a saved report") {
+			!strings.Contains(p, "not applicable") || !strings.Contains(p, "Cloud access isn&#39;t counted: ") || strings.Contains(p, "From a saved report") {
 			t.Errorf("%s: the page doesn't show Cloud access as not applicable out of 5", provider)
 		}
 	}

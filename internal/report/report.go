@@ -65,13 +65,27 @@ func SchemaFor(m obs.Manifest) string {
 }
 
 // Boundary is SBX-10, which every report states beside the grade.
-const Boundary = "No false passes holds against faults, misconfiguration, wrappers and shims in the agent's environment, " +
+const Boundary = "Sandprobe's \"no false passes\" rule covers faults, misconfiguration, wrappers, and shims in the agent's " +
+	"environment when the host-shipped probe actually runs as the agent. It does not cover a box that substitutes for " +
+	"or tampers with the probe before or during the run: that box can report the expected digest, fabricate every " +
+	"in-box observation, and the host cannot tell. Only the canary's network receipts come from outside the box; they " +
+	"can prove a way out, never a refusal."
+
+// oldBoundary is the pre-0.3.5 wording of Boundary, mapped to Boundary when rendering saved reports to HTML.
+const oldBoundary = "No false passes holds against faults, misconfiguration, wrappers and shims in the agent's environment, " +
 	"for the host-shipped probe run as the agent. It does not hold against a box that deceives the probe: one that " +
 	"substitutes or tampers with it can report the expected digest and fabricate every observation, and the host can't " +
 	"tell. The only evidence from outside the box is the canary's receipts, which can prove a way out but never a refusal."
 
 // NotTested is the rest of SBX-10: what no check here covers.
 var NotTested = []string{
+	"Kernel or hypervisor-level interception",
+	"Container or VM escapes below the Linux user-space boundary",
+	"CPU, memory, or disk exhaustion (denial of service)",
+	"Sandbox behavior applied only to other processes, not to this probe",
+}
+
+var oldNotTested = []string{
 	"interception in the kernel or hypervisor",
 	"escapes below the probe",
 	"resource exhaustion",
@@ -358,7 +372,7 @@ func Build(r *host.Run, m Meta) Doc {
 		}
 		d.Checks = append(d.Checks, c)
 	}
-	d.Statement = fmt.Sprintf("Graded on %d checks for this box at %s, from a host-shipped probe's own observations; not a certification.",
+	d.Statement = fmt.Sprintf("Host-graded on %d checks in this sandbox at %s, using the in-box probe's self-reported observations; not a certification.",
 		graded, m.StartedAt.Local().Format("Jan 2, 2006 3:04 PM MST"))
 	d.Lead = lead(d)
 	d.Contacted, d.Planned = contacted(observed), planned(man)
@@ -392,14 +406,15 @@ func lead(d Doc) string {
 		skipped := ""
 		switch n := len(d.Limits.Skipped); {
 		case n == 1:
-			skipped = " One more was skipped, so it says nothing either way."
+			skipped = " 1 more was skipped, so it says nothing either way."
 		case n > 1:
 			skipped = fmt.Sprintf(" %d more were skipped, so they say nothing either way.", n)
 		}
-		return "No finding among the checks that ran: each two-sided one ended in a verified refusal, a verified absence " +
-			"or nothing in scope, and the find-only ones found nothing, which proves nothing." + skipped
+		return "No finding among the checks that ran: each check that can prove a path closed ended in a verified refusal, " +
+			"a verified absence or nothing in scope, and the checks that can only find an open path found nothing, which " +
+			"proves nothing." + skipped
 	case len(d.Findings) == 0:
-		return "No finding, but not every check could be proven, so this is not a clean result."
+		return "No exposures found, but not every check could be verified, so this is not a clean result."
 	}
 	var proven, exposed []string
 	for _, f := range d.Findings {
@@ -425,7 +440,7 @@ func lead(d Doc) string {
 	case len(exposed) > 0:
 		return "Nothing here is proven, but a hijacked agent " + join(exposed) + note
 	}
-	return "A hijacked agent here has findings to answer for; see them below."
+	return "A hijacked agent here has findings to address; see What to fix below."
 }
 
 // join lists clauses as a sentence does.

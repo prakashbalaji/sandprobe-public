@@ -3,6 +3,7 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -77,7 +78,8 @@ var (
 	idRE   = regexp.MustCompile(`\sid="([^"]*)"`)
 )
 
-// SCR-3: the header, then the score with its strip and the six rows, then What to fix, then the appendix.
+// SCR-3: the specification bar, then the score split with its ledger and the 3x2 category matrix, then What to fix,
+// then the numbered Run details chapters.
 func TestPageOrder(t *testing.T) {
 	b, err := os.ReadFile("../../demo/reports/vibe.json")
 	if err != nil {
@@ -88,20 +90,30 @@ func TestPageOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := pageOf(t, d, "graphite")
-	head := between(p, `<header class="head"`, "</header>")
-	for _, want := range []string{`<h1>sandprobe-demo/vibe</h1>`, `<span class="tag">docker</span>`,
-		`<span class="sevtag">critical</span>The agent can open a credential and send data out of the box, so a hijacked agent could steal it.`,
-		"<dt>Ran</dt>", `<dt>Probe</dt><dd class="mono">0.1.0</dd>`, "<dd>Host-shipped, not attested</dd>"} {
+	head := between(p, `<header class="spec-bar"`, "</header>")
+	for _, want := range []string{
+		`<span class="spec-kind">Docker · local container</span>`,
+		`<h1 class="spec-name">sandprobe-demo/vibe</h1>`,
+		`<dt>User</dt><dd class="mono">uid 1000</dd>`,
+		"<dt>Ran</dt>",
+		`<dt>Probe</dt><dd class="mono">0.1.0</dd>`,
+		"<dt>Trust</dt><dd>In-box · not attested</dd>",
+	} {
 		if !strings.Contains(head, want) {
-			t.Errorf("the header doesn't hold %s", want)
+			t.Errorf("the specification bar doesn't hold %s", want)
 		}
 	}
 	if strings.Contains(head, "Mode") || strings.Contains(head, ">"+d.Run.Mode+"<") {
-		t.Error("the header shows run.mode, the probe's launch path, as a fact of the run")
+		t.Error("the specification bar shows run.mode, the probe's launch path, as a fact of the run")
+	}
+	if !strings.Contains(p, `<p class="verdict-kicker">Critical chain</p>`) ||
+		!strings.Contains(p, "The agent can open a credential and send data out of the box, so a hijacked agent could steal it.") {
+		t.Error("the hero split doesn't lead with the Critical chain sentence")
 	}
 	last := -1
-	for _, mark := range []string{`<header class="head"`, `<section class="score"`, `<ul class="stats"`, `<ol class="cats">`, `<section class="sec" id="fix">`,
-		`id="sev-critical"`, `id="sev-high"`, `id="sev-medium"`, `id="sev-low"`, `id="sev-rest"`, ">Technical appendix<", `id="map"`, `id="ran"`, `id="covers"`} {
+	for _, mark := range []string{`<header class="spec-bar"`, `<div class="hero-split">`, `<ul class="stats"`, `<ol class="cats">`,
+		`<section class="sec" id="fix">`, `id="sev-critical"`, `id="sev-high"`, `id="sev-medium"`, `id="sev-low"`, `id="sev-rest"`,
+		`Run details `, `id="map"`, `id="ran"`, `id="covers"`} {
 		i := strings.Index(p, mark)
 		if i <= last {
 			t.Errorf("%s is out of order (%d after %d)", mark, i, last)
@@ -123,7 +135,7 @@ func TestPageOrder(t *testing.T) {
 	}
 	for i, cat := range Categories { // each row says how many of its tests ran, and links to each
 		card := between(p, fmt.Sprintf(`id="cat-%d"`, i+1), "</li>")
-		if !strings.Contains(card, fmt.Sprintf("/%d tests run</span>", len(cat.Checks))) {
+		if !strings.Contains(card, fmt.Sprintf("/%d run</span>", len(cat.Checks))) {
 			t.Errorf("%s doesn't say how many of its tests ran", cat.Name)
 		}
 		for _, id := range cat.Checks {
@@ -177,7 +189,7 @@ func TestEveryTestOnce(t *testing.T) {
 func TestEveryTestOnceUnrated(t *testing.T) {
 	p := pageOf(t, doc(obs.Pass, map[string]Check{"SEC-3": {Result: obs.Finding}}), "graphite")
 	if !strings.Contains(groupOf(p, "unrated"), `id="SEC-3"`) || strings.Count(p, `id="SEC-3"`) != 1 ||
-		!strings.Contains(p, `<b class="red">1</b><span>unrated failing</span>`) {
+		!strings.Contains(p, `<b class="red">1</b><span>unrated</span>`) {
 		t.Error("a failure with no known severity is dropped, or not counted")
 	}
 }
@@ -199,14 +211,15 @@ func TestCountsComeFromRows(t *testing.T) {
 				t.Errorf("%s: %d %s rows, but the grade counts %d", name, n, sev, d.Grade.Counts[sev])
 			}
 			if n == 0 {
-				if strings.Contains(strip, sev+" failing") || strings.Contains(rail, `href="#sev-`+sev+`"`) {
+				if strings.Contains(strip, `<span>`+sev+`</span>`) || strings.Contains(rail, `href="#sev-`+sev+`"`) {
 					t.Errorf("%s: %s is counted with no row", name, sev)
 				}
 				continue
 			}
-			if !strings.Contains(strip, fmt.Sprintf(`<b class="red">%d</b><span>%s failing</span>`, n, sev)) ||
-				!strings.Contains(groupOf(p, sev), fmt.Sprintf(`<span class="q">%d failing</span>`, n)) ||
-				!strings.Contains(rail, fmt.Sprintf(`%s<span class="spacer"></span><span class="n">%d</span>`, title, n)) {
+			if !strings.Contains(strip, fmt.Sprintf(`<b class="red">%d</b><span>%s</span>`, n, sev)) ||
+				!strings.Contains(groupOf(p, sev), fmt.Sprintf(`<span class="q">%d</span>`, n)) ||
+				!strings.Contains(rail, fmt.Sprintf(`%s</span><span class="spacer"></span><span class="n">%d</span>`, title, n)) &&
+					!strings.Contains(rail, fmt.Sprintf(`%s<span class="spacer"></span><span class="n">%d</span>`, title, n)) {
 				t.Errorf("%s: the strip, the heading or the rail doesn't count %d %s", name, n, sev)
 			}
 		}
@@ -228,8 +241,8 @@ func TestCountsComeFromRows(t *testing.T) {
 		}
 		n := strings.Count(rest, `<li class="row `)
 		if strings.Count(rest, `<li class="row green"`) != passed || !strings.Contains(strip, fmt.Sprintf(`>%d</b><span>passed</span>`, passed)) ||
-			!strings.Contains(rest, fmt.Sprintf(`<span class="q">%d tests</span>`, n)) ||
-			!strings.Contains(rail, fmt.Sprintf(`Passed, or not proven<span class="spacer"></span><span class="n">%d</span>`, n)) {
+			!strings.Contains(rest, fmt.Sprintf(`<span class="q">%d</span>`, n)) ||
+			!strings.Contains(rail, fmt.Sprintf(`Other checks<span class="spacer"></span><span class="n">%d</span>`, n)) {
 			t.Errorf("%s: the fold's %d rows or its %d passes aren't what's counted", name, n, passed)
 		}
 	}
@@ -242,19 +255,22 @@ func TestUnknownIsNeverAPass(t *testing.T) {
 		t.Error("an incomplete run with a finding doesn't say it's incomplete beside the score")
 	}
 	fold := strings.Index(p, `<details class="more">`)
-	if r := rowOf(p, "AMP-1"); !strings.Contains(r, `<li class="row amber"`) || !strings.Contains(r, `<span class="key">Unknown</span>`) ||
+	if r := rowOf(p, "AMP-1"); !strings.Contains(r, `<li class="row amber"`) || !strings.Contains(r, `<div class="res">Unknown</div>`) ||
 		!strings.Contains(groupOf(p, "unknown"), `id="AMP-1"`) || strings.Index(p, `id="AMP-1"`) > fold {
 		t.Error("AMP-1 isn't a dashed unknown, unfolded in its own group")
 	}
-	if r := rowOf(p, "SEC-4"); !strings.Contains(r, `<li class="row grey"`) || !strings.Contains(r, `<span class="key">No finding</span>`) ||
+	if r := rowOf(p, "SEC-4"); !strings.Contains(r, `<li class="row grey"`) || !strings.Contains(r, `<div class="res">No finding</div>`) ||
 		!strings.Contains(r, "doesn&#39;t prove") || strings.Index(p, `id="SEC-4"`) < fold {
 		t.Error("SEC-4 isn't folded as a no-finding that proves nothing")
 	}
 	if !strings.Contains(p, `<a class="t amber" href="#AMP-1"`) || !strings.Contains(p, `<a class="t grey" href="#SEC-4"`) {
 		t.Error("a row's links don't keep the unknown and the not-proven apart from a pass")
 	}
-	for _, rule := range []string{`.row.amber .key { color: var(--unk); background: none; border: 1px dashed var(--unk-edge); }`,
-		`a.t.amber { color: var(--unk); border: 1px dashed var(--unk-edge); }`, `.stats b.unk { padding: 0 5px 1px; border: 1px dashed var(--unk-edge);`} {
+	for _, rule := range []string{
+		`.row.amber .res { display: inline-block; align-self: start; justify-self: start; padding-bottom: 1px; color: var(--unk); border-bottom: 1px dashed var(--unk-edge); }`,
+		`a.t.amber { color: var(--unk); border-bottom: 1px dashed var(--unk-edge); }`,
+		`.stats b.unk { padding: 0 5px 1px; border: 1px dashed var(--unk-edge);`,
+	} {
 		if !strings.Contains(p, rule) {
 			t.Errorf("an unknown isn't dashed: no %s", rule)
 		}
@@ -263,7 +279,7 @@ func TestUnknownIsNeverAPass(t *testing.T) {
 	d.Grade = Grade{Valid: true, Unknown: []string{"AMP-2"}}
 	p = pageOf(t, d, "graphite")
 	if !strings.Contains(p, `<p class="status">Incomplete: 1 check unknown</p>`) || !strings.Contains(p, `<b class="unk">1</b><span>unknown</span>`) ||
-		!strings.Contains(p, `.status { display: table; margin: 10px 0 0; padding: 5px 12px 6px; border: 1px dashed var(--unk-edge);`) {
+		!strings.Contains(p, `.status { display: table; margin: 12px 0 0; padding: 4px 10px 5px; border: 1px dashed var(--unk-edge);`) {
 		t.Error("an incomplete run with nothing found isn't said, dashed, beside the score")
 	}
 }
@@ -295,11 +311,10 @@ func TestNoLetterGrade(t *testing.T) {
 		d           Doc
 		title, says string
 	}{
-		"valid":      {load("../../demo/reports/vibe.json"), "Sandprobe · docker · score 1/6", "1 of 6 categories is green"},
+		"valid":      {load("../../demo/reports/vibe.json"), "Sandprobe · docker · score 1/6", "1 of 6 categories with no exposure found"},
 		"incomplete": {load("../../test/reports/canary-down.json"), "Sandprobe · docker-fixture · score 2/6", `<p class="status">Incomplete: 6 checks unknown</p>`},
 		"invalid": {Build(invalid, meta()), "Sandprobe · sprites · invalid, no score",
-			`<p class="kicker"><em>Invalid run: no score</em></p>
-  <p class="banner unk">Why this run is invalid: a duplicate check ID</p>`},
+			`<p class="invalid-h">Invalid run: no score</p>`},
 	} {
 		letter := ""
 		if tc.d.Schema != SchemaNoLetter {
@@ -323,6 +338,9 @@ func TestNoLetterGrade(t *testing.T) {
 				if !strings.Contains(p, "<title>"+tc.title+"</title>") || !strings.Contains(p, tc.says) {
 					t.Errorf("%s, %s: want the title %q and %q beside the score", name, theme, tc.title, tc.says)
 				}
+				if name == "invalid" && !strings.Contains(p, "Why this run is invalid: a duplicate check ID") {
+					t.Errorf("%s, %s: missing invalid reason", name, theme)
+				}
 				text := codeRE.ReplaceAllString(styleRE.ReplaceAllString(dataRE.ReplaceAllString(p, ""), ""), "") // what a reader sees
 				if m := gradeRE.FindString(text); m != "" || letter != "" && strings.Contains(text, ">"+letter+"<") {
 					t.Errorf("%s, %s: the page shows a letter grade (%q)", name, theme, m)
@@ -336,28 +354,28 @@ func TestNoLetterGrade(t *testing.T) {
 	}
 }
 
-// SCR-3: the header's facts come from the report as text, except the attestation, which is fixed (SBX-10).
+// SCR-3: the specification bar's facts come from the report as text, except Trust, which is fixed (SBX-10).
 func TestHeaderFacts(t *testing.T) {
 	m := meta()
 	m.Version = evil
 	d := Build(run(), m)
 	d.Probe.Attested = true // an edited report can't make the page claim an attestation
 	p := pageOf(t, d, "graphite")
-	head := between(p, `<header class="head"`, "</header>")
+	head := between(p, `<header class="spec-bar"`, "</header>")
 	if strings.Contains(head, "<script>alert") || !strings.Contains(head, `<dt>Probe</dt><dd class="mono">&lt;/script&gt;&lt;script&gt;alert(1)`) {
 		t.Error("the probe's version isn't escaped as text")
 	}
-	if !strings.Contains(head, "<dd>Host-shipped, not attested</dd>") || strings.Count(p, "ttested</dd>") != 1 {
-		t.Error("the attestation line isn't the fixed one")
+	if !strings.Contains(head, "<dd>In-box · not attested</dd>") || strings.Count(p, "not attested</dd>") != 1 {
+		t.Error("the trust line isn't the fixed one")
 	}
-	if !strings.Contains(head, `<p class="lede">`+template.HTMLEscapeString(d.Lead)+"</p>") || strings.Contains(head, "sevtag") {
-		t.Error("without a chain, the header doesn't lead with the lead sentence")
+	if !strings.Contains(p, template.HTMLEscapeString(d.Lead)) || strings.Contains(p, "verdict-kicker\">") {
+		t.Error("without a chain, the hero doesn't lead with the lead sentence")
 	}
 	if strings.Contains(head, "Mode") {
-		t.Error("the header shows run.mode")
+		t.Error("the specification bar shows run.mode")
 	}
 	m.Version = ""
-	if head := between(pageOf(t, Build(run(), m), "graphite"), `<header class="head"`, "</header>"); strings.Contains(head, "<dt>Probe</dt>") {
+	if head := between(pageOf(t, Build(run(), m), "graphite"), `<header class="spec-bar"`, "</header>"); strings.Contains(head, "<dt>Probe</dt>") {
 		t.Error("an empty version is shown")
 	}
 }
@@ -372,8 +390,8 @@ func TestInvalidHasNoCounts(t *testing.T) {
 			t.Errorf("an invalid run's page holds %s", bad)
 		}
 	}
-	if !strings.Contains(between(p, `<header class="head"`, "</header>"), "This run is invalid, so it says nothing about the box: a duplicate check ID") {
-		t.Error("an invalid run's header doesn't say so")
+	if !strings.Contains(between(p, `<div class="invalid-box">`, "</div>"), "This run is invalid, so it says nothing about the box: a duplicate check ID") {
+		t.Error("an invalid run's box doesn't say so")
 	}
 }
 
@@ -399,11 +417,156 @@ func TestHTMLExecutedCountsExcludeScopeOnlyResults(t *testing.T) {
 			t.Fatal(err)
 		}
 		card := between(string(b), `id="cat-3"`, "</li>")
-		if !strings.Contains(card, "2/5 tests run</span>") {
+		if !strings.Contains(card, "2/5 run</span>") {
 			t.Errorf("%s: unknown and not-found should count; skipped, scoped-out and missing must not: %s", theme, card)
 		}
 	}
 	if after := Score(d); after.Score != before.Score || after.Of != before.Of {
 		t.Fatal("rendering changed the score")
+	}
+}
+
+// SCR-3: plain-English target labels, decoded process capabilities/seccomp, and catalog-derived check explanations.
+func TestPlainEnglishRowsAndIdentity(t *testing.T) {
+	if got := decodeCaps("00000000a80425fb"); got != "14 capabilities (CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_FOWNER, CAP_FSETID, and 10 more)" {
+		t.Fatalf("decodeCaps: got %q", got)
+	}
+	b, err := os.ReadFile("../../demo/reports/vibe.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d Doc
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	p := pageOf(t, d, "light")
+	for _, want := range []string{
+		"Docker · local container",
+		"sandprobe-demo/vibe",
+		"1 of 6 categories with no exposure found",
+		"5 exposed · 1 unproven",
+		"no_new_privs is off (0) and setuid-root binaries exist in system folders",
+		"· exposure sign, not confirmed",
+		"Verified absent: sudo is not installed in this sandbox.",
+		"Active capabilities",
+		"none (0x0)",
+		decodeCaps(d.Identity.CapBnd),
+		"disabled (0, setuid escalation allowed)",
+		"bpf filter active (2)",
+	} {
+		if !strings.Contains(p, template.HTMLEscapeString(want)) {
+			t.Errorf("page missing plain-English text %q", want)
+		}
+	}
+	for _, jargon := range []string{
+		"CapEff", "CapBnd", "0000000000000000", "graded by the host from the probe",
+		"refusal verified next to an allowed twin", "would be high", "would be medium",
+	} {
+		text := dataRE.ReplaceAllString(p, "")
+		if strings.Contains(text, jargon) {
+			t.Errorf("visible page text still holds jargon %q", jargon)
+		}
+	}
+}
+
+// SCR-3, rule 1: the page's plain words never say more than a result proves. A value the box reports that can't be
+// read is unknown, a provider the page doesn't know is never shown as its own label, and a not_found or scoped-out
+// line claims no observation and no block.
+func TestPlainEnglishNeverOverclaims(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "unknown", "zz": "unknown", "10000000000000000": "unknown", "0": "none (0x0)", "0000000000000000": "none (0x0)",
+		"8000000000000000": "capability 63",
+	} {
+		if got := decodeCaps(in); got != want {
+			t.Errorf("decodeCaps(%q) = %q, want %q", in, got, want)
+		}
+	}
+	two, seven := 2, 7
+	if decodeNoNewPrivs(nil) != "unknown" || decodeNoNewPrivs(&two) != "unknown" || decodeSeccomp(seven) != "unknown" ||
+		strings.Contains(decodeSeccomp(0), "disabled") {
+		t.Error("an absent or invalid no_new_privs or seccomp value must read unknown, and seccomp 0 never as disabled")
+	}
+	var bare obs.Identity // a report with no seccomp field: the wire can't tell it from 0, and the page claims neither
+	if err := json.Unmarshal([]byte(`{"cap_eff":"0"}`), &bare); err != nil || decodeSeccomp(bare.Seccomp) != "no filter reported (0)" {
+		t.Errorf("an absent seccomp field reads %q (%v)", decodeSeccomp(bare.Seccomp), err)
+	}
+	const unrecognized = "Sandbox · provider not recognized"
+	for _, p := range []string{"docker", "aws-nitro", "modal", "sprites", "daytona", "e2b", "vercel", "cloudflare", "baseten",
+		"exe.dev", "boat", "exec", "recipe"} {
+		if l := providerLabel(p, ""); l == unrecognized || l == p {
+			t.Errorf("provider %q has no label of its own: %q", p, l)
+		}
+	}
+	for _, p := range []string{"Modal Sandbox · verified by Sandprobe", "nope", "<b>docker</b>"} {
+		if l := providerLabel(p, ""); l != unrecognized {
+			t.Errorf("an unrecognized provider %q is shown as %q", p, l)
+		}
+	}
+	for _, id := range catalog.IDs() {
+		nf, so := notFoundDetail(id), scopedOutDetail(id)
+		if !strings.Contains(nf, "doesn't prove") || !strings.Contains(so, "neither a pass nor a failure") {
+			t.Errorf("%s: a not_found or scoped-out line lost its caveat: %q / %q", id, nf, so)
+		}
+		for _, claim := range []string{"Blocked", "Verified", "blocked.", "arrived", "accepted", "answered"} {
+			if strings.Contains(strings.SplitN(nf, ";", 2)[0], claim) || strings.Contains(so, claim) {
+				t.Errorf("%s: a not_found or scoped-out line claims %q: %q / %q", id, claim, nf, so)
+			}
+		}
+	}
+	facts := []string{"faults, misconfiguration, wrappers, and shims", "when the host-shipped probe actually runs as the agent",
+		"substitutes for or tampers with the probe before or during the run", "report the expected digest",
+		"fabricate every in-box observation", "the host cannot tell", "can prove a way out, never a refusal"}
+	for _, fact := range facts {
+		if !strings.Contains(Boundary, fact) {
+			t.Errorf("SBX-10's boundary lost %q", fact)
+		}
+	}
+	// The hardened demo blocks HTTPS (EGR-2 passes), so nothing may say a TLS session was seen (EGR-4 not_found).
+	b, err := os.ReadFile("../../demo/reports/hardened.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d Doc
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	p := dataRE.ReplaceAllString(pageOf(t, d, "light"), "")
+	for _, bad := range []string{"arrived untouched", "clear · unproven", "categories clear", "proves nothing elsewhere"} {
+		if strings.Contains(p, bad) {
+			t.Errorf("the page says %q", bad)
+		}
+	}
+	if strings.Count(p, `<span class="verdict">none found · unproven</span>`) != 1 {
+		t.Error("a green row with no conclusive check must read none found · unproven, never clear")
+	}
+	if l := lead(d); !strings.Contains(l, "or nothing in scope") || !strings.Contains(l, "a verified refusal") || !strings.Contains(l, "which proves nothing.") ||
+		!strings.Contains(l, "say nothing either way") {
+		t.Errorf("the clean lead lost a caveat: %q", l)
+	}
+	// A report saved with the earlier boundary: the page shows the current one, the embedded JSON keeps its own.
+	if d.Boundary != oldBoundary {
+		t.Fatal("the hardened demo no longer carries the earlier boundary")
+	}
+	saved, err := SavedHTML(d, "light")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := dataRE.FindString(string(saved))
+	visible := html.UnescapeString(dataRE.ReplaceAllString(string(saved), ""))
+	for _, fact := range facts {
+		if !strings.Contains(visible, fact) {
+			t.Errorf("the saved page's boundary lost %q", fact)
+		}
+	}
+	if !strings.Contains(visible, SavedNote) || strings.Contains(visible, "for the host-shipped probe run as the agent") ||
+		!strings.Contains(data, "for the host-shipped probe run as the agent") || strings.Contains(data, "actually runs as the agent") {
+		t.Error("a saved page must keep ANL-1's note and its own strings in the embedded JSON, and show the current boundary")
+	}
+	// OUT-1's lead: a chain is the strongest statement there is, and only CHN-2 is left out of the list.
+	for id, gets := range map[string]string{"CHN-1": "can open a credential and send it out", "CHN-3": "reaches the Kubernetes API with a token"} {
+		l := lead(Doc{Grade: Grade{Valid: true, Complete: true}, Findings: []Finding{{ID: id, Class: string(catalog.Proof), Gets: gets}, {ID: "CHN-2", Class: string(catalog.Proof), Gets: "can undo every refusal"}}})
+		if !strings.Contains(l, gets) || strings.Contains(l, "undo every refusal") {
+			t.Errorf("%s: lead %q", id, l)
+		}
 	}
 }

@@ -311,9 +311,9 @@ func TestNoFindingIsNotAllRefusals(t *testing.T) {
 	}
 	b, _ := HTML(d, "modern")
 	page := string(b)
-	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="row green"`) || !strings.Contains(r, `<span class="key">Pass</span>`) ||
-		!strings.Contains(r, "we proved it") || !strings.Contains(rowOf(page, "SEC-3"), "there isn&#39;t one") ||
-		!strings.Contains(rowOf(page, "SEC-2"), `<span class="key">N/A</span>`) {
+	if r := rowOf(page, "SEC-1"); !strings.Contains(r, `class="row green"`) || !strings.Contains(r, `<div class="res">Pass</div>`) ||
+		!strings.Contains(r, "Verified:") || !strings.Contains(rowOf(page, "SEC-3"), "Verified absent:") ||
+		!strings.Contains(rowOf(page, "SEC-2"), `<div class="res">N/A</div>`) {
 		t.Fatal("want the pass and the absence verified, and the scoped-out check not counted as either")
 	}
 	if strings.Contains(string(mapSVG(d)), `data-target="SEC-2"`) {
@@ -333,8 +333,8 @@ func TestIndicatorsStayIndicators(t *testing.T) {
 		t.Fatalf("lead: %q", d.Lead)
 	}
 	b, _ := HTML(d, "modern")
-	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<span class="key">Fail</span>`) ||
-		!strings.Contains(r, "a sign we saw, not something we confirmed") {
+	if r := rowOf(string(b), "AMP-4"); !strings.Contains(r, `<div class="res">Fail</div>`) ||
+		!strings.Contains(r, "exposure sign, not confirmed") {
 		t.Fatal("the indicator's card doesn't say what kind of claim it is")
 	}
 	only := run()
@@ -377,8 +377,8 @@ func TestPlannedIsNotContacted(t *testing.T) {
 		t.Fatalf("contacted: %+v", d.Contacted)
 	}
 	page, _ := HTML(d, "modern")
-	if !strings.Contains(string(page), "EGR-2 · tried") || !strings.Contains(string(page), "SEC-4 · cleared; this check reports") {
-		t.Fatal("want each planned destination marked tried, or what its check reports")
+	if !strings.Contains(string(page), "EGR-2 · contacted") || !strings.Contains(string(page), "SEC-4 · in plan") {
+		t.Fatal("want each planned destination marked contacted, or in plan")
 	}
 }
 
