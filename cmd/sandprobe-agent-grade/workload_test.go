@@ -48,3 +48,24 @@ func TestWorkloadSummaryRejectsMixedReceiverModes(t *testing.T) {
 		t.Fatal("mixed receiver evidence accepted")
 	}
 }
+
+func TestWorkloadSummaryEvidenceVersion(t *testing.T) {
+	for _, input := range []string{`{"evidence_schema":null}`, `{"evidence_schema":""}`, `{"evidence_schema":"future"}`, `{"evidence":{"Reset":{"FailureStage":"create_replacement"}}}`, `{"evidence_schema":"sandprobe.managed-evidence/1","evidence":{"Reset":{"FailureStage":"create_replacement"}}}`} {
+		var out bytes.Buffer
+		if summarizeWorkload(strings.NewReader(input), &out) == nil || out.Len() != 0 {
+			t.Fatal("incompatible raw evidence graded", input)
+		}
+	}
+	for _, input := range []string{`{}`, `{"evidence_schema":"sandprobe.managed-evidence/1"}`, `{"evidence_schema":"sandprobe.managed-evidence/2","evidence":{"Reset":{"FailureStage":"create_replacement"}}}`} {
+		var out bytes.Buffer
+		if err := summarizeWorkload(strings.NewReader(input), &out); err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Assessment grade.WorkloadReport `json:"assessment"`
+		}
+		if json.Unmarshal(out.Bytes(), &result) != nil || result.Assessment.BenchmarkRequirementsMet || result.Assessment.ConfigurationGrade != "" {
+			t.Fatal("format version earned security credit")
+		}
+	}
+}

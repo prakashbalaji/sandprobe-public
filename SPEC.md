@@ -1131,6 +1131,16 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   schema and identity failures retain EVD-14's fixed unknown labels. The host-only artifact keeps its existing
   organization-default/configuration-only scope and schema; this is neither per-connection denial proof nor
   one of the 28 standard check outcomes.
+- **EVD-20 Versioned managed evidence.** New managed collectors wrap raw evidence in
+  `schema: sandprobe.managed-evidence/2` for `standard-evidence.json` and the Nitro bridge's collection
+  response. This version explicitly includes EVD-18's optional host reset failure stage. The public OUT-1
+  report schema is independent and unchanged. Unversioned historical managed envelopes are legacy version1;
+  they remain readable when they lack the new stage. An unknown, null or incompatible version is rejected,
+  never retried or downgraded. Live Nitro collection requires version2. Retrospective finalization carries
+  the evidence version into its strict Go request; an unversioned/version1 request containing a nonempty
+  failure stage is rejected before grading. Empty diagnostics retain legacy replay compatibility. Old strict
+  internal readers cannot consume version2; use the collector's matching new reader. A version is a format
+  declaration, never authentication, freshness, attestation or positive security evidence.
 - **EVD-11 Organization network-policy readback.** The managed Daytona collector may make one bounded
   native organization read using only the organization ID freshly verified against its own sandbox's
   create-returned identity, run label and creation time. No organization list, default-organization inference,
@@ -3739,6 +3749,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-19 | `test_organization_network_policy_uses_only_bound_sandbox` and `test_organization_policy_pinned_sdk_uses_explicit_sandbox_path`: fresh identity binding, exact sandbox GET, no account API/fallback, strict response identity/boolean and bounded failures |
+| EVD-20 | `TestManagedEvidenceVersion`, `TestWorkloadSummaryEvidenceVersion`, `test_managed_evidence_versions`: explicit v2 writers, legacy replay, unknown/null version rejection and no unversioned reset-stage downgrade |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |
 | EVD-17 | `TestWorkloadExposurePreservesValidatedProvider`: public bundle recomputation retains valid provider scope, matches canonical report scoring and coverage, and invalid contracts never yield a valid score |

@@ -8,10 +8,17 @@ import unittest
 from unittest.mock import Mock, patch
 
 from lifecycle import Failure, Journal
-from runner import Runner, HOSTNAME
+from runner import Runner, HOSTNAME, managed_evidence_version
 
 
 class StandardGradeTests(unittest.TestCase):
+    def test_managed_evidence_versions(self):
+        self.assertEqual(managed_evidence_version({}),'sandprobe.managed-evidence/1')
+        self.assertEqual(managed_evidence_version({'schema':'sandprobe.managed-evidence/2','evidence':{'Reset':{'FailureStage':'create_replacement'}}},live=True),'sandprobe.managed-evidence/2')
+        for bundle in ({'schema':None},{'schema':''},{'schema':'future'},{'evidence':{'Reset':{'FailureStage':'create_replacement'}}}):
+            with self.subTest(bundle=bundle), self.assertRaises(Failure):managed_evidence_version(bundle)
+        with self.assertRaises(Failure):managed_evidence_version({},live=True)
+
     def test_metadata_marker_reaches_standard_bridge(self):
         with tempfile.TemporaryDirectory() as root:
             j=Journal(root,'a'*16,create=True)
@@ -21,7 +28,7 @@ class StandardGradeTests(unittest.TestCase):
                 j.data.update(context={'pod_uid':'original-uid'},task_container_id='original-container',workload_contract={'frozen':'before-release'})
                 r.delegated_state=lambda:{'endpoint':'https://recorded-endpoint'}
                 report={'schema':'sandprobe/3','run':{'box':{'provider_id':'original-uid'},'provider':'aws-nitro','id':'standard-run'},'grade':{'letter':'C','valid':True,'complete':False,'unknown':[]}}
-                r.ops.call=Mock(return_value=json.dumps({'report':report,'html':'<html></html>','input':{},'evidence':{},'observations':'{}'}).encode())
+                r.ops.call=Mock(return_value=json.dumps({'schema':'sandprobe.managed-evidence/2','report':report,'html':'<html></html>','input':{},'evidence':{},'observations':'{}'}).encode())
                 with patch('runner.persistent_assessment.binding',return_value={'owned':'volume'}),patch('runner.persistent_assessment.reset_request',return_value={'owned':'reset'}),patch('runner.persistent_assessment.import_reset'):
                     r.standard_grade('original-pod','original-job','b'*64)
                 payload=json.loads(r.ops.call.call_args.kwargs['payload'])
@@ -43,7 +50,7 @@ class StandardGradeTests(unittest.TestCase):
                 report = {'schema':schema, 'run':{'box':{'provider_id':'original-uid'},
                           'provider':'aws-nitro', 'id':'standard-run'},
                           'grade':{'letter':'F','valid':True,'complete':False,'unknown':[]}}
-                r.ops.call = Mock(return_value=json.dumps({'report':report,'html':'<html></html>',
+                r.ops.call = Mock(return_value=json.dumps({'schema':'sandprobe.managed-evidence/2','report':report,'html':'<html></html>',
                                   'input':{},'evidence':{},'observations':'{}'}).encode())
                 if schema == "sandprobe/4":
                     r.standard_grade('original-pod', 'original-job', 'b'*64)
@@ -95,7 +102,7 @@ class StandardGradeTests(unittest.TestCase):
             r.delegated_state=lambda:{'endpoint':'https://recorded-endpoint'}
             grade={'letter':'F','valid':True,'complete':False,'unknown':['EGR-1']}
             report={'schema':'sandprobe/1','run':{'box':{'provider_id':'original-uid'},'provider':'aws-nitro','id':'standard-run'},'grade':grade}
-            r.ops.call=Mock(return_value=json.dumps({'report':report,'html':'<html>standard</html>','input':{},'evidence':{},'observations':'{}'}).encode())
+            r.ops.call=Mock(return_value=json.dumps({'schema':'sandprobe.managed-evidence/2','report':report,'html':'<html>standard</html>','input':{},'evidence':{},'observations':'{}'}).encode())
             r.upload_hosts=[HOSTNAME]
             j.data['endpoint_resolution']={'ipv4':['1.1.1.1','8.8.8.8']}
             r.standard_grade('model-task-original','original-job','b'*64)
@@ -143,7 +150,7 @@ class StandardGradeTests(unittest.TestCase):
             j.data.update(context={'pod_uid':'original-uid'},task_container_id='original-container',workload_contract={'frozen':'before-release'})
             r.delegated_state=lambda:{'endpoint':'https://recorded-endpoint'}
             report={'schema':'sandprobe/1','run':{'box':{'provider_id':'original-uid'},'provider':'aws-nitro','id':'standard-run'},'grade':{'letter':'F','valid':True,'complete':False,'unknown':[]}}
-            r.ops.call=Mock(return_value=json.dumps({'report':report,'html':'<html>standard</html>','input':{},'evidence':{},'observations':'{}'}).encode())
+            r.ops.call=Mock(return_value=json.dumps({'schema':'sandprobe.managed-evidence/2','report':report,'html':'<html>standard</html>','input':{},'evidence':{},'observations':'{}'}).encode())
             try:
                 r.standard_grade('model-task-original','original-job','b'*64)
             except Failure:

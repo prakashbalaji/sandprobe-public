@@ -113,6 +113,20 @@ def trust_policy(cluster_arn, namespace):
             "aws:RequestTag/kubernetes-service-account": "model-task"}}}]}
 
 
+def managed_evidence_version(bundle,live=False):
+    # EVD-20: the managed envelope has its own version, separate from OUT-1.
+    if not isinstance(bundle,dict):raise Failure('invalid_managed_evidence')
+    version=bundle.get('schema','sandprobe.managed-evidence/1')
+    if version not in ('sandprobe.managed-evidence/1','sandprobe.managed-evidence/2') or live and version!='sandprobe.managed-evidence/2':
+        raise Failure('unsupported_managed_evidence_version')
+    evidence=bundle.get('evidence',{})
+    if not isinstance(evidence,dict):raise Failure('invalid_managed_evidence')
+    reset=evidence.get('Reset') or {}
+    if not isinstance(reset,dict):raise Failure('invalid_managed_evidence')
+    if reset.get('FailureStage') and version!='sandprobe.managed-evidence/2':
+        raise Failure('unversioned_reset_diagnostic')
+    return version
+
 class Runner:
     def __init__(self, journal, profile=PROFILE, commands=None, upload_hosts=None, controller="guest", model_python="", storage_profile=None, canary_tcp80_protocol=None, persistence_marker=None):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", profile):
@@ -781,8 +795,9 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         # WGR-3/4: core Go grader recomputes from the host's bound raw collection,
         # after post-stop receipts are available. Never use the saved legacy letter.
         bundle = strict((self.journal.folder / "standard-evidence.json").read_text(), 4 << 20)
+        version = managed_evidence_version(bundle)
         request = {"manifest": bundle["report"]["manifest"], "observations": bundle["observations"],
-                   "evidence": bundle["evidence"], "workload": workload,
+                   "evidence_schema": version, "evidence": bundle["evidence"], "workload": workload,
                    "private_receiver": {"expected_uid": self.journal.data["context"]["receiver_uid"],
                      "observed_uid": self.journal.data.get("receipts", {}).get("receiver_uid", ""),
                      "issued_nonces": self.journal.data.get("nonces", []),
@@ -908,6 +923,7 @@ print(json.dumps({'canonical':c,'device':a.st_dev,'inode':a.st_ino,'protected_de
         finally:
             if persistent_assessment.enabled(self):
                 persistent_assessment.import_reset(self)
+        managed_evidence_version(bundle,live=True)
         report = bundle["report"]
         expected_schema = "sandprobe/3" if self.controller == "host" else "sandprobe/1"
         if self.canary_tcp80_protocol == "http-v1":

@@ -22,6 +22,11 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   (`sandprobe/7` with a recipe). If you match on those sentences, match on `grade`, `findings` or the score instead
   (GRD-4, SBX-10).
 
+- Managed raw-evidence artifacts now declare `sandprobe.managed-evidence/2`, separately from public
+  report schemas. This versions the optional host reset-stage diagnostics. Use the matching new managed
+  reader; older strict internal readers cannot consume version2. Historical unversioned evidence remains
+  replayable as legacy version1 without the new stage. No public OUT-1 schema or grading rule changes.
+
 ## 0.3.4 (2026-11-24)
 
 - `sandprobe run -recipe <file>` and `sandprobe plan -recipe <file>` run a recipe of your own: a small shell file,

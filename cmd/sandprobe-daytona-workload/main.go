@@ -699,12 +699,7 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = saveBytes(o.folder, "legacy-standard-report.html", page); e != nil {
 		return e
 	}
-	bundle := struct {
-		Report       report.Doc         `json:"report"`
-		Observations string             `json:"observations"`
-		Evidence     obs.CanaryEvidence `json:"evidence"`
-		Input        obs.Input          `json:"input"`
-	}{d, string(r.Doc), r.Evidence, r.Input}
+	bundle := report.NewManagedEvidence(d, string(r.Doc), r.Evidence, r.Input, "")
 	if e = save(o.folder, "standard-evidence.json", bundle); e != nil {
 		return e
 	}

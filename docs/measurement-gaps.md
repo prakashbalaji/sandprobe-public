@@ -47,3 +47,7 @@ The optional Daytona organization-default policy readback is separate from the s
 Daytona's documented sandbox-ID organization read after fresh run ownership verification, rather than an
 account-level organization read. A response is observed only with the matching organization and a strict boolean;
 a rejected or unverifiable response remains unknown. It never proves effective network enforcement.
+Managed raw-evidence artifacts have a separate compatibility boundary from public reports. New collectors write
+`sandprobe.managed-evidence/2`, including optional reset-stage diagnostics. Use a matching new reader; an older
+strict internal decoder is expected to reject this version. Historical unversioned envelopes are legacy version1
+and remain replayable without the new diagnostic. This does not change OUT-1 or authenticate saved evidence.
