@@ -484,11 +484,22 @@ class Sanitized(unittest.TestCase):
             proc = subprocess.Popen(args, stdin=r, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             os.close(r)
             keep = w
+            timer = None
             if stdin_mode == "late_data":
-                threading.Timer(0.5, lambda: (os.write(w, b"echo later\n"))).start()
+                # FIX-10: this descriptor remains ours until the callback has finished.
+                def write_later():
+                    try:
+                        os.write(w, b"echo later\n")
+                    except BrokenPipeError:
+                        pass  # The fake remote may finish before the delayed input.
+                timer = threading.Timer(0.5, write_later)
+                timer.start()
             try:
                 out, err = proc.communicate(timeout=60)
             finally:
+                if timer is not None:
+                    timer.cancel()
+                    timer.join()
                 os.close(keep)
             code = proc.returncode
         else:
@@ -506,6 +517,33 @@ class Sanitized(unittest.TestCase):
         self.assertNotIn("Traceback", text, f"{verb} {fails}: a traceback:\n{text}")
         self.assertNotIn("Fatal Python error", text, f"{verb} {fails}: a runtime diagnostic:\n{text}")
         return code, text
+
+    def test_delayed_stdin_writer_finishes_before_pipe_close(self):
+        from unittest.mock import patch
+        events = []
+        r, w = os.pipe()
+        class Child:
+            returncode = 3
+            def communicate(self, timeout):
+                events.append("remote ended")
+                return b"", b""
+        class Timer:
+            def __init__(self, delay, callback):
+                self.callback = callback
+            def start(self):
+                events.append("started")
+            def cancel(self):
+                events.append("cancelled")
+            def join(self):
+                events.append("joined")
+                os.fstat(w)  # Still owned even when the callback is already in flight.
+                self.callback()  # No reader remains: BrokenPipeError is expected and contained.
+        with patch.object(os, "pipe", return_value=(r, w)), patch.object(subprocess, "Popen", return_value=Child()), patch.object(threading, "Timer", Timer):
+            code, _ = self.run_child("sh", stdin_mode="late_data")
+        self.assertEqual(code, 3)
+        self.assertEqual(events, ["started", "remote ended", "cancelled", "joined"])
+        with self.assertRaises(OSError):
+            os.fstat(w)
 
     def loop(self, n, verb, fails, want, stdin_mode="data"):
         from concurrent.futures import ThreadPoolExecutor
