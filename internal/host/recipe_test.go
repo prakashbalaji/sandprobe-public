@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,10 +65,125 @@ func TestParseRecipe(t *testing.T) {
 		"name without who":  strings.Replace(ok1, "addressed-by: id", "addressed-by: name", 1),
 		"over 64 KiB":       ok1 + "#" + strings.Repeat("x", 64<<10) + "\n",
 		"addressed-by what": strings.Replace(ok1, "addressed-by: id", "addressed-by: tag", 1),
+		"an escape":         strings.Replace(ok1, "provider: a fake", "provider: a \x1b[2Jfake", 1),
+		"not ASCII":         strings.Replace(ok1, "provider: a fake", "provider: a f\u00e4ke", 1),
+		"a long value":      strings.Replace(ok1, "terms: none", "terms: "+strings.Repeat("x", 401), 1),
 	} {
 		if _, err := ParseRecipe("x", []byte(bad)); err == nil {
 			t.Errorf("%s: parsed", name)
+		} else if len(err.Error()) > 200 || strings.Contains(err.Error(), "\x1b") {
+			t.Errorf("%s: the error carries the header: %q", name, err)
 		}
+	}
+	if _, err := ParseRecipe("x", []byte(strings.Replace(ok1, "terms: none", "terms: "+strings.Repeat("x", 400), 1))); err != nil {
+		t.Errorf("a 400-character value: %v", err)
+	}
+	// RCP-3: a defined reset is noted, since it's never called and the plan must say so.
+	if r, _ := ParseRecipe("x", []byte(ok1)); r.Reset {
+		t.Error("no reset function, yet Reset")
+	}
+	if r, err := ParseRecipe("x", []byte(ok1+"sp_recreate() {\n:\n}\n")); err != nil || !r.Reset || !strings.Contains(RecipeResidual(r, "t", nil), "never called") {
+		t.Errorf("a defined reset isn't noted: %+v %v", r, err)
+	}
+}
+
+// RCP-4: a person's own recipe is named from its SHA-256, carries all four default exclusions whatever its header
+// lists, and its header's provider stays its own word.
+func TestOwnRecipe(t *testing.T) {
+	fns := "sp_ready() {\n:\n}\nsp_create() {\n:\n}\nsp_shell() {\n:\n}\nsp_delete() {\n:\n}\nsp_gone() {\n:\n}\n"
+	head := "# sandprobe-recipe: v1\n# provider: modal\n# terms: Modal allows everything\n%s# addressed-by: id\n"
+	for name, line := range map[string]string{"all four": "# exclusions: SEC-4 EGR-3 AMP-6 AMP-7\n", "one": "# exclusions: SEC-4\n", "none": ""} {
+		text := []byte(strings.Replace(head, "%s", line, 1) + fns)
+		r, err := ParseOwnRecipe(text)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !r.Own || !slices.Equal(r.Exclusions, RecipeDefaultExclusions) || r.Name != "own-"+r.SHA256[:12] || len(r.SHA256) != 64 ||
+			r.RunProvider() != "recipe" || r.Label() != "your own recipe" || r.Provider != "modal" {
+			t.Errorf("%s: %+v", name, r)
+		}
+		// The shipped parse takes the header's list as written, so only ParseOwnRecipe forces the four.
+		if s, _ := ParseRecipe("x", text); name == "none" && len(s.Exclusions) != 0 {
+			t.Errorf("a shipped parse with no exclusions line: %v", s.Exclusions)
+		}
+		res := RecipeResidual(r, "a place", nil)
+		for _, want := range []string{r.SHA256, `names its provider as "modal"`, "hasn't reviewed the recipe or that provider's terms", "sp_gone saying so", "SEC-4, EGR-3, AMP-6, AMP-7"} {
+			if !strings.Contains(res, want) {
+				t.Errorf("%s: the residual doesn't say %q:\n%s", name, want, res)
+			}
+		}
+		if strings.Contains(res, "Modal allows everything") {
+			t.Errorf("%s: the residual quotes the header's terms", name)
+		}
+	}
+	if _, err := ParseOwnRecipe([]byte(strings.Replace(head, "%s", "# exclusions: SEC-4 SEC-1\n", 1) + fns)); err == nil {
+		t.Error("an own recipe that excludes SEC-1 parsed")
+	}
+	if len(RecipeDefaultExclusions) != len(ExecExclusions()) {
+		t.Fatal("the default exclusions aren't PRV-15's four")
+	}
+	for _, id := range RecipeDefaultExclusions {
+		if ExecExclusions()[id] == "" {
+			t.Errorf("%s isn't one of PRV-15's four", id)
+		}
+	}
+	for name := range recipes.Shipped { // RCP-2: an own recipe's record and provider name can't collide with a shipped one's
+		if name == OwnRecipeProvider || strings.HasPrefix(name, "own-") || TermsExclusions[name] != nil {
+			t.Errorf("a shipped recipe is named %q", name)
+		}
+	}
+	if TermsExclusions[OwnRecipeProvider] != nil || OwnRecipeProvider == "exec" {
+		t.Error("the own recipe's run provider is a reviewed provider's name")
+	}
+}
+
+// PRV-3, RCP-2: a recipe run's calls are listed for the report by the recipe's SHA-256, the function, the exit code
+// and the create-returned ID, and nothing the recipe printed.
+func TestRecipeCallsRecorded(t *testing.T) {
+	defer func(g, p time.Duration) { RecipeGoneLimit, RecipeGonePoll = g, p }(RecipeGoneLimit, RecipeGonePoll)
+	RecipeGoneLimit, RecipeGonePoll = 300*time.Millisecond, 50*time.Millisecond
+	form := regexp.MustCompile(`^fake recipe sha256:[0-9a-f]{64} sp_(create|delete|gone)$`)
+	r, _ := fakeRecipe(t, "id", `
+sp_create() { echo box-1; echo "secret-on-stderr" >&2; echo "said on fd 3" >&3; }
+sp_shell() { :; }
+sp_delete() { echo "secret-on-stdout"; exit 4; }
+sp_gone() { return 1; }
+`)
+	b, _ := NewRecipeBox(r, "t", "")
+	if err := b.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Delete(context.Background()); err == nil {
+		t.Fatal("a box sp_gone still lists was confirmed deleted")
+	}
+	if len(b.Calls) != 3 {
+		t.Fatalf("calls: %+v", b.Calls)
+	}
+	for i, want := range []struct {
+		fn   string
+		ok   bool
+		exit int
+	}{{"sp_create", true, 0}, {"sp_delete", false, 4}, {"sp_gone", false, 1}} {
+		c := b.Calls[i]
+		if !form.MatchString(c.Call) || !strings.HasSuffix(c.Call, " "+want.fn) || !strings.Contains(c.Call, r.SHA256) || c.OK != want.ok ||
+			c.Exit != want.exit || c.ID != "box-1" || c.At.IsZero() || strings.Contains(c.Call+c.Error, "secret") || strings.Contains(c.Error, "fd 3") {
+			t.Errorf("%s: %+v", want.fn, c)
+		}
+	}
+	// A person's own recipe is listed as "own", never by a name or a path.
+	own, err := ParseOwnRecipe(r.Text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ob, _ := NewRecipeBox(own, "t", "")
+	if err := ob.Create(context.Background()); err != nil || ob.Calls[0].Call != "own recipe sha256:"+own.SHA256+" sp_create" || ob.Calls[0].ID != "box-1" {
+		t.Errorf("an own recipe's create: %+v %v", ob.Calls, err)
+	}
+	// A create that returns no ID is listed without one.
+	r2, _ := fakeRecipe(t, "id", "sp_create() { echo a; echo b; }\nsp_shell() { :; }\nsp_delete() { :; }\nsp_gone() { :; }\n")
+	b2, _ := NewRecipeBox(r2, "t", "")
+	if err := b2.Create(context.Background()); err == nil || len(b2.Calls) != 1 || b2.Calls[0].OK || b2.Calls[0].ID != "" {
+		t.Errorf("a create with no ID: %+v %v", b2.Calls, err)
 	}
 }
 

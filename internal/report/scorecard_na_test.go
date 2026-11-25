@@ -383,3 +383,27 @@ func TestReportRecordsAttestation(t *testing.T) {
 		t.Errorf("the page shows the attestation %d times, want 4", n)
 	}
 }
+
+// RCP-4 and SCR-2: the policy for a person's own recipe ("recipe") is PRV-15's four as opt-in, whatever provider its
+// header or a manifest names, so Cloud access is counted and reads "Not tested", never not applicable.
+func TestOwnRecipePolicy(t *testing.T) {
+	for _, declared := range []string{"", "modal", "recipe"} {
+		got := PolicyFor(host.OwnRecipeProvider, declared)
+		if len(got) != 4 {
+			t.Errorf("declaring %q: %v", declared, got)
+		}
+		for _, id := range host.RecipeDefaultExclusions {
+			if got[id] != obs.SkipOptIn {
+				t.Errorf("declaring %q: %s is %q", declared, id, got[id])
+			}
+		}
+	}
+	excluded := map[string]string{}
+	for _, id := range host.RecipeDefaultExclusions {
+		excluded[id] = "your own recipe keeps it off"
+	}
+	c := Score(replanned(t, host.OwnRecipeProvider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipOptIn}))
+	if r := row(t, c, "Cloud access"); r.NotApplicable || r.Green || !strings.HasPrefix(r.Why, "Not tested") || c.Of != 6 || len(c.NotCounted()) != 0 {
+		t.Errorf("Cloud access %+v, out of %d, %v", r, c.Of, c.NotCounted())
+	}
+}

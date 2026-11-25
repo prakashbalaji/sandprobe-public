@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"sandprobe/internal/catalog"
+	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 )
@@ -274,5 +275,33 @@ func TestCompareBetter(t *testing.T) {
 	c = Compare(a, b)
 	if c.ScoreBefore != nil || c.ScoreAfter == nil || c.GotBetter == nil || len(c.GotBetter) != 0 || c.NoLongerApplies == nil || c.NotProven == nil || !c.Incomplete {
 		t.Fatalf("invalid before: %+v", c)
+	}
+}
+
+// RCP-4 and ANL-1: a report of a person's own recipe (run.provider "recipe") reads with its opt-in kinds and its
+// attestations, since this binary's own policy for it is PRV-15's four as opt-in. A provider_terms kind on it, a
+// declared provider beside it, or the same report under a name the policy lacks, is refused.
+func TestOwnRecipeReport(t *testing.T) {
+	for name, tc := range map[string]struct {
+		edit func(d *report.Doc)
+		ok   bool
+	}{
+		"as written":          {func(d *report.Doc) {}, true},
+		"a provider_terms":    {func(d *report.Doc) { d.Manifest.SkipKinds["EGR-3"] = obs.SkipProviderTerms }, false},
+		"declaring modal":     {func(d *report.Doc) { d.Manifest.DeclaredProvider, d.Schema = "modal", report.SchemaDeclaredProvider }, false},
+		"a name of its own":   {func(d *report.Doc) { d.Run.Provider = "myrecipe" }, false},
+		"the header's claim":  {func(d *report.Doc) { d.Run.Provider = "modal" }, false},
+		"the recipe's record": {func(d *report.Doc) { d.Run.Provider = "own-0123456789ab" }, false},
+	} {
+		d := attestedRun(t, false)
+		d.Run.Provider, d.Run.Box.CreatedBySandprobe = host.OwnRecipeProvider, true
+		tc.edit(&d)
+		raw, err := json.Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(raw); (err == nil) != tc.ok {
+			t.Errorf("%s: accepted %v, want %v", name, err == nil, tc.ok)
+		}
 	}
 }
