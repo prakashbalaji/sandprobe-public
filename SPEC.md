@@ -1110,6 +1110,15 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   creating any paid receiver or provider resource. They build the checker from the same clean source as the
   managed collector. Unavailable capability stops setup with a fixed error, without a retry or legacy fallback;
   the collector still rechecks capability immediately before assessment. Preflight success is not delivery proof.
+- **EVD-19 Sandbox-bound organization readback.** EVD-11's optional Daytona configuration read uses the
+  pinned SDK's `GET /sandbox/{sandboxId}/organization`, after the existing fresh original-ID, run-label,
+  creation-time and organization checks. The sandbox ID is the verified create-returned ID, never a name,
+  guessed ID or guest input. Require the returned organization ID to match that fresh binding and the network
+  setting to be a real boolean. Make exactly one bounded read; never retry through account-level organization
+  APIs, list organizations, fetch credentials or change policy. Endpoint authentication, permission, transport,
+  schema and identity failures retain EVD-14's fixed unknown labels. The host-only artifact keeps its existing
+  organization-default/configuration-only scope and schema; this is neither per-connection denial proof nor
+  one of the 28 standard check outcomes.
 - **EVD-11 Organization network-policy readback.** The managed Daytona collector may make one bounded
   native organization read using only the organization ID freshly verified against its own sandbox's
   create-returned identity, run label and creation time. No organization list, default-organization inference,
@@ -3708,6 +3717,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
+| EVD-19 | `test_organization_network_policy_uses_only_bound_sandbox` and `test_organization_policy_pinned_sdk_uses_explicit_sandbox_path`: fresh identity binding, exact sandbox GET, no account API/fallback, strict response identity/boolean and bounded failures |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |
 | EVD-17 | `TestWorkloadExposurePreservesValidatedProvider`: public bundle recomputation retains valid provider scope, matches canonical report scoring and coverage, and invalid contracts never yield a valid score |

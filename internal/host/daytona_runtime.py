@@ -87,7 +87,7 @@ def organization_policy_failure(error):
     return 'readback_unavailable'
 
 def organization_network_policy(client,req):
-    """EVD-11: one own-sandbox-bound organization read; never a denial verdict."""
+    """EVD-19: one verified sandbox-ID organization read; never a denial verdict."""
     unknown=lambda reason:{'result':'unknown','reason':reason}
     try:
         _,meta=bound(client,req)
@@ -97,8 +97,7 @@ def organization_network_policy(client,req):
     except Exception:
         return unknown('binding_unverified')
     try:
-        from daytona_api_client.api.organizations_api import OrganizationsApi
-        value=OrganizationsApi(client._api_client).get_organization(organization,_request_timeout=15)
+        value=client._sandbox_api.get_organization_by_sandbox_id(meta['id'],_request_timeout=15)
     except Exception as error:
         return unknown(organization_policy_failure(error))
     if (getattr(value,'id',None)!=organization
