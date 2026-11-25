@@ -34,11 +34,13 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   the ID its create returned. Point it at the template you hardened, and each run probes a fresh box made from that
   template. A recipe is host code that runs on your machine with your credentials, and Sandprobe hasn't reviewed it
   or your provider's terms: the plan says so, and shows the file's path and full SHA-256, before anything is created.
-  `plan -recipe` already runs the recipe's `sp_ready`. SEC-4, EGR-3, AMP-6 and AMP-7 are always off, whatever the
-  recipe's header says, unless you turn one on by name with `-provider-endpoints`. The report's `run.provider` is
-  `recipe`, and its `provider_calls` name the recipe by its SHA-256; a Sandprobe older than this one refuses such a
-  report. `-provider` isn't accepted with `-recipe`. [docs/providers/recipe.md](docs/providers/recipe.md) explains
-  how to write one, and `examples/recipes/docker-template.sh` is a complete example on local Docker (RCP-4).
+  `plan -recipe` already runs the recipe's `sp_ready`, and a stderr line names the file and its SHA-256 before it
+  does. SEC-4, EGR-3, AMP-6 and AMP-7 are always off, whatever the recipe's header says, unless you turn one on by
+  name with `-provider-endpoints`. The report's `run.provider` is `recipe`, and a new record, `run.recipe`, holds
+  `own: true` and the SHA-256 of the recipe. Every command that reads a saved report refuses one whose record is
+  missing, misplaced or malformed. The record is part of `sandprobe/6`. `-provider` isn't accepted with `-recipe`.
+  [docs/providers/recipe.md](docs/providers/recipe.md) explains how to write one, and
+  `examples/recipes/docker-template.sh` is a complete example on local Docker (RCP-4).
 - A `run kubernetes` report now lists the recipe's create, delete and last gone answer in `provider_calls`, each
   with the recipe's SHA-256 (PRV-3, RCP-2).
 - A recipe whose header holds a value that isn't printable ASCII, or is over 400 characters, is refused (RCP-1).

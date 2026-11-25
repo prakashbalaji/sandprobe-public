@@ -20,6 +20,8 @@ reviewed your recipe, and hasn't reviewed your provider's terms. The plan says b
 - Read a recipe before you run it, above all one a coding agent or someone else wrote.
 - `sandprobe plan -recipe <file>` already runs the file: its `sp_ready`, and anything written outside a function.
   Naming the file is what allows that. Nothing is created until you approve the plan.
+- Before that first execution, Sandprobe writes one line to stderr with the file's path and its full SHA-256, with
+  `-o json` too. So the bytes that are about to run are on record even if the recipe then hangs.
 - The plan shows the file's full SHA-256. Sandprobe reads the file once and runs only those bytes, so the SHA-256 is
   of what ran. Compare it with the copy you read.
 
@@ -201,12 +203,20 @@ recipe of your own: only Sandprobe's own reviewed scope for a provider can say t
 
 - `run.provider` is `recipe`. It says how the box was reached, as `exec` does. It is not a provider's name.
 - `run.box.created_by_sandprobe` is `true`, and `run.box.provider_id` is the ID your create returned.
+- `run.recipe` is the record to rely on. Only a run through a recipe of your own has it:
+
+  ```json
+  "recipe": {"own": true, "sha256": "<64 hex>"}
+  ```
+
+  `sha256` is of the recipe's bytes that ran. A saved report whose record is missing, misplaced or malformed is
+  refused by every command that reads reports.
 - `provider_calls` lists your recipe's create, delete and last gone answer. Each names the recipe by its SHA-256, for
   example `own recipe sha256:<64 hex> sp_create`, with the exit code and the box's ID.
-- `cleanup.residual` names the SHA-256 and your header's `provider:` line as the recipe's own word, and says that
-  nobody reviewed the recipe.
+- `cleanup.residual` names the SHA-256 and your header's `provider:` line as the recipe's own word, quotes the
+  target line, and says that nobody reviewed the recipe.
 
-The report holds no path of the recipe file and nothing the recipe printed.
+The report holds no path of the recipe file, and nothing the recipe printed but the target line in the residual.
 
 ## Terms and consent
 
