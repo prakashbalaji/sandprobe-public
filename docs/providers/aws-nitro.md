@@ -1,6 +1,6 @@
 # AWS Nitro Sandboxes on EKS: `run aws-nitro`
 
-**Status for 0.3.0, being validated:** Stable target. Last validated: pending. [All providers](README.md)
+**Status:** Stable target. Last validated: 25 Nov 2026, the `isolated` pod, with 0.3.5. [All providers](README.md)
 
 `run aws-nitro` creates one pod with the `isolated-sandbox` runtime class in an EKS Auto Mode cluster that only
 Sandprobe uses, probes it and deletes it (the AWS Nitro row in SPEC.md).
