@@ -130,7 +130,7 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 | [A box your own recipe creates](docs/providers/recipe.md), from your template say | `run -recipe <file>`, a recipe you write and keep in your own repository ([an example](examples/recipes/docker-template.sh)) | Beta: on `main`, not yet in a release |
 | [E2B](docs/providers/e2b.md), [Daytona](docs/providers/daytona.md), [Vercel Sandbox](docs/providers/vercel.md), [Cloudflare Sandbox](docs/providers/cloudflare.md), [Fly Sprites](docs/providers/sprites.md), [AWS Nitro on EKS](docs/providers/aws-nitro.md) | `run <provider>`, native adapters | Stable target |
 | [Baseten](docs/providers/baseten.md) | `run baseten`, a native adapter | Beta |
-| [Modal](docs/providers/modal.md) | `run exec` through a [bridge script](examples/modal/bridge.py), on a sandbox of your own; the proof of concept (`make poc`) is not in the release build | Beta |
+| [Modal](docs/providers/modal.md) | `run modal`, Modal's defaults; `run exec` through a [bridge script](examples/modal/bridge.py) for a sandbox of your own | Beta |
 | [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev, PRV-13), never represented as provider-written permission |
 
 The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/README.md) is the single source for
@@ -222,7 +222,7 @@ every check was conclusive. Reading a saved report (`scorecard`, `profile`, `ass
 only: it can't re-verify the run or tell an edited report apart, and each says so.
 
 Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 green-category score below `-min` (`0`–`6` or `full`), 7 a box not
-confirmed deleted. `-min` gates only the green-category count (not finding severity inside an already-red category or proof coverage); use `sandprobe compare` or `-o json` to fail CI on severity or proof regressions. `-o json` gives agents the plan, the report and every error as JSON, and `SANDPROBE_NO_KEYS=1` skips post-run keys in interactive terminals.
+confirmed deleted, 8 `run modal` stopped with no report. `-min` gates only the green-category count (not finding severity inside an already-red category or proof coverage); use `sandprobe compare` or `-o json` to fail CI on severity or proof regressions. `-o json` gives agents the plan, the report and every error as JSON, and `SANDPROBE_NO_KEYS=1` skips post-run keys in interactive terminals.
 
 Research harnesses, such as the managed Nitro and Daytona coding evaluations, live in
 [experiments/](experiments/README.md). They aren't part of the product. Their run records stay local and must not be

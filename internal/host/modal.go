@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -85,25 +89,134 @@ type ModalBox struct {
 	SandboxID string
 	Tags      map[string]string // sandprobe-run=<run id>: how the cleanup confirms nothing of the run is left
 	ProbePath string
+	Arch      string
 	Calls     []obs.ProviderCall
 	api       modalAPI
+	journal   modalJournal
+	state     string // the journal's path (PRV-18), or "" for the proof of concept, which keeps its own record
+}
+
+// modalJournal is run modal's private record: the tag before the create, the ID once the create returns it (PRV-18).
+type modalJournal struct {
+	Workspace string    `json:"workspace"`
+	App       string    `json:"app"`
+	ImageID   string    `json:"image_id"`
+	Tag       string    `json:"run_tag"`
+	ID        string    `json:"id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ModalApp and ModalImage are the Modal row's App and image.
+const (
+	ModalApp   = "sandprobe"
+	ModalImage = "python:3.12-slim-bookworm"
+)
+
+// ModalResidual is what a run modal report says it leaves and can't vouch for (PRV-18).
+const ModalResidual = "The App sandprobe and the built image stay in your Modal workspace; `modal app stop sandprobe` removes the App. " +
+	"The sandbox mounts no volume, so nothing is reset and PER-5 is skipped. An ambiguous create keeps its journal and " +
+	"relies on the requested 15-minute timeout; nothing is terminated by tag."
+
+// ModalWorkspace checks the operator's named workspace (PRV-18); it asks Modal nothing.
+func ModalWorkspace(name string) error {
+	if !modalWorkspaceName.MatchString(name) {
+		return errors.New("SANDPROBE_MODAL_WORKSPACE doesn't name a Modal workspace")
+	}
+	return nil
+}
+
+var modalWorkspaceName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// CreateModalRecorded is CreateModal for run modal: the journal with the run's tag is on disk before the create, and
+// the ID before anything runs in the sandbox (PRV-18). A nil box means nothing was created. A box with an error is the
+// caller's to Destroy.
+func CreateModalRecorded(ctx context.Context, api modalAPI, spec ModalSpec, dir, workspace, imageID string) (*ModalBox, error) {
+	b := newModalBox(api, spec)
+	tag := b.Tags["sandprobe-run"]
+	b.journal = modalJournal{Workspace: workspace, App: ModalApp, ImageID: imageID, Tag: tag, CreatedAt: time.Now().UTC()}
+	b.state = filepath.Join(dir, "modal-"+tag+".state")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, errors.New("the Modal journal directory is unavailable, so nothing was created")
+	}
+	if err := b.save(); err != nil {
+		return nil, fmt.Errorf("%w, so nothing was created", err)
+	}
+	err := b.create(ctx)
+	if b.SandboxID != "" {
+		b.journal.ID = b.SandboxID
+		if serr := b.save(); serr != nil {
+			err = errors.Join(err, fmt.Errorf("%w with the ID, so nothing runs in the sandbox", serr))
+		}
+	}
+	return b, err
+}
+
+// StatePath is the journal's path, for a message about an unconfirmed cleanup.
+func (b *ModalBox) StatePath() string { return b.state }
+
+func (b *ModalBox) save() error {
+	data, _ := json.MarshalIndent(b.journal, "", "  ")
+	f, err := os.CreateTemp(filepath.Dir(b.state), ".modal-state-*") // mode 600
+	if err != nil {
+		return errors.New("the Modal journal can't be written")
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(append(data, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), b.state)
+	}
+	if err != nil {
+		return errors.New("the Modal journal can't be written")
+	}
+	return nil
+}
+
+// DetectArch asks the sandbox which probe it runs.
+func (b *ModalBox) DetectArch(ctx context.Context) error {
+	out, err := b.Exec(ctx, []string{"uname", "-m"}, nil)
+	if err != nil {
+		return fmt.Errorf("uname: %w", err)
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "x86_64":
+		b.Arch = "amd64"
+	case "aarch64":
+		b.Arch = "arm64"
+	default:
+		return errors.New("an architecture Sandprobe has no probe for")
+	}
+	return nil
+}
+
+func newModalBox(api modalAPI, spec ModalSpec) *ModalBox {
+	return &ModalBox{Spec: spec, Tags: map[string]string{"sandprobe-run": token("m")[1:]}, api: api}
 }
 
 // CreateModal creates the run's sandbox. It always returns the box, so a create that failed still leaves its tag
 // for the cleanup to look for.
 func CreateModal(ctx context.Context, api modalAPI, spec ModalSpec) (*ModalBox, error) {
-	b := &ModalBox{Spec: spec, Tags: map[string]string{"sandprobe-run": token("m")[1:]}, api: api}
+	b := newModalBox(api, spec)
+	return b, b.create(ctx)
+}
+
+func (b *ModalBox) create(ctx context.Context) error {
 	at := time.Now()
-	id, err := api.Create(ctx, spec, b.Tags)
-	b.record(ctx, at, "create sandbox ("+spec.Setup+")", id, err)
+	id, err := b.api.Create(ctx, b.Spec, b.Tags)
+	b.record(ctx, at, "create sandbox ("+b.Spec.Setup+")", id, err)
 	if err != nil {
-		return b, err
+		return err
 	}
 	if id == "" {
-		return b, errors.New("modal create returned no sandbox ID")
+		return errors.New("modal create returned no sandbox ID")
 	}
 	b.SandboxID = id
-	return b, nil
+	return nil
 }
 
 func (b *ModalBox) ID() string { return b.SandboxID }
@@ -187,6 +300,11 @@ func (b *ModalBox) Destroy(ctx context.Context) error {
 		return fmt.Errorf("the create returned no sandbox ID, so it stays unresolved: look for tag sandprobe-run=%s "+
 			"in App sandprobe later; Modal ends any such sandbox at its %s timeout", b.Tags["sandprobe-run"], modalTimeout)
 	}
+	if b.state != "" { // PRV-18: only a confirmed deletion retires the journal
+		if err := os.Remove(b.state); err != nil && !os.IsNotExist(err) {
+			return errors.New("the deletion is confirmed but the Modal journal couldn't be removed")
+		}
+	}
 	return nil
 }
 
@@ -209,7 +327,7 @@ func (b *ModalBox) record(ctx context.Context, at time.Time, call, id string, er
 // modalOut keeps a command's output, capped like a document.
 func modalOut() *capped { return &capped{max: obs.MaxDoc + 1} }
 
-// ModalSetups are POC-2's setups, in order. `sandprobe run modal` takes all but the sidecar, which only the PoC builds.
+// ModalSetups are POC-2's setups, in order. `sandprobe run modal` makes the default one only (PRV-18).
 var ModalSetups = []string{"default", "domain-empty", "domain-one", "block", "block-vm", "sidecar"}
 
 // ModalSetup is POC-2's table row for a setup: the Modal row's sandbox with one change. domain-one's one name is the

@@ -115,6 +115,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	r.providerEndpointsSet = given["provider-endpoints"]
 	r.providerSet = given["provider"]
 	r.recipeSet = given["recipe"]
+	r.variantSet = given["variant"]
 	recipeRun := r.recipeSet && (cmd == "run" || cmd == "plan") && len(positional) == 0
 	if r.recipeSet && !recipeRun { // RCP-4
 		return reportErr(o, stderr, fail("usage", "-recipe <file> takes the provider's place on run and plan, and applies nowhere else (RCP-4)", "sandprobe plan -recipe <file>", exitUsage))
@@ -286,9 +287,11 @@ report, and never adds or changes it to turn a red category into not applicable.
 Baseten: -keep-sandbox retains a completed sandbox for inspection until one hour after creation.
 E2B: -e2b-key-file <private file>; -e2b-python <venv python with e2b==2.63.0>.
 Vercel: -vercel-key-file <private file>; explicit -vercel-team team_... -vercel-project prj_....
+Modal: SANDPROBE_MODAL_WORKSPACE names the one workspace a run may use; Modal's own SDK reads your token.
 Providers: sprites, aws-nitro (-variant isolated or network-isolated), baseten, e2b, vercel, cloudflare, boat,
-daytona, exe.dev, kubernetes (a recipe). Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login,
-5 incomplete or invalid, 6 below -min, 7 a box neither deleted nor intentionally retained.`
+daytona, exe.dev, modal, kubernetes (a recipe). Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login,
+5 incomplete or invalid, 6 below -min, 7 a box neither deleted nor intentionally retained, 8 run modal stopped
+with no report.`
 
 // pocCmd is the Modal proof of concept, set only in a -tags poc build (SPEC.md, the Modal section; never shipped).
 var pocCmd func(o opts, r runFlags, args []string, stderr io.Writer) (int, error)

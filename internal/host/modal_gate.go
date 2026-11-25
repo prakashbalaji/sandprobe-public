@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -131,4 +132,90 @@ func RelayGate(receipts []obs.Receipt, l RelayLog) (trip, unknown string) {
 		}
 	}
 	return "", ""
+}
+
+// ModalUnsound is why a run's canary evidence can't clear POC-5's gate, or "": an empty receipt list means nothing
+// unless the run was live, the receipts were read, and the canary wasn't overloaded.
+func ModalUnsound(ev obs.CanaryEvidence, valid bool, invalid string) string {
+	switch {
+	case !ev.Live:
+		return "the canary wasn't armed for the run"
+	case !ev.ReceiptsRead:
+		return "the canary's receipts weren't read"
+	case ev.Overloaded:
+		return "the canary was overloaded, so its counts prove nothing either way"
+	case !valid:
+		return "the probe's document isn't valid: " + invalid
+	}
+	return ""
+}
+
+// ModalImageNames are the names ModalImage's own config declares, as Docker showed them on 10 Nov 2026 (POC-7). A name
+// a later build of that tag adds stops run modal until a reviewed change lists it.
+var ModalImageNames = []string{"PATH", "LANG", "GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256"}
+
+// ModalStop is POC-5's generic gate for run modal's open sandbox (PRV-18): a credential surface the image and the host
+// didn't put there, which may be Modal's own. It returns the rule that tripped, or "". A document it can't read trips.
+func ModalStop(doc []byte) string {
+	if names := ModalUnplacedNames(doc, ModalImageNames); len(names) > 0 {
+		return "SEC-1 names whose source POC-7 can't establish: " + strings.Join(names, ", ")
+	}
+	if paths := ModalUnexpectedCreds(doc); len(paths) > 0 {
+		return "SEC-3 credential files beyond the image's own /etc/shadow: " + strings.Join(paths, ", ")
+	}
+	return ""
+}
+
+// ModalUnplacedNames are SEC-1's names that neither the image declares nor the host set (it sets SANDPROBE_TWIN only).
+func ModalUnplacedNames(doc []byte, image []string) []string {
+	d, err := obs.ParseDoc(doc)
+	if err != nil {
+		return []string{"(the document didn't parse)"}
+	}
+	var out []string
+	for _, o := range d.Observations {
+		if o.ID != "SEC-1" || o.Result != obs.Finding {
+			continue
+		}
+		list, ok := strings.CutPrefix(o.Evidence, "secret-shaped names in the agent's environment, values never read: ")
+		if !ok || list == "" { // exactly the probe's own sentence, or the gate can't clear
+			out = append(out, "(the evidence couldn't be read)")
+		}
+		for n := range strings.SplitSeq(list, ", ") {
+			if !slices.Contains(image, n) && n != "SANDPROBE_TWIN" {
+				out = append(out, n)
+			}
+		}
+		for _, n := range o.ObservedNames {
+			if !slices.Contains(image, n) && n != "SANDPROBE_TWIN" && !slices.Contains(out, n) {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+// ModalUnexpectedCreds are SEC-3's readable credential paths other than the image's own /etc/shadow.
+func ModalUnexpectedCreds(doc []byte) []string {
+	d, err := obs.ParseDoc(doc)
+	if err != nil {
+		return []string{"(the document didn't parse)"}
+	}
+	var out []string
+	for _, o := range d.Observations {
+		if o.ID != "SEC-3" || o.Result != obs.Finding {
+			continue
+		}
+		list, pre := strings.CutPrefix(o.Evidence, "the agent can read ")
+		list, suf := strings.CutSuffix(list, " (opened, never read)")
+		if !pre || !suf || list == "" {
+			out = append(out, "(the evidence couldn't be read)")
+		}
+		for p := range strings.SplitSeq(list, ", ") {
+			if p != "/etc/shadow" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }

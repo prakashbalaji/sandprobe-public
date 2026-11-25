@@ -1,21 +1,41 @@
-# Modal: a proof of concept
+# Modal: `run modal`
 
-**Status for 0.3.0, being validated:** Beta. A release probes a Modal sandbox of your own with `run exec` and a bridge
-script ([below](#probe-your-own-modal-sandbox-with-run-exec)); the proof of concept is not in the release build. Last
-validated: pending.
-[All providers](README.md)
+**Status:** Beta. Last validated: pending. [All providers](README.md)
 
-The Modal proof of concept probes Modal Sandboxes in your own workspace: a default sandbox, a few locked-down network
-setups, and a sidecar that watches the main container's traffic (SPEC.md, "Modal proof of concept"). It lives behind
-a build tag. A release has no `poc` command, and there is no `sandprobe run modal`.
+`run modal` creates one Modal Sandbox with Modal's defaults in your own workspace (root, open egress, CPU), probes it,
+terminates it by its ID and confirms it's gone (PRV-18).
 
-Its known gaps:
+```sh
+modal setup                                     # once: Modal's own login, which writes ~/.modal.toml
+export SANDPROBE_MODAL_WORKSPACE=my-workspace   # the one workspace a run may use (modal profile list)
+sandprobe plan modal
+sandprobe run modal -y
+```
 
-- You build it from source.
-- It needs a canary you deploy yourself (see the last section).
-- It runs one setup per invocation, and you read each setup's raw record before you render its reports.
+- You need an installed `sandprobe`, a Modal workspace of your own, and a token for it. You don't need a clone of this
+  repository or Modal's Python SDK in the run: `modal setup` only writes the token, and `MODAL_TOKEN_ID` and
+  `MODAL_TOKEN_SECRET` work instead.
+- Modal's own SDK, built into `sandprobe`, reads the token. No token enters a sandbox, report or journal. If the token
+  is for another workspace, nothing is created.
+- The sandbox has a 15-minute timeout as a spend backstop. A private journal in `~/.config/sandprobe` names it until
+  it's confirmed gone; exit 7 names that journal.
+- The image and Sandprobe put no credential in the sandbox but the image's own `/etc/shadow` and `GPG_KEY`. If the probe
+  sees any other, it may be Modal's own: the run deletes the sandbox, writes no report, keeps a private note and exits
+  8. Don't run it again; report it privately to Modal.
+- The App `sandprobe` and the built image stay in your workspace. `modal app stop sandprobe` removes the App.
+- Cloud access is not applicable and the score is out of five: SEC-4, EGR-3, AMP-6 and AMP-7 would contact endpoints
+  Modal owns, and PRV-5 excludes them.
 
-## Prerequisites
+It tests Modal's defaults, so a low score is a starting point. To test a sandbox set up the way your agents run, use
+[`run exec`](#probe-your-own-modal-sandbox-with-run-exec), where the fixes below were proven.
+
+## The proof of concept
+
+The proof of concept (SPEC.md, "Modal proof of concept") compares Modal's locked-down network setups and runs a sidecar
+that watches the main container's traffic. It lives behind a build tag and isn't in a release. You build it from
+source, it needs a canary you deploy yourself, and it runs one setup per invocation.
+
+### Prerequisites
 
 - A clone of this repository and Go 1.25, to build `bin/sandprobe-poc` with `make poc`.
 - A Modal workspace of your own, with Modal's token already in `~/.modal.toml`.
@@ -23,14 +43,14 @@ Its known gaps:
   (`ZONE` and `DOMAIN`), the `cf` CLI and `jq`. The `domain-one` and `sidecar` setups also need its wildcard record:
   `deploy/canary.sh wildcard`.
 
-## Credentials
+### Credentials
 
 | Name | What it is |
 |-|-|
 | `~/.modal.toml` | Modal's own token file. The SDK reads it on your machine. It never enters a sandbox, and Sandprobe never prints it. |
 | `SANDPROBE_MODAL_WORKSPACE` | The one workspace the proof of concept may use. Nothing runs without it. |
 
-## Run it
+### Run it
 
 ```sh
 make poc
@@ -121,19 +141,27 @@ integration and the Outbound Policy (POC-4).
 
 ## Terms and consent
 
-SPEC.md's Modal row records no terms link. It notes that Modal's terms say nothing about customers testing their own
-sandboxes, and that Modal's security page asks bug-bounty research to use a workspace ending `-H1-<username>`. The
-proof of concept runs in your own workspace, outside the bug bounty. If a result suggests a real flaw on Modal's
+SPEC.md's Modal row records Modal's [terms](https://modal.com/legal/terms) and
+[security page](https://modal.com/docs/guide/security) as read on 25 Nov 2026. We found nothing in them on customers
+testing their own sandboxes. Customers agree not to "reverse engineer, decompile, disassemble, or otherwise attempt to
+discover the underlying structure, ideas, or algorithms of the Service". The security page, under its bug bounty, says
+"When performing security research, you must use a Modal Workspace whose name ends in `-H1-<username>`". A run checks
+your own sandbox's configuration from inside. It isn't bounty research, carries no permission from Modal, and contacts
+no endpoint Modal owns through the four excluded checks. Read both yourself and decide whether your run fits them. If a
+report suggests a flaw on Modal's side, stop, don't repeat it, and report it to Modal privately.
+
+The proof of concept also runs in your own workspace, outside the bug bounty. If a result suggests a real flaw on Modal's
 side, the run stops and exits 8, and keeps only a private note (POC-5).
 
 ## What the score can and can't reach
 
 - Persistence rests on PER-1 to PER-4. Whether anything survives a reset isn't tested.
-- Each setup is one configuration, chosen by `-variant`, not every way a Modal sandbox can be set up.
+- `run modal` tests one configuration, Modal's defaults. Each proof of concept setup is one more, chosen by `-variant`.
 
 ### Canary and Cloud access (0.3.0)
 
-The proof of concept doesn't use the hosted canary. It needs `-canary <state file>`, naming a canary you deployed with
+`run modal` uses the hosted canary at `control.pub.probe.ac0.dev`, like the other providers. The proof of concept
+doesn't. It needs `-canary <state file>`, naming a canary you deployed with
 `deploy/canary.sh`, which it reaches over AWS SSM. Cloud access is not applicable here: PRV-5 excludes Modal's own
 metadata and Kubernetes endpoints under Sandprobe's own rules of engagement, not Modal's terms, so the box holds no
 cloud identity of yours to check. Cloud access is never green, the score is out of five, and a line under the score

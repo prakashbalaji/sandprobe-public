@@ -64,7 +64,7 @@ func TestSummary(t *testing.T) {
 // POC-5: no gate clears on evidence that proves nothing; the image list fails closed.
 func TestEvidenceAndImages(t *testing.T) {
 	good := obs.CanaryEvidence{Live: true, ReceiptsRead: true}
-	if why := evidenceUnsound(good, true, ""); why != "" {
+	if why := host.ModalUnsound(good, true, ""); why != "" {
 		t.Fatalf("sound evidence refused: %s", why)
 	}
 	for name, ev := range map[string]obs.CanaryEvidence{
@@ -72,11 +72,11 @@ func TestEvidenceAndImages(t *testing.T) {
 		"not read":   {Live: true},
 		"overloaded": {Live: true, ReceiptsRead: true, Overloaded: true},
 	} {
-		if evidenceUnsound(ev, true, "") == "" {
+		if host.ModalUnsound(ev, true, "") == "" {
 			t.Errorf("%s: cleared the gate", name)
 		}
 	}
-	if evidenceUnsound(good, false, "bad doc") == "" {
+	if host.ModalUnsound(good, false, "bad doc") == "" {
 		t.Error("an invalid document cleared the gate")
 	}
 	dir := t.TempDir()
