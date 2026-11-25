@@ -1119,6 +1119,12 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
   the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
   it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
+- **EVD-16 Native exclusion provenance in managed reports.** The managed Daytona collector uses the same
+  PRV-12 exclusion map as the native adapter and must preserve its `provider_terms` kind in the frozen manifest.
+  This selects no additional check, changes no observation, and gives skipped checks no measured or conclusive
+  credit. SCR-2's existing provider policy decides category applicability; this does not turn exclusions into
+  passes or change the scoring algorithm. Do not assign provider-terms provenance to an operator's narrower
+  assessment exclusion merely because it names a provider endpoint.
 - **EVD-15 Metadata-only persistence marker.** The host may explicitly choose `symlink-v1` for PER-5 instead
   of the default regular file. The frozen planned path is `<root>/.sandprobe-link-<run id>`, distinct from the
   regular-file namespace. After pinning and verifying the surveyed root, create exclusively a symbolic link
@@ -3684,6 +3690,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
+| EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |
 | EVD-15 | `TestLinkMarkerSurvivesRenumberingWithoutFollowingTarget`, `TestLinkMarkerRejectsWrongTypeAndMetadata`, `TestLinkMarkerRejectsConcurrentReplacementAndUnsupportedRead`, `TestLinkMarkerCreationIsExclusiveAndRootBound`, existing `TestRecheckIdentityDiagnostics`, `TestPlanMetadataPersistenceMarker`, `TestMetadataMarkerStillRequiresResetAndVolumeProof`, and `TestMetadataMarkerChangesComparisonContext` |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |

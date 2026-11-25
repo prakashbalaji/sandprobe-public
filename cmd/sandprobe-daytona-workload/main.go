@@ -790,7 +790,7 @@ func workloadUploadAddresses(hosts []string, network string) (map[string]string,
 }
 
 func collectionOptions(sha string, contract *obs.WorkloadContract) host.Options {
-	return host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: host.DaytonaExclusions(), WorkloadContract: contract}
+	return host.Options{Mode: "exec", ProbeSHA256: sha, Excluded: host.DaytonaExclusions(), ExcludedKind: obs.SkipProviderTerms, WorkloadContract: contract}
 }
 func main() {
 	var o options
