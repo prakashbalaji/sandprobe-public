@@ -40,20 +40,24 @@ sbx rm my-check
 ## What to expect
 
 Docker builds this sandbox so that the microVM is the boundary, and gives the agent a lot inside it. Sandprobe scores
-what the agent can reach inside the box, so several categories read red by design:
+what the agent can reach inside the box, so several categories read red by design. What follows is what one local
+`shell` sandbox showed with `sbx` 0.54.1 and the `balanced` policy on 25 Nov 2026; another template, policy or `sbx`
+version can differ, so read your own report:
 
-- **Privilege.** The agent has passwordless `sudo` and setuid programs. Removing `/etc/sudoers.d/agent` (as root,
-  `sbx exec -u root <sandbox> rm /etc/sudoers.d/agent`) clears the sudo finding, as a rerun on 25 Nov showed; the
-  setuid finding stays.
+- **Privilege.** Docker's docs say the agent runs "as a non-root user with sudo privileges". In the `shell` template
+  the rule was `/etc/sudoers.d/agent`, and setuid programs were present too. Removing that file as root
+  (`sbx exec -u root <sandbox> rm /etc/sudoers.d/agent`) cleared the sudo finding on a rerun; the setuid finding
+  stayed.
 - **Containment.** The agent can reach the sandbox's own Docker daemon socket, which Docker provides on purpose.
 - **Secrets.** Credential-shaped names such as `GH_TOKEN` can be in the agent's environment. Docker's
   [credentials page](https://docs.docker.com/ai/sandboxes/configuration/credentials/) says that when its proxy manages
   a credential "the sandbox sees only a sentinel value". Sandprobe never reads a value, so it can't tell a sentinel
   from a key and reports the name.
-- **Exfiltration can't go green.** Outbound TCP goes through Docker's proxy on your machine, which accepts the
-  connection and then applies your network policy. A connection the proxy accepted isn't a refusal, so Sandprobe
-  reports HTTPS and TCP 22, 80 and 8080 as unproven, not blocked. Outbound UDP is off by default, and DNS goes through
-  Docker's resolver.
+- **Exfiltration didn't go green.** Docker's docs say all outbound TCP passes through a proxy on your machine that
+  enforces network policy. In this run the connections to the canary were accepted and nothing reached it, and a
+  connection that was accepted isn't a refusal, so Sandprobe reported HTTPS and TCP 22, 80 and 8080 as unproven, not
+  blocked. Expect the same wherever that proxy accepts first. Docker's docs also say outbound UDP is off by default and
+  DNS goes through the sandbox's resolver.
 - **Cloud access** reads "Not tested" with the commands above, which name neither `-provider` nor
   `-provider-endpoints`.
 

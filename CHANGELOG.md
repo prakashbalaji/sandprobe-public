@@ -6,7 +6,8 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 ## Unreleased
 
 - A guide for [Docker Sandboxes](docs/providers/docker-sandboxes.md): `run exec` through `sbx exec`, with no new code.
-  It says which categories read red by Docker's design, and why Exfiltration can't go green through Docker's proxy.
+  It says which categories read red by Docker's design, and why Exfiltration stayed unproven through Docker's proxy
+  in the one sandbox checked (`sbx` 0.54.1, the `shell` template).
 
 ## 0.3.7 (2026-11-25)
 
