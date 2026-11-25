@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-// UX-8: -theme reaches the page, and with none the page is auto, which follows the viewer's system. A value that
-// isn't a palette, the retired modern or a guess such as dark, renders auto too.
+// UX-8: -theme reaches the page, and with none the page is auto, which follows the viewer's system. dark is another
+// name for graphite, and the page says graphite. A value that isn't a palette, the retired modern included, renders auto.
 func TestThemeFlag(t *testing.T) {
 	abs, _ := filepath.Abs("../../demo/reports/hardened.json") // a public report from the demo's Docker box
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{{nil, "auto"}, {[]string{"-theme", "auto"}, "auto"}, {[]string{"-theme", "light"}, "light"}, {[]string{"-theme", "graphite"}, "graphite"},
-		{[]string{"-theme", "mission"}, "mission"}, {[]string{"-theme", "modern"}, "auto"}, {[]string{"-theme", "dark"}, "auto"}} {
+		{[]string{"-theme", "mission"}, "mission"}, {[]string{"-theme", "dark"}, "graphite"}, {[]string{"-theme", "modern"}, "auto"}, {[]string{"-theme", "night"}, "auto"}} {
 		pages := filepath.Join(t.TempDir(), "pages")
 		var out, errb bytes.Buffer
 		if code := run(append([]string{"scorecard", abs, "-out", pages}, tc.args...), &out, &errb); code != 0 {
