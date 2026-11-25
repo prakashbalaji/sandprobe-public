@@ -3,6 +3,12 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- A guide for [Docker Sandboxes](docs/providers/docker-sandboxes.md): `run exec` through `sbx exec`, with no new code.
+  It says which categories read red by Docker's design, and why Exfiltration stayed unproven through Docker's proxy
+  in the one sandbox checked (`sbx` 0.54.1, the `shell` template).
+
 ## 0.3.7 (2026-11-25)
 
 - `sandprobe run modal -y` is built in. It makes one Modal Sandbox with Modal's defaults in the workspace
