@@ -486,6 +486,10 @@ func TestPlainEnglishNeverOverclaims(t *testing.T) {
 		strings.Contains(decodeSeccomp(0), "disabled") {
 		t.Error("an absent or invalid no_new_privs or seccomp value must read unknown, and seccomp 0 never as disabled")
 	}
+	var bare obs.Identity // a report with no seccomp field: the wire can't tell it from 0, and the page claims neither
+	if err := json.Unmarshal([]byte(`{"cap_eff":"0"}`), &bare); err != nil || decodeSeccomp(bare.Seccomp) != "no filter reported (0)" {
+		t.Errorf("an absent seccomp field reads %q (%v)", decodeSeccomp(bare.Seccomp), err)
+	}
 	const unrecognized = "Sandbox · provider not recognized"
 	for _, p := range []string{"docker", "aws-nitro", "modal", "sprites", "daytona", "e2b", "vercel", "cloudflare", "baseten",
 		"exe.dev", "boat", "exec", "recipe"} {

@@ -12,8 +12,9 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   nothing proves it closed) or `not applicable`. "What to fix" lists failures by severity, and everything else folds
   under "Other checks". Each result is explained in plain English from the catalog: what was blocked, what was absent,
   and for a check that found nothing, that this proves nothing. A sign that isn't confirmed says so. "Run details"
-  decodes the process's capabilities, `no_new_privs` and seccomp mode into words; a value that is missing or can't be
-  read shows as unknown. The three palettes, `-theme`, print and the embedded JSON are unchanged in kind, and scoring
+  decodes the process's capabilities, `no_new_privs` and seccomp mode into words. A capability mask or `no_new_privs`
+  that is missing or can't be read shows as unknown; a seccomp mode of 0, which a report can't tell from one the probe
+  never reported, shows as "no filter reported (0)". The three palettes, `-theme`, print and the embedded JSON are unchanged in kind, and scoring
   hasn't changed: the same report gets the same score (SCR-2, SCR-3, UX-8).
 
 - The sentences a JSON report carries in `statement`, `boundary`, `lead` and `limits.not_tested` are reworded in plain
