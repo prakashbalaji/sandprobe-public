@@ -24,7 +24,7 @@ import (
 )
 
 // Version is Sandprobe's own version.
-const Version = "0.3.3"
+const Version = "0.3.4"
 
 // OUT-4's exit codes.
 const (
