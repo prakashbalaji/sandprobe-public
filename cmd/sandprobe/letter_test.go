@@ -22,11 +22,15 @@ func noLetter(d report.Doc) report.Doc {
 // A letter grade in any output: the word beside a letter, the old field names, or a bare letter as a JSON value.
 var letterShown = regexp.MustCompile(`(?i)\bgrade\s+"?[ABCDF]\b|"letter"|reported_grade|saved grade|"[ABCDF]"`)
 
-// GRD-1, ANL-1, ANL-2, CAL-3 and CMP-1: no offline command prints or copies a saved report's letter, in text, in JSON
-// or in the page -out re-renders. Each older report (sandprobe/1, with its letter) gives byte for byte the output of
-// the same report as a run writes it now (sandprobe/6, no letter), so the letter decides nothing; and one against the
-// other compares as unchanged.
+var reportData = regexp.MustCompile(`(?s)<script id="report-data" type="application/json">(.*?)</script>`)
+
+// GRD-1, ANL-1, ANL-2, CAL-3, CMP-1 and FBK-3: no offline command prints or copies a saved report's letter, in text,
+// in JSON, in feedback's preview or in the page -out re-renders. Each older report (sandprobe/1, with its letter)
+// gives byte for byte the output of the same report as a run writes it now (sandprobe/6, no letter), so the letter
+// decides nothing; and one against the other compares as unchanged.
 func TestNoLetterInOfflineOutput(t *testing.T) {
+	pinGH(t, "absent") // feedback previews only: no gh, nothing sent
+	body := writeBody(t, plainBody)
 	files, _ := filepath.Glob("../../demo/reports/*.json")
 	more, _ := filepath.Glob("../../test/reports/*.json")
 	files = append(files, more...)
@@ -78,7 +82,21 @@ func TestNoLetterInOfflineOutput(t *testing.T) {
 			strings.Contains(mixed.String(), `"declared_configuration"`) {
 			t.Errorf("%s against its sandprobe/6 form: exit %d, want %d:\n%s", old, code, want, mixed.String())
 		}
-		// SCR-3: the page -out re-renders embeds the report without its letter, whichever form it was saved in.
+		// FBK-3: feedback's preview of a report's summary, which is all it would send.
+		var previews [2]fbRun
+		for i, path := range []string{old, now} {
+			previews[i] = fbIn(t, "", nil, "bug", "-title", "a summary", "-report", path, "-body-file", body, "-o", "json")
+			if s := previews[i].stdout + previews[i].stderr; previews[i].code != exitApproval || !strings.Contains(s, "### Report summary") || letterShown.MatchString(s) {
+				t.Errorf("%s: feedback's preview: exit %d, a letter %q:\n%s", path, previews[i].code, letterShown.FindString(s), s)
+			}
+		}
+		if previews[0] != previews[1] {
+			t.Errorf("%s: feedback previews the older report and its sandprobe/6 form differently", old)
+		}
+		// SCR-3 and AGT-6: the page -out re-renders embeds the report as sandprobe/6 without its letter, whichever
+		// form it was saved in, and scorecard reads that embedded report back to the same card.
+		var card bytes.Buffer
+		run([]string{"scorecard", old, "-o", "json"}, &card, &errs)
 		for _, path := range []string{old, now} {
 			dir := t.TempDir()
 			var out, errs bytes.Buffer
@@ -88,8 +106,17 @@ func TestNoLetterInOfflineOutput(t *testing.T) {
 				t.Fatalf("%s: pages %v: %s", path, pages, errs.String())
 			}
 			page, _ := os.ReadFile(pages[0])
-			if !bytes.Contains(page, []byte(`"grade":{`)) || bytes.Contains(page, []byte(`"letter"`)) {
-				t.Errorf("%s: the re-rendered page's JSON carries a letter, or no grade", path)
+			data := reportData.FindSubmatch(page)
+			if data == nil || !bytes.Contains(data[1], []byte(`"schema":"sandprobe/6"`)) || !bytes.Contains(data[1], []byte(`"grade":{`)) || bytes.Contains(page, []byte(`"letter"`)) {
+				t.Fatalf("%s: the re-rendered page's JSON carries a letter, an older version, or no grade", path)
+			}
+			embedded := filepath.Join(dir, "embedded.json")
+			if err := os.WriteFile(embedded, data[1], 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out.Reset()
+			if code := run([]string{"scorecard", embedded, "-o", "json"}, &out, &errs); code == exitUsage || out.String() != card.String() {
+				t.Errorf("%s: the page's embedded report doesn't read back to the same card: exit %d\n%s%s", path, code, out.String(), errs.String())
 			}
 		}
 	}

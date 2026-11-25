@@ -327,8 +327,9 @@ func TestNoLetterGrade(t *testing.T) {
 				if m := gradeRE.FindString(text); m != "" || letter != "" && strings.Contains(text, ">"+letter+"<") {
 					t.Errorf("%s, %s: the page shows a letter grade (%q)", name, theme, m)
 				}
-				if data := dataRE.FindString(p); !strings.Contains(data, `"grade":{`) || strings.Contains(data, `"letter"`) {
-					t.Errorf("%s, %s: the embedded JSON carries a letter, or no grade", name, theme)
+				if data := dataRE.FindString(p); !strings.Contains(data, `"grade":{`) || strings.Contains(data, `"letter"`) ||
+					!strings.Contains(data, `"schema":"sandprobe/6"`) {
+					t.Errorf("%s, %s: the embedded JSON carries a letter, an older version, or no grade", name, theme)
 				}
 			}
 		}

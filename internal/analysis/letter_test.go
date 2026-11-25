@@ -1,8 +1,12 @@
 package analysis
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -17,6 +21,17 @@ func asV6(doc map[string]any) {
 	delete(doc["grade"].(map[string]any), "letter")
 }
 
+// nitroContract gives a report's tree RUN-17's host-controller contract, on aws-nitro, as sandprobe/3 added it.
+func nitroContract(doc, manifest map[string]any) {
+	doc["run"].(map[string]any)["provider"] = "aws-nitro"
+	manifest["workload_contract"] = &obs.WorkloadContract{Schema: "sandprobe.workload-contract/3", Profile: obs.WorkloadProfile,
+		Provider: "aws-nitro", IdentityMode: "host_controller_no_guest_credentials", AgentUID: 10001, AgentGID: 10001,
+		ManagedRunID: strings.Repeat("a", 16), BoxID: manifest["BoxID"].(string),
+		Image: "registry.example/agent@sha256:" + strings.Repeat("b", 64), ImageContentVerified: true,
+		ConfigSHA256: strings.Repeat("c", 64), IdentityPolicySHA256: strings.Repeat("d", 64), AgentHomeSHA256: strings.Repeat("e", 64),
+		ProtectedDevice: 3, ProtectedInode: 4}
+}
+
 // AGT-6, ANL-1 and GRD-1: sandprobe/1 to sandprobe/5 still read, each exactly the version its fields need and with its
 // letter, checked as before; sandprobe/6 carries no letter in any form. Under sandprobe/6 no version says which earlier
 // fields a report carries, so each one's own rule is what refuses a forged one.
@@ -27,13 +42,8 @@ func TestLetterMatchesSchema(t *testing.T) {
 	contract := func(provider string) func(d, m map[string]any, c []any) {
 		return func(d, m map[string]any, c []any) {
 			asV6(d)
+			nitroContract(d, m)
 			d["run"].(map[string]any)["provider"] = provider
-			m["workload_contract"] = &obs.WorkloadContract{Schema: "sandprobe.workload-contract/3", Profile: obs.WorkloadProfile,
-				Provider: "aws-nitro", IdentityMode: "host_controller_no_guest_credentials", AgentUID: 10001, AgentGID: 10001,
-				ManagedRunID: strings.Repeat("a", 16), BoxID: m["BoxID"].(string),
-				Image: "registry.example/agent@sha256:" + strings.Repeat("b", 64), ImageContentVerified: true,
-				ConfigSHA256: strings.Repeat("c", 64), IdentityPolicySHA256: strings.Repeat("d", 64), AgentHomeSHA256: strings.Repeat("e", 64),
-				ProtectedDevice: 3, ProtectedInode: 4}
 		}
 	}
 	for name, tc := range map[string]struct {
@@ -175,6 +185,94 @@ func TestSavedLetterIsIgnored(t *testing.T) {
 		}
 		if p := Summarize(old); p.Schema != "sandprobe.profile/2" || a.Schema != "sandprobe.assessment/2" || a.Coverage.Schema != p.Schema {
 			t.Errorf("%s: output versions %s, %s", path, p.Schema, a.Schema)
+		}
+	}
+}
+
+var reportData = regexp.MustCompile(`(?s)<script id="report-data" type="application/json">(.*?)</script>`)
+
+// SCR-3, OUT-2 and AGT-6: the page -out re-renders from an older report embeds a report this reader takes: the saved
+// one as sandprobe/6, with no letter and nothing else changed. It holds for each earlier version and the fields that
+// version added, and for an invalid run, which stays invalid with its reason. Without the new version the embedded
+// document would declare a version that requires the letter it no longer has, and be refused.
+func TestReRenderedPageReadsBack(t *testing.T) {
+	tree := func(edit func(doc, manifest map[string]any)) []byte {
+		return edited(t, func(d, m map[string]any, _ []any) { edit(d, m) })
+	}
+	declaredV5, _ := json.Marshal(declaredTree(t))
+	legacy := func(d report.Doc, letter string) []byte { // a run exec report with attestations, as sandprobe/2 wrote it
+		d.Schema, d.Grade.Letter = report.SchemaSkipKinds, &letter
+		b, _ := json.Marshal(d)
+		return b
+	}
+	saved := map[string]struct {
+		raw    []byte
+		schema string
+	}{
+		"v2, skip kinds":        {tree(asV2), report.SchemaSkipKinds},
+		"v2, attested":          {legacy(attestedRun(t, false), "F"), report.SchemaSkipKinds},
+		"v2, invalid":           {legacy(attestedRun(t, true), ""), report.SchemaSkipKinds},
+		"v3, RUN-17's contract": {tree(func(d, m map[string]any) { d["schema"] = report.SchemaHostController; nitroContract(d, m) }), report.SchemaHostController},
+		"v4, EVD-10's protocol": {tree(func(d, m map[string]any) {
+			d["schema"], m["canary_tcp80_protocol"] = report.SchemaCanaryHTTP, canary.HTTPMarkerV1
+		}), report.SchemaCanaryHTTP},
+		"v5, a declared provider": {declaredV5, report.SchemaDeclaredProvider},
+		"v6, as a run writes it":  {tree(func(d, m map[string]any) { asV6(d) }), report.SchemaNoLetter},
+	}
+	for _, pat := range []string{"../../demo/reports/*.json", "../../test/reports/*.json"} {
+		files, _ := filepath.Glob(pat)
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved["v1, "+f] = struct {
+				raw    []byte
+				schema string
+			}{b, report.Schema}
+		}
+	}
+	if len(saved) < 13 {
+		t.Fatalf("saved reports: %d", len(saved))
+	}
+	for name, tc := range saved {
+		old, err := Parse(tc.raw)
+		if err != nil || old.Schema != tc.schema || (old.Grade.Letter != nil) != (tc.schema != report.SchemaNoLetter) {
+			t.Fatalf("%s: the saved report isn't a %s one this reader takes: %v", name, tc.schema, err)
+		}
+		if invalid := name == "v2, invalid"; invalid == old.Grade.Valid || invalid && (old.Grade.Invalid == "" || *old.Grade.Letter != "") {
+			t.Fatalf("%s: valid %v, reason %q", name, old.Grade.Valid, old.Grade.Invalid)
+		}
+		for _, theme := range []string{"graphite", "mission"} {
+			page, err := report.SavedHTML(*old, theme)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := reportData.FindSubmatch(page)
+			if m == nil {
+				t.Fatalf("%s: the page has no report-data", name)
+			}
+			got, err := Parse(m[1])
+			if err != nil {
+				t.Errorf("%s, %s: the page's embedded report is refused: %v", name, theme, err)
+				continue
+			}
+			want := *old
+			want.Schema, want.Grade.Letter = report.SchemaNoLetter, nil
+			a, _ := json.Marshal(got)
+			b, _ := json.Marshal(want)
+			if got.Schema != report.SchemaNoLetter || got.Grade.Letter != nil || bytes.Contains(m[1], []byte(`"letter"`)) || !bytes.Equal(a, b) {
+				t.Errorf("%s, %s: the embedded report declares %s, or differs from the saved one in more than the version and the letter", name, theme, got.Schema)
+			}
+			if got.Grade.Valid != old.Grade.Valid || got.Grade.Invalid != old.Grade.Invalid || got.Grade.Complete != old.Grade.Complete {
+				t.Errorf("%s, %s: validity changed: %+v", name, theme, got.Grade)
+			}
+			if !bytes.Contains(page, []byte("report schema "+report.SchemaNoLetter+" ")) {
+				t.Errorf("%s, %s: the footer doesn't name the embedded report's version", name, theme)
+			}
+		}
+		if old.Schema != tc.schema || (old.Grade.Letter != nil) != (tc.schema != report.SchemaNoLetter) {
+			t.Errorf("%s: rendering changed the caller's report", name)
 		}
 	}
 }
