@@ -258,7 +258,7 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
 
 Flags: -o json for agents (AGT-2); -y to approve the plan; -out <dir> for the reports;
 -min <0..6|full> to exit 6 below a green-category count (category count only, not severity or proof coverage;
-use sandprobe compare or -o json for regression gating in CI); -theme graphite|mission; -allow-local-proxy;
+use sandprobe compare or -o json for regression gating in CI); -theme auto|light|graphite|mission; -allow-local-proxy;
 SANDPROBE_NO_KEYS=1 to skip post-run keys on an interactive terminal.
 Runs use the hosted canary by default; -canary-url <url> -canary-pin <pin> names a public canary you run, and
 -canary <state file> an operator canary from deploy/canary.sh, used only when named. A canary flag sets every
