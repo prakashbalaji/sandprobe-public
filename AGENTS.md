@@ -37,6 +37,7 @@ Every test runs on public data: saved reports come from `demo/reports` and `test
 | `internal/host` | provider adapters, `run exec`'s transport (`exec.go`) and the recipe runner (`recipe.go`) |
 | `internal/report` | JSON (OUT-1) and a self-contained HTML page (OUT-2) |
 | `internal/catalog` | the check catalog and each check's guide |
+| `internal/fix` | `sandprobe fix`'s action table: each fix, its trigger checks, and the snippets a rerun proved per platform (FIX-1 to FIX-9) |
 | `recipes/` | shipped recipes: POSIX sh files that create, reach and delete a box (RCP-1 to RCP-4) |
 | `deploy/` | `canary.sh` (EC2 and Cloudflare DNS) and `eks.sh` (EKS Auto Mode for AWS Nitro); both need `PROFILE`, your AWS CLI profile |
 | `test/` | Docker fixtures, each with an expected result, and the probe and calibration scripts |

@@ -42,6 +42,53 @@ bin/sandprobe-poc poc modal cleanup -out <dir> -y
 has a 15-minute timeout as a spend backstop and is terminated by its ID. The built images stay until `cleanup`, and
 the App stays, named in the report.
 
+## Probe your own Modal sandbox with run exec
+
+You don't need the proof of concept to probe a sandbox of your own. `run exec` reaches a Modal sandbox through any
+command of yours that opens `sh` in it and pipes stdin and stdout, such as a short script that calls the SDK's
+`Sandbox.exec("sh")` on a sandbox you created. Create the sandbox yourself, in your own workspace, and terminate it
+by the ID your create returned. A worked example script follows in a later release.
+
+```sh
+sandprobe run exec -as root -y -out round-0 -- <your command that opens sh in the sandbox>
+sandprobe fix round-0/*.json -platform modal            # you name the platform; fix never guesses it
+```
+
+Then apply the top action to how you create and run the sandbox, run again into `round-1` (with `-as agent` once the
+agent has its own user), and `sandprobe compare round-0/*.json round-1/*.json`. It prints `Score: 0/6 → 3/6` and what
+"Got better"; DNS and UDP 53 under `block_network=True` show as "No longer found, but not proven", which isn't a fix.
+
+`run exec` keeps SEC-4, EGR-3, AMP-6 and AMP-7 off, since each would contact an endpoint Modal owns. Leave them off:
+on Modal they are outside Sandprobe's reviewed scope. Without a declared provider, Cloud access reads "Not tested",
+and `fix` lists it as not an action for an agent. When you, the person, declare the provider yourself with
+`run exec -provider modal` (PRV-17, [exec.md](exec.md)), that scope keeps them off and Cloud access reads not
+applicable; an agent never adds the flag. `fix` still takes its platform only from `-platform`, never from the
+report's declared provider.
+
+### The fixes proven on Modal
+
+Three rounds on 24 November 2026, one throwaway sandbox per round (python:3.12-slim-bookworm), each rerun through
+`run exec` and compared with the round before (FIX-4):
+
+| Round | `fix` action | The change | Score |
+|-|-|-|-|
+| 0 | | Modal's defaults: root, network open | 0/6 |
+| 1 | `run-as-user` | In the image, `useradd -m -u 1000 -s /bin/bash agent`; run the agent's commands through `setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=-all --ambient-caps=-all --no-new-privs <cmd>` | 3/6, with `block-network`: Exfiltration, Containment and Privilege turn green |
+| 1 | `block-network` | `modal.Sandbox.create(..., block_network=True)` | |
+| 2 | `clean-env` | Add `--reset-env` to that `setpriv`, so the agent starts with a minimal environment | 4/6, with `protect-home`: Persistence turns green, and SEC-1 clears |
+| 2 | `protect-home` | In the image, `chown -R root:root /home/agent; chmod 0755 /home/agent; mkdir -p /work; chown agent:agent /work`; `workdir="/work"` on exec | |
+
+What it costs, and what stays:
+
+- `block_network=True` also cuts the agent off from its model API. Its model calls must go through something outside
+  the sandbox.
+- DNS and UDP 53 then have no receipt, which isn't proof, so Exfiltration reads green with "not proven: DNS, UDP 53".
+- Modal's domain and CIDR allowlists weren't tested in this loop, so nothing here says how they treat DNS.
+- SEC-2 stayed red in every round, because the probe then counted the shell `run exec` started as another of the
+  agent's processes. `run exec` now runs Sandprobe's own wrapper there and leaves it out (LNC-1 to LNC-5), so on a rerun
+  SEC-2 should reflect only the box's own processes; these rounds predate that.
+- Cloud access stays "Not tested", as above.
+
 ## What's skipped, and why
 
 | Check | Why |
