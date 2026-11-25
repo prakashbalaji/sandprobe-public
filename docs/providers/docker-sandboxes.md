@@ -25,7 +25,8 @@ sandprobe plan exec -as agent -- sbx exec -i <sandbox> sh
 sandprobe run exec -as agent -y -- sbx exec -i <sandbox> sh
 ```
 
-Docker's agent templates run the agent as `agent` (uid 1000), and `sbx exec` runs as that user unless you pass `-u`.
+In the `shell` template the agent is `agent` (uid 1000), and `sbx exec` ran as that user, as it does unless you
+pass `-u`. If `-as agent` stops the run, check `sbx exec <sandbox> id` for your template's user.
 To check a fresh sandbox rather than one an agent has used, make one without a workspace from your machine, check it,
 then remove it yourself:
 
