@@ -59,3 +59,21 @@ func TestDaytonaOrganizationPolicyIsOptionalAndBounded(t *testing.T) {
 		t.Fatal("gone sandbox readback", e)
 	}
 }
+
+func TestDaytonaOrganizationPolicyFailureReasons(t *testing.T) {
+	for _, reason := range []string{"authentication_failed", "endpoint_unavailable", "rate_limited", "request_rejected", "service_unavailable", "request_timeout", "transport_unavailable", "response_schema_invalid"} {
+		b, _ := workloadDaytonaFixture(t)
+		calls := 0
+		b.client.runtime = func(_ context.Context, in map[string]any) ([]byte, error) {
+			calls++
+			if in["op"] != "organization_network_policy" || in["id"] != b.ID() || in["organization"] != b.journal.Organization {
+				t.Fatal("unbound policy read")
+			}
+			return json.Marshal(map[string]string{"result": "unknown", "reason": reason})
+		}
+		e := b.OrganizationNetworkPolicy(context.Background(), strings.Repeat("a", 16), strings.Repeat("b", 64))
+		if calls != 1 || e.Result != "unknown" || e.Reason != reason || e.LimitedNetworkEgress != nil || e.EnforcementObserved {
+			t.Fatalf("failure altered policy semantics: %+v", e)
+		}
+	}
+}

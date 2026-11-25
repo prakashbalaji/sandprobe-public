@@ -36,7 +36,9 @@ func ValidateOrganizationNetworkPolicy(e OrganizationNetworkPolicyEvidence) erro
 		return bad
 	}
 	switch e.Reason {
-	case "binding_unverified", "permission_denied", "readback_unavailable", "response_mismatch":
+	case "binding_unverified", "permission_denied", "readback_unavailable", "response_mismatch",
+		"authentication_failed", "endpoint_unavailable", "rate_limited", "request_rejected",
+		"service_unavailable", "request_timeout", "transport_unavailable", "response_schema_invalid": // EVD-14
 		return nil
 	}
 	return bad

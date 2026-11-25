@@ -1119,6 +1119,12 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   reason, never organization identifiers or raw SDK text. Permission, binding and schema failures do not stop
   the workload. This is configuration readback, not per-flow denial proof or full effective-policy/tier proof;
   it changes no guest observation, pass/fail, exposure score or configuration eligibility requirement.
+- **EVD-14 Bounded policy-readback diagnostics.** EVD-11's optional organization read may report only fixed
+  failure categories: authentication, permission, endpoint availability, rate limit, request rejection, service
+  availability, timeout, transport or response-schema failure; other errors retain `readback_unavailable`.
+  No exception text, response body, URL, headers, organization data or credentials enter the artifact. Binding
+  must still be verified before the single exact-ID read; no retries, fallback endpoint, policy mutation or
+  grading change. Every failure remains unknown with no inferred policy value or enforcement claim.
 - **EVD-12 Typed block-device permission evidence.** AMP-8.blk may test only a resolved block-device node
   pinned with `O_PATH`; regular files, character devices, other types and paths that cannot be pinned remain
   unknown, never a block-device finding or negative proof. Read permission uses
@@ -3660,6 +3666,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | RUN-14 | existing managed lifecycle, request-budget and original-ID cleanup regressions; retained continuation provenance and assessment |
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
+| EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-12 | Linux synthetic block/character node metadata fixtures, regular/FIFO/missing type rejection, pinned-call replacement/retargeting guards, unsupported-call refusal and existing permission twins |
 | EVD-13 | `TestBlockDevicePaths`, `TestPlanBlockDevicePaths`, `TestExecuteRejectsInvalidBlockDevicePaths`, `TestExecBlockDevicePaths`, `TestDeclaredBlockDevices`, and `TestGrades` scoped-out declared-target rejection |
 | EVD-10 | explicit protocol planning/rejection and same-pin capability tests; signed control compatibility; probe HTTP/legacy selection; report schema/reader and changed-configuration tests; existing kernel/receipt grading invariance; managed HTTP capability failure stops before paid receiver/provider creation |
