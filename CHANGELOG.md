@@ -3,6 +3,15 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- The web report (`OUT-2` and `sandprobe scorecard -out`) now opens with a sharp hairline scorecard sheet that calls out
+  what sandbox service or runtime is under test alongside the box name, Linux user ID, run timestamp, probe version, and
+  trust boundary, paired with a prominent score, two-tone verdict headline, hairline result ledger, and seamless 3×2
+  category matrix. Check outcomes, indicator sign notes, capability bitmasks, `no_new_privs`, `seccomp`, and scope
+  boundaries are written in plain English while preserving Sandprobe's "no false passes" guarantees (`SCR-2`, `SCR-3`,
+  `UX-8`).
+
 ## 0.3.4 (2026-11-24)
 
 - `sandprobe run -recipe <file>` and `sandprobe plan -recipe <file>` run a recipe of your own: a small shell file,

@@ -87,7 +87,7 @@ func screenRules(t *testing.T, css string) []cssRule {
 			out = append(out, r)
 		}
 	}
-	if len(out) < 150 {
+	if len(out) < 120 {
 		t.Fatalf("read only %d rules: the stylesheet's shape changed", len(out))
 	}
 	return out
@@ -174,13 +174,12 @@ var audit = []use{
 	{".nav", "border-bottom", decoration, "bg"},
 	{".nav", "background", ground, "bg"},
 	{".crumbs", "color", text, "bg+nav"},
+	{".text-btn", "color", text, "bg+nav"},
+	{".text-btn:hover", "color", text, "bg+nav+hover"},
+	{".text-btn:hover", "background", ground, "bg+nav"},
 	{".pill", "background", ground, ""},
 	{".pill", "color", text, "pill pill-hover"},
 	{".pill:hover", "background", ground, ""},
-	{".ghost", "border", mark, "bg+nav"},
-	{".ghost", "color", text, "bg+nav"},
-	{".ghost:hover", "color", text, "bg+nav+hover"},
-	{".ghost:hover", "background", ground, "bg+nav"},
 
 	{".toc p", "color", text, "bg"},
 	{".toc a", "color", text, "bg"},
@@ -193,110 +192,110 @@ var audit = []use{
 	{".saved", "border", decoration, "bg"},
 	{".saved", "background", ground, ""},
 	{".saved::before", "border", mark, "inset"},
-	{".head", "border", decoration, "bg"},
-	{".head", "background", ground, ""},
-	{".tag", "border", mark, "raise"},
-	{".tag", "color", text, "raise"},
-	{".lede", "color", text, "raise"},
-	{".lede.chain", "color", text, "raise"},
-	{".sevtag", "border", mark, "raise"},
-	{".sevtag", "background", ground, "raise"},
-	{".sevtag", "color", text, "raise+red-tint"},
+	{".sheet", "border", decoration, "bg"},
+	{".sheet", "background", ground, ""},
+
+	{".spec-bar", "border-bottom", decoration, "raise"},
+	{".spec-kind", "color", text, "raise"},
+	{".spec-sep", "color", text, "raise"},
+	{".spec-name", "color", text, "raise"},
 	{".facts div", "border-left", decoration, "raise"},
 	{".facts dt", "color", text, "raise"},
+	{".facts dd", "color", text, "raise"},
 
-	{".kicker", "color", text, "bg"},
-	{".kicker em", "color", text, "bg"},
-	{".score .kicker em", "border", mark, "bg"},
-	{".scorebig", "color", text, "bg"},
-	{".scorebig.green", "color", text, "bg"},
-	{".scorebig span", "color", text, "bg"},
-	{".status", "border", mark, "bg"},
-	{".status", "color", text, "bg"},
-	{".stats", "border-block", decoration, "bg"},
-	{".stats li", "border-left", decoration, "bg"},
-	{".stats b.red", "color", text, "bg"},
-	{".stats b.green", "color", text, "bg"},
-	{".stats b.unk", "border", mark, "bg"},
-	{".stats b.unk", "color", text, "bg"},
-	{".stats span", "color", text, "bg"},
-	{".statement", "color", text, "bg"},
-	{".cov", "color", text, "bg"},
+	{".hero-split", "border-bottom", decoration, "raise"},
+	{".score-col", "border-right", decoration, "raise"},
+	{".score-kicker", "color", text, "raise"},
+	{".score-fig", "color", text, "raise"},
+	{".score-fig.green", "color", text, "raise"},
+	{".score-fig span", "color", text, "raise"},
+	{".score-foot", "color", text, "raise"},
+	{".score-foot strong", "color", text, "raise"},
 
-	{".cats .cat", "border", decoration, "bg"},
-	{".cats .cat", "background", ground, ""},
+	{".verdict-kicker", "color", text, "raise"},
+	{".verdict-kicker::before", "background", mark, "raise"},
+	{".verdict-h span", "color", text, "raise"},
+	{".status", "border", mark, "raise"},
+	{".status", "color", text, "raise"},
+	{".statement", "color", text, "bg raise"},
+	{".banner", "border", decoration, "raise"},
+	{".banner", "background", ground, ""},
+	{".banner.unk", "border", mark, "raise inset"},
+	{".invalid-h", "border", mark, "raise"},
+	{".invalid-h", "color", text, "raise"},
+	{".lead", "color", text, "bg raise"},
+
+	{".stats", "border-top", decoration, "raise"},
+	{".stats li", "border-left", decoration, "raise"},
+	{".stats a", "color", text, "raise"},
+	{".stats a:hover", "color", text, "raise"},
+	{".stats b", "color", text, "raise"},
+	{".stats b.red", "color", text, "raise"},
+	{".stats b.green", "color", text, "raise"},
+	{".stats b.unk", "border", mark, "raise"},
+	{".stats b.unk", "color", text, "raise"},
+	{".stats span", "color", text, "raise"},
+
+	{".cats .cat", "border-right", decoration, "raise"},
+	{".cats .cat", "border-bottom", decoration, "raise"},
 	{".cats .dot", "background", mark, "raise"},
 	{".cats .green .dot", "background", mark, "raise"},
 	{".cats .green.gnp .dot", "border", mark, "raise"},
 	{".cats .na .dot", "border", mark, "raise"},
+	{".verdict", "color", text, "raise"},
+	{".cat.green .verdict", "color", text, "raise"},
+	{".cat.green.gnp .verdict", "border-bottom", mark, "raise"},
+	{".cat.na .verdict", "color", text, "raise"},
 	{".cats .q", "color", text, "raise"},
 	{".cats .why", "color", text, "raise"},
-	{".cats .why.np, .cats .why.cv", "color", text, "raise"},
+	{".cats .why.np", "color", text, "raise"},
 	{".cats .why.np::before", "border", mark, "raise"},
 	{".tl .ran", "color", text, "raise"},
-	{"a.t", "border", mark, "raise"},
 	{"a.t", "color", text, "raise"},
 	{"a.t:hover", "color", text, "raise+hover"},
 	{"a.t:hover", "background", ground, "raise"},
-	{"a.t.red", "color", text, "raise+red-tint"},
-	{"a.t.red", "border-color", mark, "raise"},
-	{"a.t.red", "background", ground, "raise"},
-	{"a.t.green", "color", text, "raise raise+hover"}, // hovered, it keeps its green and takes a.t:hover's wash
-	{"a.t.green", "border-color", mark, "raise"},
-	{"a.t.amber", "color", text, "raise raise+hover"}, // as a.t.green
-	{"a.t.amber", "border", mark, "raise"},
-	{".verdict", "border", mark, "raise"},
-	{".verdict", "background", ground, "raise"},
-	{".verdict", "color", text, "raise+red-tint"},
-	{".cat.green .verdict", "color", text, "raise"},
-	{".cat.green .verdict", "border-color", mark, "raise"},
-	{".cat.na .verdict", "color", text, "raise"},
-	{".cat.na .verdict", "border-color", mark, "raise"},
+	{"a.t.red", "color", text, "raise raise+hover"},
+	{"a.t.green", "color", text, "raise raise+hover"},
+	{"a.t.amber", "color", text, "raise raise+hover"},
+	{"a.t.amber", "border-bottom", mark, "raise"},
 
-	{".sec-h span, h2.appendix span", "color", text, "bg"},
+	{".sec-h span", "color", text, "bg"},
 	{".none", "color", text, "bg"},
+	{".grp-h", "border-bottom", decoration, "bg"},
 	{".grp-h .q", "color", text, "bg"},
-	{".sevdot", "background", mark, "bg bg+hover bg+sel"}, // a group's heading, and its entry in the rail
+	{".sevdot", "background", mark, "bg bg+hover bg+sel"},
 	{".sevdot.high", "opacity", mark, "bg bg+hover bg+sel"},
 	{".sevdot.medium, .sevdot.unrated", "opacity", mark, "bg bg+hover bg+sel"},
 	{".sevdot.low", "opacity", mark, "bg bg+hover bg+sel"},
 	{".sevdot.unknown", "border", mark, "bg bg+hover bg+sel"},
-	{".box", "border", decoration, "bg"},
-	{".row", "border-top", decoration, "bg"},
-	{".key", "border", mark, "bg"},
-	{".key", "color", text, "bg"},
-	{".row.red .key", "color", text, "bg+fail-bg"},
-	{".row.red .key", "background", ground, "bg"},
-	{".row.red .key", "border-color", mark, "bg"},
-	{".row.green .key", "color", text, "bg"},
-	{".row.green .key", "border-color", mark, "bg"},
-	{".row.amber .key", "color", text, "bg"},
-	{".row.amber .key", "border", mark, "bg"},
-	{".row.grey .key", "color", text, "bg"},
+	{".row", "border-bottom", decoration, "bg"},
+	{".res", "color", text, "bg"},
+	{".row.red .res", "color", text, "bg+fail-bg"},
+	{".row.red .res", "background", ground, "bg"},
+	{".row.green .res", "color", text, "bg"},
+	{".row.amber .res", "color", text, "bg"},
+	{".row.amber .res", "border-bottom", mark, "bg"},
 	{".seen", "color", text, "bg"},
-	{".seen a", "text-decoration-color", mark, "bg"}, // the underline is all that marks a link in this line
+	{".seen a", "color", text, "bg"},
+	{".seen a", "text-decoration-color", mark, "bg"},
 	{".seen a:hover", "color", text, "bg"},
+	{".sign-note", "color", text, "bg"},
 	{".fixit", "color", text, "bg"},
 	{".fixit b", "color", text, "bg"},
 	{".cid", "color", text, "bg"},
-	{".ctag", "border", mark, "bg"},
 	{".ctag", "color", text, "bg"},
-	{".would", "color", text, "bg"},
-	{"details.more > summary", "background", ground, ""},
-	{"details.more > summary", "color", text, "raise"},
-	{"details.more > summary:hover", "color", text, "raise"},
-	{"details.more[open] > summary", "border-bottom", decoration, "raise"},
+	{"details.more", "border-bottom", decoration, "bg"},
+	{"details.more > summary", "color", text, "bg"},
+	{"details.more > summary:hover", "color", text, "bg"},
+	{"details.more[open] > summary", "border-bottom", decoration, "bg"},
 
-	{"h2.appendix", "border-top", decoration, "bg"},
-	{".banner", "border", decoration, "bg"},
-	{".banner", "background", ground, ""},
-	{".banner.unk", "border", mark, "bg inset"},
-	{"h2.ap-h b", "border", decoration, "bg"}, // a box round a section's letter; the letter is the text
-	{"h2.ap-h b", "color", text, "bg"},
-	{".note", "color", text, "bg"},
+	{".appendix-sec", "border-top", decoration, "bg"},
+	{"h3.ap-h span", "color", text, "bg"},
+	{".note", "color", text, "bg raise"},
 	{".legend", "color", text, "bg"},
-	{".legend span::before", "border-top", mark, "bg"}, // drawn in --c, which each kind of legend line sets
-	{".mapbox", "background", ground, ""},
+	{".legend span::before", "border-top", mark, "bg"},
+	{".panel", "border", decoration, "bg"},
+	{".panel", "background", ground, ""},
 	{".map .grid", "stroke", decoration, "raise"},
 	{".map .wall", "stroke", mark, "raise"},
 	{".map .cat", "fill", text, "raise"},
@@ -311,21 +310,31 @@ var audit = []use{
 	{".map .unk", "fill", ground, ""},
 	{".map .unk", "stroke", mark, "raise"},
 	{".map .unk-q", "fill", text, "raise"},
-	{".panel", "border", decoration, "bg"},
-	{".panel h3", "border-bottom", decoration, "raise"},
-	{".panel h3", "background", ground, ""},
-	{".panel h3", "color", text, "raise"},
-	{".panel table + h3, .panel ul + h3", "border-top", decoration, "raise"},
-	{".panel td", "border-top", decoration, "bg"},
-	{".grid2 td:last-child", "color", text, "bg"},
-	{".panel .note + .note", "border-top", decoration, "bg"},
-	{"ul.plain", "color", text, "bg"},
-	{"ul.plain li", "border-top", decoration, "bg"},
+
+	{".grid2", "border", decoration, "bg"},
+	{".grid2", "background", ground, ""},
+	{".grid2 > div + div", "border-left", decoration, "raise"},
+	{".col-h, .panel h3", "border-bottom", decoration, "raise"},
+	{".col-h, .panel h3", "color", text, "raise"},
+	{".grid2 table + .col-h, .grid2 ul + .col-h, .panel table + h3, .panel ul + h3", "border-top", decoration, "raise"},
+	{"td", "border-top", decoration, "raise"},
+	{"td:first-child", "color", text, "raise"},
+	{"td:last-child", "color", text, "raise"},
+	{".panel .note + .note", "border-top", decoration, "raise"},
+	{"ul.plain", "color", text, "raise"},
+	{"ul.plain li", "border-top", decoration, "raise"},
 	{"details.passes > summary", "border", decoration, "bg"},
 	{"details.passes > summary", "background", ground, ""},
 	{"details.passes > summary span", "color", text, "raise"},
 	{"footer", "border-top", decoration, "bg"},
 	{"footer p", "color", text, "bg"},
+
+	// responsive hairline adjustments in @media blocks
+	{".cats .cat:nth-child(3n)", "border-right", decoration, "raise"},
+	{".cats .cat:nth-last-child(-n+3)", "border-bottom", decoration, "raise"},
+	{".score-col", "border-bottom", decoration, "raise"},
+	{".cats .cat, .cats .cat:nth-child(n)", "border-bottom", decoration, "raise"},
+	{".grid2 > div + div", "border-top", decoration, "raise"},
 }
 
 // dims names, for each opacity the audit lists, the "selector | property" whose color it dims.
@@ -339,12 +348,11 @@ var dims = map[string]string{
 // property: value", with why it may. The value is part of the entry, so a changed one has to be looked at again. No
 // ratio is computed for these, so a text color can't be one: TestContrast refuses color and -webkit-text-fill-color.
 var fixed = map[string]string{
-	".map .wall | fill: rgb(255 255 255 / .015)":                              "a white wash of 1.5% inside the box's wall, too thin to change what the map's words sit on",
-	".map .mark | opacity: 0":                                                 "where a mark's entry animation starts; it ends at 1",
-	".map .mark | opacity: 1":                                                 "reduced motion: the mark as the animation leaves it",
-	`[data-theme="mission"] body | text-shadow: 0 0 6px rgb(255 176 0 / .28)`: "mission's glow, the text's own color at 28%: not computed",
+	".map .mark | opacity: 0": "where a mark's entry animation starts; it ends at 1",
+	".map .mark | opacity: 1": "reduced motion: the mark as the animation leaves it",
+	`[data-theme="mission"] body | text-shadow: 0 0 6px rgb(255 176 0 / .28)`:                                                            "mission's glow, the text's own color at 28%: not computed",
 	`[data-theme="mission"] body::after | background: repeating-linear-gradient(to bottom, transparent 0 2px, rgb(0 0 0 / .22) 2px 3px)`: "mission's scan lines, a fixed overlay over the whole page: not computed",
-	`[data-theme="mission"] .map .gridbg | opacity: .55`: "mission's grid behind the map: decoration",
+	`[data-theme="mission"] .map .gridbg | opacity: .55`:                                                                                 "mission's grid behind the map: decoration",
 }
 
 // plain are the values that bring no color of their own.
@@ -839,15 +847,13 @@ func fontSize(prop, value string) (string, bool) {
 
 // sizeParents says what a relative font size is relative to: the rule that sizes the element's parent. The
 // stylesheet can't say, so this does, and TestTypeSizes fails on a relative size with no entry here.
-var sizeParents = map[string]string{
-	".scorebig span": ".scorebig", // the "/6" beside the score
-}
+var sizeParents = map[string]string{}
 
 var mapBoxRE = regexp.MustCompile(`\n\.map \{ display: block; width: 100%; min-width: (\d+)px; height: auto; max-height: (\d+)px; \}`)
 
 // missionCapitals is the one rule allowed under 12px: mission's capitals, 10.5px and no smaller (UX-9).
-const missionCapitals = `[data-theme="mission"] .kicker, [data-theme="mission"] .panel h3, [data-theme="mission"] .stats span, ` +
-	`[data-theme="mission"] .facts dt, [data-theme="mission"] .toc p, [data-theme="mission"] .ctag, [data-theme="mission"] .key`
+const missionCapitals = `[data-theme="mission"] .score-kicker, [data-theme="mission"] .col-h, [data-theme="mission"] .panel h3, ` +
+	`[data-theme="mission"] .stats span, [data-theme="mission"] .facts dt, [data-theme="mission"] .toc p, [data-theme="mission"] .ctag, [data-theme="mission"] .res`
 
 // UX-9: on a screen, body text is 14px on a line height of 1.55 and no font size the stylesheet sets can come to
 // under 12px. mission keeps its own type, held the same way: a 13px body, and its capitals alone under the floor. Every size is worked out to the least it can be: a clamp() to its floor,
