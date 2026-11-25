@@ -129,7 +129,7 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 | [Kubernetes, any cluster](docs/providers/kubernetes.md) | `run kubernetes`, a [recipe](recipes/kubernetes.sh) | Stable target |
 | [E2B](docs/providers/e2b.md), [Daytona](docs/providers/daytona.md), [Vercel Sandbox](docs/providers/vercel.md), [Cloudflare Sandbox](docs/providers/cloudflare.md), [Fly Sprites](docs/providers/sprites.md), [AWS Nitro on EKS](docs/providers/aws-nitro.md) | `run <provider>`, native adapters | Stable target |
 | [Baseten](docs/providers/baseten.md) | `run baseten`, a native adapter | Beta |
-| [Modal](docs/providers/modal.md) | a proof of concept (`make poc`), not in the release build | Beta |
+| [Modal](docs/providers/modal.md) | `run exec` through a [bridge script](examples/modal/bridge.py), on a sandbox of your own; the proof of concept (`make poc`) is not in the release build | Beta |
 | [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev, PRV-13), never represented as provider-written permission |
 
 The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/README.md) is the single source for
