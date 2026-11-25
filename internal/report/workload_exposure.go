@@ -104,6 +104,11 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 	if len(x.Rows) != len(Categories) {
 		return false
 	}
+	// SCR-7: validate first, build second. The coverage partition (every ID the category's own, each once, every list
+	// bounded by the category's size) is checked before any row is built, so a forged list costs only a linear pass.
+	if !validCardCoverage(x.Card) {
+		return false
+	}
 	green, applicable := 0, len(Categories)
 	for i, row := range x.Rows {
 		built, ok := cardRow(i, row, x.gradedInfo) // the stored row must equal a row buildRow makes from its own evidence (SCR-2)
@@ -117,5 +122,5 @@ func validWorkloadExposure(x WorkloadExposure) bool {
 			green++
 		}
 	}
-	return x.Score == green && x.Of == applicable && validCardCoverage(x.Card)
+	return x.Score == green && x.Of == applicable
 }

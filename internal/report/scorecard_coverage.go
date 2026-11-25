@@ -117,6 +117,11 @@ func validCardCoverage(card Card) bool {
 		if c == nil || c.Total != len(Categories[i].Checks) || row.NotApplicable && len(c.Skipped) != c.Total {
 			return false // SCR-2: a not-applicable row is one whose every check was skipped
 		}
+		// SCR-7: every list a card supplies is bounded by the category's size before any loop walks it.
+		if len(c.Proven)+len(c.Findings)+len(c.Unproven)+len(c.Unknown)+len(c.ScopedOut)+len(c.Skipped)+len(c.Missing) != c.Total ||
+			len(row.Found)+len(row.Unknown)+len(row.Unproven) > c.Total {
+			return false
+		}
 		seen := map[string]bool{}
 		for _, group := range [][]string{c.Proven, c.Findings, c.Unproven, c.Unknown, c.ScopedOut, c.Skipped, c.Missing} {
 			for _, id := range group {

@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -431,7 +432,12 @@ func TestCardCoordinatedMutations(t *testing.T) {
 										recount(&x.Card)
 									}
 									tried++
-									if !validWorkloadExposure(x) {
+									cardBuilds.Store(0)
+									ok := validWorkloadExposure(x)
+									if n := cardBuilds.Load(); n > int64(2*cardOutcomeCeiling*len(Categories)) {
+										t.Fatalf("%s: one card cost %d builds, over the ceiling", fname, n)
+									}
+									if !ok {
 										continue
 									}
 									accepted++
@@ -461,5 +467,84 @@ func TestCardCoordinatedMutations(t *testing.T) {
 	t.Logf("tried %d coordinated mutations; %d accepted, every one honest by the oracle", tried, accepted)
 	if tried < 10000 {
 		t.Fatalf("only %d mutations: the enumeration shrank", tried)
+	}
+}
+
+// SCR-7, security-agent's review of 0ceb1d3: work on an unauthenticated card is bounded before it is validated. A card
+// is refused with no row built when its coverage repeats a check (the reviewer's 10 and 20 repeated SEC-4 skips under
+// Modal, and 10,000), or any coverage group or row list is longer than its category; a card that passes the partition
+// costs at most 6 builds per row, counted, never timed.
+func TestCardWorkIsBounded(t *testing.T) {
+	ceiling := int64(2 * cardOutcomeCeiling * len(Categories))
+	modal := asCard(Score(replanned(t, "modal", host.Options{Mode: "exec", Excluded: host.ModalExcluded, ExcludedKind: obs.SkipProviderTerms})))
+	if !validWorkloadExposure(modal) || !modal.Rows[4].NotApplicable {
+		t.Fatalf("the honest Modal card: %+v", modal.Rows[4])
+	}
+	check := func(name string, x WorkloadExposure, maxBuilds int64) {
+		t.Helper()
+		cardBuilds.Store(0)
+		if validWorkloadExposure(x) {
+			t.Errorf("%s: accepted", name)
+		}
+		if n := cardBuilds.Load(); n > maxBuilds {
+			t.Errorf("%s: %d rows built, want at most %d", name, n, maxBuilds)
+		}
+	}
+	repeat := func(id string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = id
+		}
+		return out
+	}
+	for _, n := range []int{10, 20, 10000} {
+		x := modal
+		x.Card = cloneCard(modal.Card)
+		x.Rows[4].Coverage.Skipped = repeat("SEC-4", n)
+		check(fmt.Sprintf("%d repeated SEC-4 skips", n), x, 0)
+	}
+	for g := 0; g < 7; g++ {
+		x := modal
+		x.Card = cloneCard(modal.Card)
+		v := x.Rows[1].Coverage
+		groups := []*[]string{&v.Proven, &v.Findings, &v.Unproven, &v.Unknown, &v.ScopedOut, &v.Skipped, &v.Missing}
+		*groups[g] = append(*groups[g], repeat(Categories[1].Checks[0], 10000)...)
+		check(fmt.Sprintf("coverage group %d oversized", g), x, 0)
+	}
+	for _, list := range []string{"found", "unknown", "unproven"} {
+		x := modal
+		x.Card = cloneCard(modal.Card)
+		r := &x.Rows[1]
+		big := repeat(Categories[1].Checks[0], 10000)
+		switch list {
+		case "found":
+			r.Found = big
+		case "unknown":
+			r.Unknown = big
+		case "unproven":
+			r.Unproven = big
+		}
+		check("row "+list+" oversized, with coverage", x, 0)
+		y := x
+		y.Card = cloneCard(x.Card)
+		y.Coverage = nil
+		for j := range y.Rows {
+			y.Rows[j].Coverage, y.Rows[j].GreenNotProven = nil, false
+		}
+		check("row "+list+" oversized, without coverage", y, ceiling)
+	}
+	x := asCard(Score(replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, Existing: true})))
+	x.Card = cloneCard(x.Card)
+	x.Rows[4].Why = "Not tested: opt in with -provider-endpoints " + strings.Repeat("SEC-4,", 10000) + "AMP-7 if your provider's terms allow"
+	check("an opt-in reason naming 10,000 checks", x, ceiling)
+	if ids, ok := optInNamed(Categories[4], x.Rows[4].Why); ok || len(ids) > 0 {
+		t.Errorf("optInNamed read %d checks from an oversized reason", len(ids))
+	}
+	for name, f := range map[string]WorkloadExposure{"modal": modal, "exec opt-in": asCard(Score(replanned(t, "exec", host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn, Existing: true})))} {
+		for i, r := range f.Rows {
+			if n := len(cardOutcomes(Categories[i], r, r.Scope, nil)); n > cardOutcomeCeiling {
+				t.Errorf("%s row %s: %d outcome maps, ceiling %d", name, r.Name, n, cardOutcomeCeiling)
+			}
+		}
 	}
 }

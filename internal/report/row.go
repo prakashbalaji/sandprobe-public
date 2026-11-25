@@ -3,6 +3,7 @@ package report
 import (
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
@@ -82,7 +83,7 @@ func buildRow(cat Category, out map[string]outcome, scope string, declared, noCa
 
 // cardRow rebuilds row i of an unauthenticated workload card (SCR-4) from the least the card can't forge against
 // itself: the category, this binary's PRV-row table, and the row's own check lists and coverage. It checks the lists'
-// invariants first, then tries every outcome map they allow, builds each row with buildRow, and accepts the stored
+// invariants first, then tries the few outcome maps they allow (cardOutcomes), builds each row with buildRow, and accepts the stored
 // row only when it equals one of them as a whole. It returns that built row, which is what the page renders.
 // gradedInfo is the card's severity evidence from this process's own grading (SCR-7), nil for a card read from a file.
 func cardRow(i int, row Row, gradedInfo map[string]bool) (Row, bool) {
@@ -99,6 +100,7 @@ func cardRow(i int, row Row, gradedInfo map[string]bool) (Row, bool) {
 	}
 	for _, out := range cardOutcomes(cat, row, key, gradedInfo) {
 		for _, noCanary := range []bool{false, true} {
+			cardBuilds.Add(1)
 			want := buildRow(cat, out, key, false, noCanary)
 			want.Coverage = row.Coverage
 			if row.Coverage != nil {
@@ -119,6 +121,9 @@ func cardRow(i int, row Row, gradedInfo map[string]bool) (Row, bool) {
 // is Info by evidence (infoUnlisted); and a card without coverage (0.2.1's form) carries no not-applicable row, scope,
 // terms or declared provider, since 0.2.1 wrote none.
 func rowInvariants(cat Category, row Row, gradedInfo map[string]bool) bool {
+	if len(row.Found)+len(row.Unknown)+len(row.Unproven) > len(cat.Checks) { // bounded before any loop over them
+		return false
+	}
 	for _, ids := range [][]string{row.Found, row.Unknown, row.Unproven} {
 		if !inCategory(cat, ids) {
 			return false
@@ -157,30 +162,30 @@ func rowInvariants(cat Category, row Row, gradedInfo map[string]bool) bool {
 	return row.DeclaredProvider == "" // PRV-17: the managed workload runners never declare a provider
 }
 
-// cardOutcomes is every outcome map row's evidence allows. With coverage, each check's outcome is its coverage group's;
-// a finding is outInfo only when its check has an Info variant and the row doesn't list it, else outFound; a skipped check may be outSkipped, outOptIn when it is a
-// provider endpoint, or outTerms when key's PRV-row entry excludes it. Without coverage (0.2.1's form), the row's own
-// lists fix theirs, and the rest are all clean or all missing: the two forms that change the row.
+// cardOutcomes is the outcome maps row's evidence allows, at most cardOutcomeCeiling of them, built without
+// enumerating combinations (SCR-7). With coverage, each check's outcome is its coverage group's; a finding is outInfo
+// only when it is Info by evidence (infoUnlisted) and the row doesn't list it, else outFound. A skipped check's kind
+// changes buildRow's row in two ways only: the row is not applicable when every check of the category is excluded by
+// key's PRV-row entry (and none was tested), and the opt-in hint names the opt-in subset in catalog order. So three maps
+// cover every row a card can show: every skipped check plain; every one excluded by key's entry, when the entry excludes
+// each; and the one opt-in subset the stored reason names, when every check it names is a skipped provider endpoint of
+// the category. Without coverage (0.2.1's form), the row's own lists fix theirs, and the rest are all clean or all
+// missing: the two forms that change the row. The caller has already checked the coverage partition, so every list is
+// the category's own checks, each once.
 func cardOutcomes(cat Category, row Row, key string, gradedInfo map[string]bool) []map[string]outcome {
 	base := map[string]outcome{}
-	var open []string // skipped checks whose kind the card doesn't record
-	if c := row.Coverage; c != nil {
-		for _, g := range []struct {
-			ids []string
-			o   outcome
-		}{{c.Proven, outClean}, {c.ScopedOut, outClean}, {c.Unproven, outNotFound}, {c.Unknown, outUnknown}, {c.Missing, outMissing}} {
-			for _, id := range g.ids {
-				base[id] = g.o
+	with := func(over map[string]outcome) map[string]outcome {
+		m := make(map[string]outcome, len(cat.Checks))
+		for _, id := range cat.Checks {
+			m[id] = base[id]
+			if o, ok := over[id]; ok {
+				m[id] = o
 			}
 		}
-		for _, id := range c.Findings { // Info only by evidence (infoUnlisted): never a green on the card's word
-			base[id] = outFound
-			if !slices.Contains(row.Found, id) && infoUnlisted(id, gradedInfo) {
-				base[id] = outInfo
-			}
-		}
-		open = c.Skipped
-	} else {
+		return m
+	}
+	c := row.Coverage
+	if c == nil {
 		for _, id := range row.Found {
 			base[id] = outFound
 		}
@@ -192,42 +197,79 @@ func cardOutcomes(cat Category, row Row, key string, gradedInfo map[string]bool)
 		}
 		var maps []map[string]outcome
 		for _, rest := range []outcome{outClean, outMissing} {
-			m := map[string]outcome{}
+			over := map[string]outcome{}
 			for _, id := range cat.Checks {
-				if o, ok := base[id]; ok {
-					m[id] = o
-				} else {
-					m[id] = rest
+				if _, ok := base[id]; !ok {
+					over[id] = rest
 				}
 			}
-			maps = append(maps, m)
+			maps = append(maps, with(over))
 		}
 		return maps
 	}
+	for _, g := range []struct {
+		ids []string
+		o   outcome
+	}{{c.Proven, outClean}, {c.ScopedOut, outClean}, {c.Unproven, outNotFound}, {c.Unknown, outUnknown}, {c.Missing, outMissing}, {c.Skipped, outSkipped}} {
+		for _, id := range g.ids {
+			base[id] = g.o
+		}
+	}
+	for _, id := range c.Findings { // Info only by evidence (infoUnlisted): never a green on the card's word
+		base[id] = outFound
+		if !slices.Contains(row.Found, id) && infoUnlisted(id, gradedInfo) {
+			base[id] = outInfo
+		}
+	}
+	maps := []map[string]outcome{with(nil)}
 	entry := host.DeclaredExclusions(key)
-	maps := []map[string]outcome{base}
-	for _, id := range open {
-		options := []outcome{outSkipped}
-		if catalog.ProviderEndpoints[id] {
-			options = append(options, outOptIn)
+	terms := map[string]outcome{}
+	for _, id := range c.Skipped {
+		if _, ok := entry[id]; !ok {
+			terms = nil
+			break
 		}
-		if _, ok := entry[id]; ok {
-			options = append(options, outTerms)
-		}
-		var next []map[string]outcome
-		for _, m := range maps {
-			for _, o := range options {
-				n := make(map[string]outcome, len(m)+1)
-				for k, v := range m {
-					n[k] = v
-				}
-				n[id] = o
-				next = append(next, n)
+		terms[id] = outTerms
+	}
+	if len(terms) > 0 {
+		maps = append(maps, with(terms))
+	}
+	if ids, ok := optInNamed(cat, row.Why); ok {
+		over := map[string]outcome{}
+		for _, id := range ids {
+			if !catalog.ProviderEndpoints[id] || !slices.Contains(c.Skipped, id) {
+				return maps
 			}
+			over[id] = outOptIn
 		}
-		maps = next
+		maps = append(maps, with(over))
 	}
 	return maps
+}
+
+// cardOutcomeCeiling bounds cardOutcomes: three maps with coverage, two without. With HCN-5's no-canary choice, cardRow
+// builds at most 2 * cardOutcomeCeiling rows for a row, so a card costs at most 6 * len(Categories) builds (SCR-7).
+const cardOutcomeCeiling = 3
+
+// cardBuilds counts the rows cardRow builds, so tests bound the work a card costs by counting it, never by time.
+var cardBuilds atomic.Int64
+
+// optInNamed reads the checks PRV-15's opt-in hint names in reason, bounded by the category's size: the IDs between
+// its fixed prefix and suffix, each a check of the category, once, in catalog order. ok is false for any other reason.
+func optInNamed(cat Category, reason string) ([]string, bool) {
+	const prefix, suffix = "Not tested: opt in with -provider-endpoints ", " if your provider's terms allow"
+	list, ok := strings.CutPrefix(reason, prefix)
+	if !ok {
+		return nil, false
+	}
+	if list, ok = strings.CutSuffix(list, suffix); !ok || list == "" {
+		return nil, false
+	}
+	ids := strings.SplitN(list, ",", len(cat.Checks)+1)
+	if len(ids) > len(cat.Checks) || !inCategory(cat, ids) {
+		return nil, false
+	}
+	return ids, true
 }
 
 // sameRow is the stored row equal to the built one as a whole, nil and empty lists alike. A stored green-not-proven flag
