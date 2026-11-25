@@ -38,8 +38,12 @@ const SchemaDeclaredProvider = "sandprobe/5"
 // defines the letter, so every report Build writes declares it, whatever earlier fields its manifest carries (AGT-6).
 const SchemaNoLetter = "sandprobe/6"
 
+// SchemaOwnRecipe adds run.recipe (RCP-4), and nothing else: sandprobe/6 with the record. 0.3.3 shipped sandprobe/6
+// without it and would refuse the field, so only a report that carries the record declares this version (AGT-6).
+const SchemaOwnRecipe = "sandprobe/7"
+
 // Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider, SchemaNoLetter}
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider, SchemaNoLetter, SchemaOwnRecipe}
 
 // SchemaFor is AGT-6 for a report that carries a letter: the lowest of sandprobe/1 to sandprobe/5 whose fields a
 // report with this manifest needs. BuildLegacy declares it, and a reader requires a report of those versions to
@@ -84,6 +88,9 @@ type Meta struct {
 	Calls              []obs.ProviderCall
 	Cleanup            string // how the box's teardown ended
 	Residual           string // a provider's stated residual risk (PRV-1)
+	// OwnRecipeSHA256 is the SHA-256 of a person's own recipe file, for a run made through one (RCP-4): Build writes
+	// run.recipe from it. Empty for every other run, a shipped recipe's included.
+	OwnRecipeSHA256 string
 }
 
 // Doc is OUT-1.
@@ -126,7 +133,17 @@ type Run struct {
 	Mode       string `json:"mode"`
 	Provider   string `json:"provider"`
 	Box        Box    `json:"box"`
-	NoCanary   bool   `json:"no_canary,omitempty"` // HCN-5, set by the host from its manifest, never by the box
+	// Recipe is RCP-4's record of a run made through a person's own recipe, and of no other run. A report that carries
+	// it declares sandprobe/7 (AGT-6). ANL-1 reads it only whole.
+	Recipe   *RunRecipe `json:"recipe,omitempty"`
+	NoCanary bool       `json:"no_canary,omitempty"` // HCN-5, set by the host from its manifest, never by the box
+}
+
+// RunRecipe says a run's box came from a person's own recipe, and which: the SHA-256 of the bytes that ran, 64
+// lowercase hex digits. Own is always true: a shipped recipe's run carries no record. No path, and no header text.
+type RunRecipe struct {
+	Own    bool   `json:"own"`
+	SHA256 string `json:"sha256"`
 }
 
 type Box struct {
@@ -263,6 +280,9 @@ func Build(r *host.Run, m Meta) Doc {
 		Toolchain: []any{}, Overrides: []string{}, Contacted: []Contact{}, Receipts: r.Evidence.Receipts, Markers: []Marker{},
 		ProviderCalls: m.Calls, Cleanup: Cleanup{Outcome: m.Cleanup, Residual: m.Residual},
 		Limits: Limits{NotTested: NotTested, NotProven: rep.NotProven, ScopedOut: rep.ScopedOut, Skipped: rep.Skipped}}
+	if m.OwnRecipeSHA256 != "" { // RCP-4, AGT-6: the record, and the one version that carries it
+		d.Schema, d.Run.Recipe = SchemaOwnRecipe, &RunRecipe{Own: true, SHA256: m.OwnRecipeSHA256}
+	}
 	if man.CanaryTCP80Protocol != "" && obs.ValidCanaryTCP80Protocol(man.CanaryTCP80Protocol) {
 		d.Toolchain = append(d.Toolchain, map[string]string{"canary_tcp80_protocol": man.CanaryTCP80Protocol})
 	}

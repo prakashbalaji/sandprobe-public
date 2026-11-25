@@ -233,7 +233,8 @@ func scopeOf(provider, declared string) (string, bool) {
 
 // PolicyKinds is SCR-2's skip kinds as this binary's own policy derives them for the provider a run names, never as a
 // report states them: a native adapter's PRV-row exclusions are provider_terms (PRV-5); run exec's (PRV-15) and a
-// shipped recipe's (RCP-4) default exclusions are opt_in; any other provider has none. PolicyFor adds PRV-17.
+// shipped recipe's (RCP-4) default exclusions are opt_in, and so are the four a person's own recipe always carries
+// (RCP-4: "recipe", whatever provider its header names); any other provider has none. PolicyFor adds PRV-17.
 func PolicyKinds(provider string) map[string]string {
 	kinds := map[string]string{}
 	if excluded, ok := host.TermsExclusions[provider]; ok {
@@ -245,6 +246,8 @@ func PolicyKinds(provider string) map[string]string {
 	var ids []string
 	if provider == "exec" {
 		ids = slices.Collect(maps.Keys(host.ExecExclusions()))
+	} else if provider == host.OwnRecipeProvider {
+		ids = host.RecipeDefaultExclusions
 	} else if text, ok := recipes.Get(provider); ok && recipes.Shipped[provider] != "" {
 		if rc, err := host.ParseRecipe(provider, text); err == nil {
 			ids = rc.Exclusions

@@ -114,6 +114,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	r.settleCanary(given) // HCN-5: a canary flag beats every SANDPROBE_CANARY* value
 	r.providerEndpointsSet = given["provider-endpoints"]
 	r.providerSet = given["provider"]
+	r.recipeSet = given["recipe"]
+	recipeRun := r.recipeSet && (cmd == "run" || cmd == "plan") && len(positional) == 0
+	if r.recipeSet && !recipeRun { // RCP-4
+		return reportErr(o, stderr, fail("usage", "-recipe <file> takes the provider's place on run and plan, and applies nowhere else (RCP-4)", "sandprobe plan -recipe <file>", exitUsage))
+	}
 	docker := (cmd == "run" || cmd == "plan") && len(positional) == 2 && positional[0] == "docker"
 	execRun := (cmd == "run" || cmd == "plan") && len(positional) == 1 && positional[0] == "exec"
 	if given["block-device-path"] && !execRun {
@@ -126,10 +131,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if o.out != "text" && o.out != "json" {
 		return reportErr(o, stderr, fail("usage", "-o takes text or json", "sandprobe "+cmd+" -o json", exitUsage))
 	}
-	if r.noCanary && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
+	if r.noCanary && !recipeRun && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
 		return reportErr(o, stderr, fail("usage", "-no-canary applies only to run exec, a recipe such as run kubernetes, and their plans", "sandprobe run exec -no-canary -y -- <command>", exitUsage))
 	}
-	if r.providerEndpointsSet && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
+	if r.providerEndpointsSet && !recipeRun && !((cmd == "run" || cmd == "plan") && len(positional) == 1 && (positional[0] == "exec" || recipes.Shipped[positional[0]] != "")) {
 		return reportErr(o, stderr, fail("usage", "-provider-endpoints applies only to run exec, a recipe such as run kubernetes, and their plans: run docker already runs these checks, and a provider's own PRV row decides them (PRV-15)", "sandprobe run exec -provider-endpoints SEC-4,AMP-7 -y -- <command>", exitUsage))
 	}
 	if r.providerSet && !execRun { // PRV-17: a native adapter is its own provider; a recipe keeps RCP-4's exclusions
@@ -180,7 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "explain":
 		err = explain(o, positional)
 	case "plan":
-		err = plan(o, r, positional)
+		err = plan(o, r, positional, stderr)
 	case "run":
 		code, err = runCmd(o, r, positional, stderr)
 	case "poc":
@@ -240,6 +245,9 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
                                    also test cloud access, attesting your provider's terms allow it on your account
   sandprobe run kubernetes [-as <user>] -y
                                    grade a throwaway pod in your cluster, by recipe; set SANDPROBE_KUBE_CONTEXT (PRV-16)
+  sandprobe run -recipe <file> [-as <user>] -y
+                                   grade a throwaway box your own recipe creates, from your template say; the recipe
+                                   is your code, run here with your credentials, and Sandprobe hasn't reviewed it (RCP-4)
   sandprobe canary check [-canary-url <url> -canary-pin <pin>]
                                    ask the hosted canary, or one you name, for its signed status; reserves nothing
   sandprobe cleanup baseten -baseten-state <journal> -y  verify/delete a retained sandbox

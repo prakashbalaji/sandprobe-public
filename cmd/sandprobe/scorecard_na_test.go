@@ -272,12 +272,14 @@ func TestReportSchemaVersions(t *testing.T) {
 		"sandprobe/6 with a letter":         {retag(v1, "sandprobe/6", false), exitUsage},
 		"sandprobe/1 without its letter":    {retag(v1, "sandprobe/1", true), exitUsage},
 		"sandprobe/2 without its letter":    {retag(v2, "sandprobe/2", true), exitUsage},
+		"sandprobe/7 with no run.recipe":    {retag(v1, "sandprobe/7", true), exitUsage}, // AGT-6, RCP-4: only with the record
+		"sandprobe/7, kinds, no run.recipe": {retag(v2, "sandprobe/7", true), exitUsage},
 		"a version this build doesn't know": {retag(v2, "sandprobe/9", false), exitUsage},
 		"an unknown version, no letter":     {retag(v2, "sandprobe/9", true), exitUsage},
 	} {
 		var out, errs bytes.Buffer
 		code := run([]string{"scorecard", tc.path}, &out, &errs)
-		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 or sandprobe/5 or sandprobe/6 report file") {
+		if code != tc.code || code == exitUsage && !strings.Contains(errs.String(), "sandprobe/1 or sandprobe/2 or sandprobe/3 or sandprobe/4 or sandprobe/5 or sandprobe/6 or sandprobe/7 report file") {
 			t.Errorf("%s: exit %d, %s", name, code, errs.String())
 		}
 	}

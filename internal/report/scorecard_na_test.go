@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"html/template"
 	"maps"
@@ -323,7 +324,7 @@ func TestReportSchemaVersions(t *testing.T) {
 			t.Error("a report with no kind carries SkipKinds")
 		}
 	}
-	if Schema != "sandprobe/1" || !slices.Equal(Schemas, []string{"sandprobe/1", "sandprobe/2", "sandprobe/3", "sandprobe/4", "sandprobe/5", "sandprobe/6"}) {
+	if Schema != "sandprobe/1" || !slices.Equal(Schemas, []string{"sandprobe/1", "sandprobe/2", "sandprobe/3", "sandprobe/4", "sandprobe/5", "sandprobe/6", "sandprobe/7"}) {
 		t.Errorf("the versions this build reads: %v", Schemas)
 	}
 }
@@ -381,5 +382,69 @@ func TestReportRecordsAttestation(t *testing.T) {
 	}
 	if n := strings.Count(string(page), template.HTMLEscapeString(Attestation)); n != 4 { // beside each test, and in the appendix
 		t.Errorf("the page shows the attestation %d times, want 4", n)
+	}
+}
+
+// RCP-4 and SCR-2: the policy for a person's own recipe ("recipe") is PRV-15's four as opt-in, whatever provider its
+// header or a manifest names, so Cloud access is counted and reads "Not tested", never not applicable.
+func TestOwnRecipePolicy(t *testing.T) {
+	for _, declared := range []string{"", "modal", "recipe"} {
+		got := PolicyFor(host.OwnRecipeProvider, declared)
+		if len(got) != 4 {
+			t.Errorf("declaring %q: %v", declared, got)
+		}
+		for _, id := range host.RecipeDefaultExclusions {
+			if got[id] != obs.SkipOptIn {
+				t.Errorf("declaring %q: %s is %q", declared, id, got[id])
+			}
+		}
+	}
+	excluded := map[string]string{}
+	for _, id := range host.RecipeDefaultExclusions {
+		excluded[id] = "your own recipe keeps it off"
+	}
+	c := Score(replanned(t, host.OwnRecipeProvider, host.Options{Mode: "exec", Excluded: excluded, ExcludedKind: obs.SkipOptIn}))
+	if r := row(t, c, "Cloud access"); r.NotApplicable || r.Green || !strings.HasPrefix(r.Why, "Not tested") || c.Of != 6 || len(c.NotCounted()) != 0 {
+		t.Errorf("Cloud access %+v, out of %d, %v", r, c.Of, c.NotCounted())
+	}
+}
+
+// RCP-4 and AGT-6: Build writes run.recipe for a run through a person's own recipe, as exactly own and the SHA-256,
+// under sandprobe/7; and no recipe key, under sandprobe/6, for any other run, a shipped recipe's included. The page
+// re-rendered from a saved report embeds a sandprobe/7 report as sandprobe/7, and an older one as sandprobe/6.
+func TestOwnRecipeRecordWritten(t *testing.T) {
+	sha := strings.Repeat("0123456789abcdef", 4)
+	m, pd, ev := replan(t, host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	b, _ := json.Marshal(pd)
+	r := &host.Run{Manifest: m, Doc: b, Evidence: ev, Report: grade.GradeBytes(m, b, &ev)}
+	for provider, own := range map[string]string{host.OwnRecipeProvider: sha, "kubernetes": "", "exec": ""} {
+		d := Build(r, Meta{Version: "fixture", Provider: provider, BoxName: m.BoxID, CreatedBySandprobe: true, OwnRecipeSHA256: own})
+		raw, _ := json.Marshal(d)
+		var tree struct {
+			Run map[string]json.RawMessage `json:"run"`
+		}
+		if err := json.Unmarshal(raw, &tree); err != nil {
+			t.Fatal(err)
+		}
+		got, has := tree.Run["recipe"]
+		if want := `{"own":true,"sha256":"` + sha + `"}`; own != "" && string(got) != want || own == "" && has {
+			t.Errorf("%s: run.recipe is %s", provider, got)
+		}
+		want := SchemaNoLetter
+		if own != "" {
+			want = SchemaOwnRecipe
+		}
+		if d.Schema != want {
+			t.Errorf("%s: %s", provider, d.Schema)
+		}
+		page, err := SavedHTML(d, "graphite")
+		if err != nil || !bytes.Contains(page, []byte(`"schema":"`+want+`"`)) || (own != "") != bytes.Contains(page, []byte(`"recipe":{"own":true,"sha256":"`+sha+`"}`)) {
+			t.Errorf("%s: the re-rendered page doesn't embed the report as %s: %v", provider, want, err)
+		}
+		letter := "F"
+		d.Schema, d.Grade.Letter, d.Run.Recipe = SchemaSkipKinds, &letter, nil
+		if page, err := SavedHTML(d, "graphite"); err != nil || !bytes.Contains(page, []byte(`"schema":"sandprobe/6"`)) || bytes.Contains(page, []byte(`"letter"`)) {
+			t.Errorf("%s: an older report isn't embedded as sandprobe/6 without its letter: %v", provider, err)
+		}
 	}
 }

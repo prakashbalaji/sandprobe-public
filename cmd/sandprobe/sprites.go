@@ -48,6 +48,8 @@ type runFlags struct {
 	providerEndpointsSet                       bool     // -provider-endpoints was given, even empty
 	provider                                   string   // run exec: the provider the operator declares (PRV-17)
 	providerSet                                bool     // -provider was given, even empty
+	recipe                                     string   // run and plan: a person's own recipe file, in place of a provider (RCP-4)
+	recipeSet                                  bool     // -recipe was given, even empty
 	canaryFlags                                bool     // -canary, -canary-url or -canary-pin given as a flag (HCN-5)
 	keepSandbox                                bool
 	basetenState                               string
@@ -86,6 +88,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.canaryURL, "canary-url", os.Getenv("SANDPROBE_CANARY_URL"), "a public canary you run, https://control.<domain>, instead of the hosted one (HCN-5)")
 	fs.BoolVar(&r.noCanary, "no-canary", false, "exec and recipes: run without a canary; Exfiltration isn't tested, so the run stays incomplete (HCN-5)")
 	fs.StringVar(&r.provider, "provider", "", "run exec only: the provider the operator says the box runs on, one Sandprobe has a reviewed scope for (PRV-17); the operator's word, never verified, and never inferred, added or changed by an agent")
+	fs.StringVar(&r.recipe, "recipe", "", "run and plan: your own recipe file, in place of a provider; it is your code, run on this machine with your credentials, and Sandprobe hasn't reviewed it (RCP-4)")
 	fs.StringVar(&r.providerEndpoints, "provider-endpoints", "", "exec and recipes: turn on named checks that contact your provider's own endpoints (SEC-4, EGR-3, AMP-6, AMP-7), attesting your provider's terms allow each on your own account (PRV-15)")
 	fs.BoolVar(&r.tlsInsecure, "tls-insecure", false, "canary check only: accept a Let's Encrypt staging certificate; trust still rests on -canary-pin")
 	fs.BoolVar(&r.requireHTTPMarker, "require-http-marker-v1", false, "canary check only: require signed TCP/80 HTTP marker capability")
@@ -345,6 +348,9 @@ type planDoc struct {
 	// DeclaredProvider is PRV-17's -provider, with Declared its plan lines: the operator's word, never verified.
 	DeclaredProvider string   `json:"declared_provider,omitempty"`
 	Declared         []string `json:"declared,omitempty"`
+	RecipeFile       string   `json:"recipe_file,omitempty"`   // RCP-4, run -recipe: the person's own recipe, its path as given
+	RecipeSHA256     string   `json:"recipe_sha256,omitempty"` // the SHA-256 of the bytes read, the only ones run
+	OwnRecipe        []string `json:"own_recipe,omitempty"`    // its plan lines: nobody reviewed it, and they say so
 	Contacts         []string `json:"contacts"`
 	BoxNamed         []string `json:"box_named_destinations"`
 	OpensReadOnly    []string `json:"opens_read_only"`
@@ -418,12 +424,19 @@ func withRetention(residual string, c canaryChoice) string {
 }
 
 func printPlan(w io.Writer, p planDoc) {
-	fmt.Fprintf(w, "The plan for %s\n\n", p.Provider)
+	if p.RecipeFile != "" {
+		fmt.Fprint(w, "The plan for your own recipe\n\n")
+	} else {
+		fmt.Fprintf(w, "The plan for %s\n\n", p.Provider)
+	}
 	line := func(k string, vs ...string) {
 		fmt.Fprintf(w, "  %s\n", k)
 		for _, v := range vs {
 			fmt.Fprintf(w, "    · %s\n", v)
 		}
+	}
+	if p.RecipeFile != "" {
+		line("Your own recipe (-recipe, RCP-4)", p.OwnRecipe...)
 	}
 	line("Creates", p.Creates...)
 	line("Runs the probe through", p.LaunchPath)
@@ -446,7 +459,11 @@ func printPlan(w io.Writer, p planDoc) {
 	line("Leaves", p.Residual)
 }
 
-func plan(o opts, r runFlags, args []string) error {
+func plan(o opts, r runFlags, args []string, stderr io.Writer) error {
+	if r.recipeSet { // RCP-4: the file takes the provider's place, and is named on stderr before it first runs
+		_, e := runRecipe(o, r, "", true, stderr)
+		return e
+	}
 	if len(args) == 1 && args[0] == "exec" {
 		_, e := runExec(o, r, true, nil)
 		return e
@@ -530,6 +547,9 @@ func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
 			}
 			return 0, fail("usage", msg, "use -min full (every applicable category green) or -min 5", exitUsage)
 		}
+	}
+	if r.recipeSet { // RCP-4: the file takes the provider's place
+		return runRecipe(o, r, "", false, stderr)
 	}
 	if len(args) == 1 && args[0] == "exec" {
 		return runExec(o, r, false, stderr)

@@ -7,12 +7,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
+
+	"sandprobe/internal/obs"
 )
 
 // Recipe is a recipe file (RCP-1): a POSIX sh file with a header and the sp_ functions, held as the bytes read once,
@@ -23,7 +26,22 @@ type Recipe struct {
 	Env                                      []string // the settings it reads from the person's environment
 	Text                                     []byte
 	SHA256                                   string
+	// Reset says the recipe defines sp_checkpoint, sp_restore or sp_recreate. Resets aren't built, so none is ever
+	// called, and the plan and report say so (RCP-3).
+	Reset bool
+	// Own marks a person's own recipe file (run -recipe, RCP-4): nobody reviewed it, so it always carries all four
+	// default exclusions, and its header is only its own word. File is its path as given, for the plan and the record
+	// alone: never a report, and never the record's name.
+	Own  bool
+	File string
 }
+
+// OwnRecipeProvider is what a report's run.provider reads for a person's own recipe (RCP-4): the way the box was
+// reached, as "exec" is, never a provider's name.
+const OwnRecipeProvider = "recipe"
+
+// RecipeDefaultExclusions are PRV-15's four, which a person's own recipe always carries (RCP-4).
+var RecipeDefaultExclusions = []string{"SEC-4", "EGR-3", "AMP-6", "AMP-7"}
 
 var (
 	recipeKey  = regexp.MustCompile(`^# ([a-z-]+): (.+)$`)
@@ -37,12 +55,49 @@ var (
 	RecipeGonePoll  = 2 * time.Second
 )
 
-const recipeMax = 64 << 10
+// recipeSaysMax bounds what the host keeps of a recipe's fd 3, and recipeSaysLinger how long a child left holding fd 3
+// can delay a call after the recipe exits (RCP-1).
+var (
+	recipeSaysMax    = 4 << 10
+	recipeSaysLinger = time.Second
+)
 
-// ParseRecipe checks a recipe's header and functions (RCP-1).
+// RecipeMax bounds a recipe's bytes (RCP-1).
+const RecipeMax = 64 << 10
+
+// ParseOwnRecipe checks a person's own recipe as ParseRecipe checks a shipped one, then gives it what nobody's review
+// could change (RCP-4): a name from its SHA-256, never from its path, and all four default exclusions, whatever its
+// header lists.
+func ParseOwnRecipe(text []byte) (*Recipe, error) {
+	r, err := ParseRecipe("", text)
+	if err != nil {
+		return nil, err
+	}
+	r.Name, r.Own, r.Exclusions = "own-"+r.SHA256[:12], true, slices.Clone(RecipeDefaultExclusions)
+	return r, nil
+}
+
+// Label is how a message names the recipe.
+func (r *Recipe) Label() string {
+	if r.Own {
+		return "your own recipe"
+	}
+	return "the " + r.Name + " recipe"
+}
+
+// RunProvider is the report's run.provider for a run of this recipe.
+func (r *Recipe) RunProvider() string {
+	if r.Own {
+		return OwnRecipeProvider
+	}
+	return r.Name
+}
+
+// ParseRecipe checks a recipe's header and functions (RCP-1). Its errors echo nothing from the recipe but a header
+// key's own name, lowercase letters and hyphens, cut to 32 characters: a person's own file reaches it too (RCP-4).
 func ParseRecipe(name string, text []byte) (*Recipe, error) {
-	if len(text) > recipeMax {
-		return nil, fmt.Errorf("the recipe is over %d KiB", recipeMax>>10)
+	if len(text) > RecipeMax {
+		return nil, fmt.Errorf("the recipe is over %d KiB", RecipeMax>>10)
 	}
 	lines := strings.Split(string(text), "\n")
 	if lines[0] != "# sandprobe-recipe: v1" {
@@ -57,9 +112,12 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 			break
 		}
 		if seen[m[1]] {
-			return nil, fmt.Errorf("the recipe's header names %s twice", m[1])
+			return nil, fmt.Errorf("the recipe's header names %.32s twice", m[1])
 		}
 		seen[m[1]] = true
+		if !recipeLine.MatchString(m[2]) { // RCP-1: plans and reports show a header's values
+			return nil, fmt.Errorf("the recipe's header value for %.32s isn't printable ASCII of at most 400 characters (RCP-1)", m[1])
+		}
 		switch v := m[2]; m[1] {
 		case "provider":
 			r.Provider = v
@@ -74,7 +132,7 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 		case "env":
 			r.Env = strings.Fields(v)
 		default:
-			return nil, fmt.Errorf("the recipe's header has an unknown key %s", m[1])
+			return nil, fmt.Errorf("the recipe's header has an unknown key %.32s", m[1])
 		}
 	}
 	switch {
@@ -85,12 +143,12 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 	}
 	for _, id := range r.Exclusions {
 		if !excludable[id] {
-			return nil, fmt.Errorf("the recipe excludes %s, which only a provider's endpoints may exclude (GRD-3)", id)
+			return nil, errors.New("the recipe's exclusions name something other than SEC-4, EGR-3, AMP-6 and AMP-7, the checks a provider's endpoints may exclude (GRD-3)")
 		}
 	}
 	for _, e := range r.Env {
 		if !recipeEnv.MatchString(e) || e == "SANDPROBE_BOX" || e == "SANDPROBE_NAME" || e == "SANDPROBE_TARGET" {
-			return nil, fmt.Errorf("the recipe's env names %q, not a SANDPROBE_ setting of its own", e)
+			return nil, errors.New("the recipe's env names something that isn't a SANDPROBE_ setting of its own")
 		}
 	}
 	need := []string{"sp_ready", "sp_create", "sp_shell", "sp_delete", "sp_gone"}
@@ -102,6 +160,7 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 			return nil, fmt.Errorf("the recipe has no %s() (RCP-1)", fn)
 		}
 	}
+	r.Reset = regexp.MustCompile(`(?m)^sp_(checkpoint|restore|recreate)\(\) *\{`).Match(text)
 	return r, nil
 }
 
@@ -110,23 +169,35 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 // error carrying the exit code and what the recipe said on fd 3. Its stderr goes to /dev/null: kubectl and an exec
 // plugin write there, and it can carry a credential (AGENTS rule 3). A recipe runs its child commands with fd 3
 // closed, so none of them can write a message as the recipe.
+//
+// fd 3 is a pipe the host drains while the recipe runs, keeping the first recipeSaysMax bytes and discarding the
+// rest: the text has no file and no name, and a recipe that floods it grows nothing (RCP-1).
 func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, RecipeCallLimit)
 	defer cancel()
-	says, err := os.CreateTemp("", "sandprobe-recipe-says-*")
+	listen, speak, err := os.Pipe()
 	if err != nil {
-		return nil, -1, fmt.Errorf("%s didn't run: no file for its messages: %w", fn, err)
+		return nil, -1, fmt.Errorf("%s didn't run: no pipe for its messages: %w", fn, err)
 	}
-	defer says.Close()
-	// Unlinked before the recipe starts: only the open descriptor reaches it, so no tool can reopen it by its name.
-	if err := os.Remove(says.Name()); err != nil {
-		return nil, -1, fmt.Errorf("%s didn't run: its message file couldn't be unlinked: %w", fn, err)
-	}
+	says, drained := &capped{max: recipeSaysMax}, make(chan struct{})
+	go func() {
+		io.Copy(says, listen)
+		close(drained)
+	}()
 	cmd := exec.CommandContext(ctx, "sh", "-c", string(r.Text)+"\n"+fn)
 	cmd.Env, cmd.WaitDelay = recipeEnviron(env), 5*time.Second
 	out := &capped{max: 64 << 10}
-	cmd.Stdout, cmd.ExtraFiles = out, []*os.File{says} // fd 3
+	cmd.Stdout, cmd.ExtraFiles = out, []*os.File{speak} // fd 3
 	err = cmd.Run()
+	// The recipe has exited. Once the host's own end is closed the drain ends, unless a child the recipe left behind
+	// still holds fd 3: that gets a moment and no more, and closing the reading end stops the drain either way.
+	speak.Close()
+	select {
+	case <-drained:
+	case <-time.After(recipeSaysLinger):
+	}
+	listen.Close()
+	<-drained
 	if err == nil {
 		return out.Bytes(), 0, nil
 	}
@@ -135,10 +206,8 @@ func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int
 	if errors.As(err, &ee) {
 		code = ee.ExitCode()
 	}
-	said := make([]byte, 4<<10)
-	n, _ := says.ReadAt(said, 0)
-	msg := printable(said[:n])
-	if n == 0 {
+	msg := printable(says.Bytes())
+	if msg == "" {
 		msg = "no message of its own (its other output isn't shown, since it can carry a credential)"
 	}
 	return out.Bytes(), code, fmt.Errorf("%s exited %d: %s", fn, code, msg)
@@ -157,17 +226,20 @@ func recipeEnviron(env []string) []string {
 	return append(out, env...)
 }
 
-// printable keeps the last line or so of a recipe's stderr, printable only, for an error message.
+// printable keeps the last line or so of what a recipe wrote to fd 3, as printable ASCII only, for an error message
+// or a report (RCP-1): a newline or tab becomes a space and every other byte is dropped. So no control character, C1
+// control such as U+009B, Unicode format character such as U+202E, or invalid UTF-8 reaches a terminal or a report.
 func printable(b []byte) string {
-	s := strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return ' '
+	var keep strings.Builder
+	for _, c := range b {
+		switch {
+		case c == '\n' || c == '\t':
+			keep.WriteByte(' ')
+		case c >= 0x20 && c <= 0x7e:
+			keep.WriteByte(c)
 		}
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, string(b)))
+	}
+	s := strings.TrimSpace(keep.String())
 	if len(s) > 300 {
 		s = "…" + s[len(s)-300:]
 	}
@@ -195,6 +267,24 @@ type RecipeBox struct {
 	Name   string // sandprobe-<12 hex>, made before the create and reported if the create returns no ID
 	BoxID  string // sp_create's whole stdout, once it matched RCP-2's form
 	Target string // sp_ready's line
+	Calls  []obs.ProviderCall
+}
+
+// record lists one call for the report (PRV-3, RCP-2): the recipe by its SHA-256, the function, how it exited and the
+// create-returned ID. Nothing the recipe printed is kept.
+func (b *RecipeBox) record(at time.Time, fn string, code int, err error) {
+	who := b.Recipe.Name
+	if b.Recipe.Own {
+		who = "own"
+	}
+	c := obs.ProviderCall{At: at.UTC(), Call: who + " recipe sha256:" + b.Recipe.SHA256 + " " + fn, OK: err == nil, Exit: code}
+	if b.BoxID != "" {
+		c.ID = b.ID()
+	}
+	if err != nil {
+		c.Error = "the recipe's function failed"
+	}
+	b.Calls = append(b.Calls, c)
 }
 
 // NewRecipeBox fixes the name and the scratch path before anything is created.
@@ -235,17 +325,21 @@ func (b *RecipeBox) ID() string {
 // Create runs sp_create. Its whole stdout must be one ID line (RCP-2). An ID with a failed create is kept, so the
 // box it names is still deleted; no ID leaves only the name, reported and never deleted.
 func (b *RecipeBox) Create(ctx context.Context) error {
-	out, _, err := b.Recipe.call(ctx, "sp_create", b.env())
+	at := time.Now()
+	out, code, err := b.Recipe.call(ctx, "sp_create", b.env())
 	id := strings.TrimSuffix(string(out), "\n")
 	if !recipeID.MatchString(id) {
 		why := "its output isn't one ID line"
 		if err != nil {
 			why = err.Error()
 		}
-		return fmt.Errorf("the create returned no ID (%s); a box named %s may exist and wasn't deleted (RCP-2)", why, b.Name)
+		err = fmt.Errorf("the create returned no ID (%s); a box named %s may exist and wasn't deleted (RCP-2)", why, b.Name)
+		b.record(at, "sp_create", code, err)
+		return err
 	}
 	b.BoxID = id
 	b.ExecBox.Env = recipeEnviron(b.env())
+	b.record(at, "sp_create", code, err)
 	return err
 }
 
@@ -269,12 +363,20 @@ func (b *RecipeBox) Delete(ctx context.Context) error {
 	}
 	deleteErr := errors.New("not asked")
 	if b.Recipe.AddressedBy != "name" || b.whois(ctx) == nil { // a name that holds another box isn't deleted
-		_, _, deleteErr = b.Recipe.call(ctx, "sp_delete", b.env())
+		at := time.Now()
+		var code int
+		_, code, deleteErr = b.Recipe.call(ctx, "sp_delete", b.env())
+		b.record(at, "sp_delete", code, deleteErr)
 	}
 	deadline := time.Now().Add(RecipeGoneLimit)
 	last := "never answered"
 	for {
+		at := time.Now()
 		_, code, err := b.Recipe.call(ctx, "sp_gone", b.env())
+		over := time.Now().After(deadline) || ctx.Err() != nil
+		if err == nil || over {
+			b.record(at, "sp_gone", code, err) // the last answer only
+		}
 		switch {
 		case err == nil:
 			return nil
@@ -283,7 +385,7 @@ func (b *RecipeBox) Delete(ctx context.Context) error {
 		default:
 			last = "the provider couldn't say: " + err.Error()
 		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
+		if over {
 			return fmt.Errorf("%s isn't confirmed deleted (%s; the delete: %v)", b.ID(), last, deleteErr)
 		}
 		select {
@@ -296,8 +398,21 @@ func (b *RecipeBox) Delete(ctx context.Context) error {
 // RecipeResidual is what a recipe run's report says it can't vouch for (PRV-1, RCP-2, RCP-3, RCP-4).
 func RecipeResidual(r *Recipe, target string, attested []string) string {
 	s := "This box was made for this run through the " + r.Name + " recipe in " + target + ", reached through its " +
-		"sp_shell, and deleted only by the ID its create returned. The recipe ran on this machine with your own " +
-		"credentials and permissions. Persistence across a reset (PER-5) isn't tested: the recipe has no reset (RCP-3)."
+		"sp_shell, and deleted only by the ID its create returned."
+	if r.Own { // RCP-4: nobody reviewed it, and what its functions did with the ID is its own code
+		s = "This box was made for this run through your own recipe (SHA-256 " + r.SHA256 + "), which names its provider as \"" +
+			r.Provider + "\": that is the recipe's own word, and Sandprobe hasn't reviewed the recipe or that provider's " +
+			"terms (RCP-4). It was made in " + target + ", reached through the recipe's sp_shell, and deleted through its " +
+			"sp_delete, which was given the ID its create returned, with the name and the target, and is required to act " +
+			"only on that ID: Sandprobe can't enforce what the recipe does with them, and that the box is gone is the " +
+			"recipe's sp_gone saying so."
+	}
+	s += " The recipe ran on this machine with your own credentials and permissions. Persistence across a reset (PER-5) isn't tested: "
+	if r.Reset {
+		s += "the recipe defines a reset, but recipe resets aren't built yet, so it was never called (RCP-3)."
+	} else {
+		s += "the recipe has no reset (RCP-3)."
+	}
 	var off []string
 	for _, id := range r.Exclusions {
 		if !slices.Contains(attested, id) {

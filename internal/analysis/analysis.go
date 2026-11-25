@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -18,6 +19,9 @@ import (
 const MaxReport = 8 << 20
 
 var ErrInput = errors.New("unsupported, inconsistent or unsafe report input")
+
+// recipeSHA256 is the one form run.recipe's digest takes (RCP-4).
+var recipeSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Load never follows the final symlink, opens devices or accepts unframed JSON.
 func Load(path string) (*report.Doc, error) {
@@ -45,6 +49,9 @@ func Parse(b []byte) (*report.Doc, error) {
 // absent either (GRD-1).
 func canonicalNewFields(b []byte, d *report.Doc) bool {
 	var p struct {
+		Run struct {
+			Recipe json.RawMessage `json:"recipe"`
+		} `json:"run"`
 		Grade struct {
 			Letter json.RawMessage `json:"letter"`
 		} `json:"grade"`
@@ -61,7 +68,10 @@ func canonicalNewFields(b []byte, d *report.Doc) bool {
 	if json.Unmarshal(b, &p) != nil || len(p.Checks) != len(d.Checks) {
 		return false
 	}
-	if p.Grade.Letter != nil && d.Schema == report.SchemaNoLetter {
+	if p.Grade.Letter != nil && (d.Schema == report.SchemaNoLetter || d.Schema == report.SchemaOwnRecipe) {
+		return false
+	}
+	if p.Run.Recipe != nil && d.Run.Recipe == nil { // AGT-6, RCP-4: a present run.recipe is never null
 		return false
 	}
 	if p.Manifest.SkipKinds != nil && len(d.Manifest.SkipKinds) == 0 || p.Manifest.Attested != nil && len(d.Manifest.Attested) == 0 {
@@ -127,7 +137,8 @@ func Validate(d *report.Doc) error {
 
 	// AGT-6: sandprobe/6 has no letter and takes any earlier version's fields, each under its own rules below. An
 	// earlier version is exactly the one its fields need, and carries its letter.
-	legacy := d.Schema != report.SchemaNoLetter
+	// sandprobe/7 is sandprobe/6 with run.recipe, and is declared exactly when the report carries it (RCP-4, below).
+	legacy := d.Schema != report.SchemaNoLetter && d.Schema != report.SchemaOwnRecipe
 	if legacy && d.Schema != report.SchemaFor(d.Manifest) || legacy != (d.Grade.Letter != nil) {
 		return ErrInput
 	}
@@ -139,6 +150,14 @@ func Validate(d *report.Doc) error {
 		return ErrInput
 	}
 	if !slices.Contains([]string{"exec", "entrypoint"}, d.Run.Mode) {
+		return ErrInput
+	}
+	// RCP-4: run.recipe is read only whole. It is there exactly when the run's provider is "recipe" and exactly when
+	// the report declares sandprobe/7 (AGT-6), saying the recipe is the person's own (a shipped recipe's run carries no
+	// record), with the SHA-256 in its one form, on a box Sandprobe created. So a reader can tell an own-recipe report
+	// from any other by it.
+	if rec := d.Run.Recipe; (rec != nil) != (d.Run.Provider == host.OwnRecipeProvider) || (rec != nil) != (d.Schema == report.SchemaOwnRecipe) ||
+		rec != nil && (!rec.Own || !recipeSHA256.MatchString(rec.SHA256) || !d.Run.Box.CreatedBySandprobe) {
 		return ErrInput
 	}
 	if d.Manifest.BoxID == "" || d.Manifest.BoxID != d.Run.Box.ProviderID || d.Manifest.ProbeSHA256 == "" || d.Manifest.ProbeSHA256 != d.Probe.SHA256 {
@@ -502,7 +521,8 @@ func Compare(a, b *report.Doc) Comparison {
 	}
 	// SCR-2: a changed set of provider-terms skips changes which categories the score counts, so it's a changed setup;
 	// so does any change to a declared provider (PRV-17), even with the same skips.
-	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) || a.Manifest.DeclaredProvider != b.Manifest.DeclaredProvider {
+	if !reflect.DeepEqual(a.Manifest.Targets, b.Manifest.Targets) || !reflect.DeepEqual(a.Manifest.Discover, b.Manifest.Discover) || !reflect.DeepEqual(a.Manifest.Overrides, b.Manifest.Overrides) || a.Manifest.CanaryTCP80Protocol != b.Manifest.CanaryTCP80Protocol || a.Manifest.Reset != b.Manifest.Reset || a.Manifest.AllowLocalProxy != b.Manifest.AllowLocalProxy || a.Manifest.ProxyMalformed != b.Manifest.ProxyMalformed || a.Manifest.Proxy != b.Manifest.Proxy || a.Manifest.KubeAPI != b.Manifest.KubeAPI || !slices.Equal(termsSkips(a.Manifest), termsSkips(b.Manifest)) || a.Manifest.DeclaredProvider != b.Manifest.DeclaredProvider ||
+		!reflect.DeepEqual(a.Run.Recipe, b.Run.Recipe) { // RCP-4: different host code made and deleted the boxes
 		out.ContextChanges = append(out.ContextChanges, "declared_configuration")
 	}
 	rowsA, rowsB := map[string]report.Check{}, map[string]report.Check{}
