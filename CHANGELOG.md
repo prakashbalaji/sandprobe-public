@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.1 (2026-11-24)
 
 - `compare` now says what got better, so a fix loop (run, fix, run again, compare) shows its progress: each check that
   was a finding or unknown and now passes with proof or is verified absent; separate lists, never counted as better,
