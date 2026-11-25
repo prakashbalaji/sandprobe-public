@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"sandprobe/internal/analysis"
 	"sandprobe/internal/host"
@@ -175,7 +177,7 @@ func TestOwnRecipePlan(t *testing.T) {
 	for _, want := range []string{"The plan for your own recipe", "the file my-recipe.sh, SHA-256 " + sum, "it is your own recipe, not one Sandprobe ships",
 		"Sandprobe hasn't reviewed it", `it names its provider as "modal": that is the recipe's own word`, "Sandprobe hasn't reviewed that provider's terms",
 		"it is trusted host code", "with your own credentials and permissions", "its sp_ready has already run", "where the box will be made: a test place",
-		"SEC-4, EGR-3, AMP-6, AMP-7 are off", "its header can't turn on any of SEC-4, EGR-3, AMP-6, AMP-7", "through your recipe's sp_delete, which gets only the ID its create returned",
+		"SEC-4, EGR-3, AMP-6, AMP-7 are off", "its header can't turn on any of SEC-4, EGR-3, AMP-6, AMP-7", "through your recipe's sp_delete, which is given the ID its create returned, with the name and the target, and is required to act only on that ID", "Sandprobe can't enforce what your recipe does with them",
 		"sandprobe-", "as agent, checked before any check runs", "you chose -no-canary", "recipe resets aren't built yet, so it's never called", "PER-5 is skipped (RCP-3)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the plan doesn't say %q:\n%s", want, out.String())
@@ -430,7 +432,7 @@ func TestOwnRecipeAnnounced(t *testing.T) {
 }
 
 // ownSaved is a saved Docker report as a run through a person's own recipe would have written it (RCP-4): the four
-// default exclusions skipped as host.Plan plans them, sandprobe/6, the box created by Sandprobe, and run.recipe.
+// default exclusions skipped as host.Plan plans them, sandprobe/7, the box created by Sandprobe, and run.recipe.
 func ownSaved(t *testing.T) report.Doc {
 	t.Helper()
 	b, err := os.ReadFile(skipSaved(t, host.OwnRecipeProvider, host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn}))
@@ -442,7 +444,7 @@ func ownSaved(t *testing.T) report.Doc {
 		t.Fatal(err)
 	}
 	d = noLetter(d)
-	d.Run.Box.CreatedBySandprobe = true
+	d.Schema, d.Run.Box.CreatedBySandprobe = report.SchemaOwnRecipe, true
 	d.Run.Recipe = &report.RunRecipe{Own: true, SHA256: strings.Repeat("0123456789abcdef", 4)}
 	return d
 }
@@ -456,7 +458,7 @@ func TestOwnRecipeReportConsumers(t *testing.T) {
 	d := ownSaved(t)
 	good := writeDoc(t, d)
 	record := `"recipe":{"own":true,"sha256":"` + d.Run.Recipe.SHA256 + `"}`
-	if b, _ := os.ReadFile(good); !bytes.Contains(b, []byte(record)) {
+	if b, _ := os.ReadFile(good); !bytes.Contains(b, []byte(record)) || !bytes.Contains(b, []byte(`"schema":"sandprobe/7"`)) {
 		t.Fatalf("the saved report doesn't carry the record as a run writes it: %s", b)
 	}
 	forged := map[string]string{}
@@ -466,6 +468,7 @@ func TestOwnRecipeReportConsumers(t *testing.T) {
 		"an upper-case SHA": func(d *report.Doc) { d.Run.Recipe.SHA256 = strings.ToUpper(d.Run.Recipe.SHA256) },
 		"not created by us": func(d *report.Doc) { d.Run.Box.CreatedBySandprobe = false },
 		"as run exec":       func(d *report.Doc) { d.Run.Provider = "exec" },
+		"as sandprobe/6":    func(d *report.Doc) { d.Schema = report.SchemaNoLetter },
 	} {
 		f := ownSaved(t)
 		edit(&f)
@@ -507,8 +510,8 @@ func TestOwnRecipeReportConsumers(t *testing.T) {
 	}
 	page, _ := os.ReadFile(pages[0])
 	data := reportData.FindSubmatch(page)
-	if data == nil || !bytes.Contains(data[1], []byte(record)) {
-		t.Fatalf("the re-rendered page's report doesn't carry the record")
+	if data == nil || !bytes.Contains(data[1], []byte(record)) || !bytes.Contains(data[1], []byte(`"schema":"sandprobe/7"`)) {
+		t.Fatalf("the re-rendered page's report doesn't carry the record as sandprobe/7")
 	}
 	embedded := filepath.Join(dir, "embedded.json")
 	os.WriteFile(embedded, data[1], 0o644)
@@ -516,6 +519,80 @@ func TestOwnRecipeReportConsumers(t *testing.T) {
 	run([]string{"scorecard", good, "-o", "json"}, &card, &errs)
 	if code := run([]string{"scorecard", embedded, "-o", "json"}, &again, &errs); code == exitUsage || again.String() != card.String() {
 		t.Errorf("the page's embedded report doesn't read back to the same card: exit %d\n%s", code, again.String())
+	}
+	// CMP-1: unequal records are a changed setup, never "no observed change": another SHA-256, or the same run as
+	// run exec wrote it, with no record. The same report on both sides is a matched pair.
+	other := ownSaved(t)
+	other.Run.Recipe.SHA256 = strings.Repeat("fedcba9876543210", 4)
+	another := writeDoc(t, other)
+	exec := skipSaved(t, "exec", host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
+	for name, tc := range map[string]struct {
+		before, after string
+		code          int
+	}{
+		"the same recipe":           {good, good, exitGraded},
+		"another SHA-256":           {good, another, exitPartial},
+		"another SHA-256, reversed": {another, good, exitPartial},
+		"run exec, then a recipe":   {exec, good, exitPartial},
+		"a recipe, then run exec":   {good, exec, exitPartial},
+	} {
+		var out, errs bytes.Buffer
+		code := run([]string{"compare", tc.before, tc.after, "-o", "json"}, &out, &errs)
+		var c struct {
+			ContextChanges   []string `json:"context_changes"`
+			NoObservedChange bool     `json:"no_observed_change"`
+		}
+		json.Unmarshal(out.Bytes(), &c)
+		matched := tc.code == exitGraded
+		if code != tc.code || c.NoObservedChange != matched || slices.Contains(c.ContextChanges, "declared_configuration") == matched {
+			t.Errorf("compare, %s: exit %d, %+v %s", name, code, c, errs.String())
+		}
+	}
+}
+
+// RCP-1: what a recipe writes to fd 3 reaches a terminal, an error document and a report as printable ASCII only. A
+// C1 control (U+009B), a Unicode format character (U+202E) and an invalid UTF-8 sequence, with ESC and a carriage
+// return beside them, are dropped on every path: a failing sp_ready, a failing sp_create, and a delete that can't be
+// confirmed, whose text becomes the report's cleanup outcome.
+func TestOwnRecipeHostileMessages(t *testing.T) {
+	const hostile = `'the template \302\2331;31m is \342\200\256 gone \377\300\257 \033[2J \r now'`
+	clean := func(s string) bool {
+		return utf8.ValidString(s) && !strings.ContainsAny(s, "\u009b‮�\x1b\r") && !strings.Contains(s, `\u009b`) && !strings.Contains(s, `‮`) &&
+			!strings.Contains(s, `�`) && !strings.Contains(s, `\u001b`) && strings.Contains(s, "the template 1;31m is  gone  [2J  now")
+	}
+	ready, _, _ := ownFile(t, ownHeader("")+strings.Replace(ownBody, `sp_ready() { note ready; echo "a test place"; }`, `sp_ready() { printf `+hostile+` >&3; return 1; }`, 1))
+	for _, mode := range []string{"text", "json"} {
+		var out, errs bytes.Buffer
+		if code := run([]string{"plan", "-recipe", ready, "-no-canary", "-o", mode}, &out, &errs); code != exitLogin || !clean(out.String()+errs.String()) {
+			t.Errorf("a failing sp_ready (%s): exit %d, %q", mode, code, out.String()+errs.String())
+		}
+	}
+	create, _, _ := ownFile(t, ownHeader("")+strings.Replace(ownBody, `sp_create() { note create; echo box-1; }`, `sp_create() { printf `+hostile+` >&3; exit 1; }`, 1))
+	for _, mode := range []string{"text", "json"} {
+		var out, errs bytes.Buffer
+		if code := run([]string{"run", "-recipe", create, "-no-canary", "-y", "-o", mode}, &out, &errs); code != exitCleanup || !clean(out.String()+errs.String()) {
+			t.Errorf("a failing sp_create (%s): exit %d, %q", mode, code, out.String()+errs.String())
+		}
+	}
+	// The cleanup's own words, which the report records as cleanup.outcome and stderr gets at once.
+	defer func(d, g, p time.Duration) { recipeDeleteLimit, host.RecipeGoneLimit, host.RecipeGonePoll = d, g, p }(recipeDeleteLimit, host.RecipeGoneLimit, host.RecipeGonePoll)
+	recipeDeleteLimit, host.RecipeGoneLimit, host.RecipeGonePoll = 2*time.Second, 100*time.Millisecond, 20*time.Millisecond
+	gone, _, _ := ownFile(t, ownHeader("")+strings.Replace(ownBody, "sp_gone() { note gone; }", `sp_gone() { printf `+hostile+` >&3; return 2; }`, 1))
+	rc, err := ownRecipe(gone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := host.NewRecipeBox(rc, "a test place", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := box.Create(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var errs bytes.Buffer
+	outcome, cleaned := recipeCleanup(box, recipeJournal{Recipe: rc.Name, Name: box.Name}, &errs)
+	if cleaned || !clean(outcome) || !clean(errs.String()) || !strings.Contains(outcome, "NOT confirmed deleted") {
+		t.Errorf("the cleanup outcome: cleaned %v, %q\n%q", cleaned, outcome, errs.String())
 	}
 }
 
@@ -593,7 +670,7 @@ func TestOwnRecipeDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the saved report doesn't load: %v", err)
 	}
-	if !d.Grade.Valid || d.Run.Provider != "recipe" || d.Run.Mode != "exec" || !d.Run.Box.CreatedBySandprobe || d.Schema != report.SchemaNoLetter ||
+	if !d.Grade.Valid || d.Run.Provider != "recipe" || d.Run.Mode != "exec" || !d.Run.Box.CreatedBySandprobe || d.Schema != report.SchemaOwnRecipe ||
 		len(d.Manifest.SkipKinds) != 4 || len(d.Manifest.Attested) != 0 || d.Manifest.DeclaredProvider != "" {
 		t.Errorf("run %+v, schema %s, valid %v (%s), kinds %v", d.Run, d.Schema, d.Grade.Valid, d.Grade.Invalid, d.Manifest.SkipKinds)
 	}

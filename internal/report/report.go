@@ -38,8 +38,12 @@ const SchemaDeclaredProvider = "sandprobe/5"
 // defines the letter, so every report Build writes declares it, whatever earlier fields its manifest carries (AGT-6).
 const SchemaNoLetter = "sandprobe/6"
 
+// SchemaOwnRecipe adds run.recipe (RCP-4), and nothing else: sandprobe/6 with the record. 0.3.3 shipped sandprobe/6
+// without it and would refuse the field, so only a report that carries the record declares this version (AGT-6).
+const SchemaOwnRecipe = "sandprobe/7"
+
 // Schemas are the versions this build reads, oldest first.
-var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider, SchemaNoLetter}
+var Schemas = []string{Schema, SchemaSkipKinds, SchemaHostController, SchemaCanaryHTTP, SchemaDeclaredProvider, SchemaNoLetter, SchemaOwnRecipe}
 
 // SchemaFor is AGT-6 for a report that carries a letter: the lowest of sandprobe/1 to sandprobe/5 whose fields a
 // report with this manifest needs. BuildLegacy declares it, and a reader requires a report of those versions to
@@ -129,8 +133,8 @@ type Run struct {
 	Mode       string `json:"mode"`
 	Provider   string `json:"provider"`
 	Box        Box    `json:"box"`
-	// Recipe is RCP-4's record of a run made through a person's own recipe, and of no other run. It joins sandprobe/6,
-	// which no release has shipped (AGT-6). ANL-1 reads it only whole.
+	// Recipe is RCP-4's record of a run made through a person's own recipe, and of no other run. A report that carries
+	// it declares sandprobe/7 (AGT-6). ANL-1 reads it only whole.
 	Recipe   *RunRecipe `json:"recipe,omitempty"`
 	NoCanary bool       `json:"no_canary,omitempty"` // HCN-5, set by the host from its manifest, never by the box
 }
@@ -276,8 +280,8 @@ func Build(r *host.Run, m Meta) Doc {
 		Toolchain: []any{}, Overrides: []string{}, Contacted: []Contact{}, Receipts: r.Evidence.Receipts, Markers: []Marker{},
 		ProviderCalls: m.Calls, Cleanup: Cleanup{Outcome: m.Cleanup, Residual: m.Residual},
 		Limits: Limits{NotTested: NotTested, NotProven: rep.NotProven, ScopedOut: rep.ScopedOut, Skipped: rep.Skipped}}
-	if m.OwnRecipeSHA256 != "" { // RCP-4
-		d.Run.Recipe = &RunRecipe{Own: true, SHA256: m.OwnRecipeSHA256}
+	if m.OwnRecipeSHA256 != "" { // RCP-4, AGT-6: the record, and the one version that carries it
+		d.Schema, d.Run.Recipe = SchemaOwnRecipe, &RunRecipe{Own: true, SHA256: m.OwnRecipeSHA256}
 	}
 	if man.CanaryTCP80Protocol != "" && obs.ValidCanaryTCP80Protocol(man.CanaryTCP80Protocol) {
 		d.Toolchain = append(d.Toolchain, map[string]string{"canary_tcp80_protocol": man.CanaryTCP80Protocol})

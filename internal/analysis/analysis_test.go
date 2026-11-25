@@ -279,7 +279,7 @@ func TestCompareBetter(t *testing.T) {
 	}
 }
 
-// ownRecipeRun is a real Docker fixture run as a run through a person's own recipe writes it (RCP-4): sandprobe/6,
+// ownRecipeRun is a real Docker fixture run as a run through a person's own recipe writes it (RCP-4): sandprobe/7,
 // run.provider "recipe", the box created by Sandprobe, opt-in kinds, and run.recipe with the recipe's SHA-256.
 func ownRecipeRun(t *testing.T) report.Doc {
 	t.Helper()
@@ -287,7 +287,7 @@ func ownRecipeRun(t *testing.T) report.Doc {
 	if d.Schema != report.SchemaNoLetter || d.Run.Provider != "exec" || d.Run.Recipe != nil {
 		t.Fatalf("the fixture run: %s %s %+v", d.Schema, d.Run.Provider, d.Run.Recipe)
 	}
-	d.Run.Provider, d.Run.Box.CreatedBySandprobe = host.OwnRecipeProvider, true
+	d.Schema, d.Run.Provider, d.Run.Box.CreatedBySandprobe = report.SchemaOwnRecipe, host.OwnRecipeProvider, true
 	d.Run.Recipe = &report.RunRecipe{Own: true, SHA256: strings.Repeat("0123456789abcdef", 4)}
 	return d
 }
@@ -320,8 +320,8 @@ func TestOwnRecipeReport(t *testing.T) {
 }
 
 // RCP-4, AGT-6 and ANL-1: run.recipe is read only whole, so a reader can rely on it to tell an own-recipe report from
-// any other. It is there exactly when run.provider is "recipe", under sandprobe/6 only, with own true, a SHA-256 of 64
-// lowercase hex digits and a box Sandprobe created. Every other shape is refused, and each control beside a forged
+// any other. It is there exactly when run.provider is "recipe" and exactly when the report declares sandprobe/7, with
+// own true, a SHA-256 of 64 lowercase hex digits and a box Sandprobe created. Every other shape is refused, and each control beside a forged
 // report reads, so the record alone refuses it.
 func TestOwnRecipeRecordForged(t *testing.T) {
 	sha := strings.Repeat("0123456789abcdef", 4)
@@ -377,7 +377,9 @@ func TestOwnRecipeRecordForged(t *testing.T) {
 		"another case of a key": set("SHA256", sha),
 		"not created by us":     func(_, run map[string]any) { run["box"].(map[string]any)["created_by_sandprobe"] = false },
 		"created_by absent":     func(_, run map[string]any) { delete(run["box"].(map[string]any), "created_by_sandprobe") },
-		"under sandprobe/7":     func(doc, _ map[string]any) { doc["schema"] = "sandprobe/7" },
+		"under sandprobe/8":     func(doc, _ map[string]any) { doc["schema"] = "sandprobe/8" },
+		"with a letter":         func(doc, _ map[string]any) { doc["grade"].(map[string]any)["letter"] = "F" },
+		"with a null letter":    func(doc, _ map[string]any) { doc["grade"].(map[string]any)["letter"] = nil },
 	}
 	forged["digest absent"] = drop("sha256")
 	for name, v := range map[string]any{"empty": "", "null": nil, "short": sha[:63], "long": sha + "0", "upper case": strings.ToUpper(sha),
@@ -409,10 +411,27 @@ func TestOwnRecipeRecordForged(t *testing.T) {
 		if err := parse(d, rec(nil)); err == nil {
 			t.Errorf("%s: accepted with a null record", name)
 		}
+		// AGT-6: sandprobe/7 is declared only with the record, and the record only on a "recipe" report.
+		d.Schema = report.SchemaOwnRecipe
+		if err := parse(d, nil); err == nil {
+			t.Errorf("%s: accepted as sandprobe/7 with no record", name)
+		}
+		if err := parse(d, rec(whole())); err == nil {
+			t.Errorf("%s: accepted as sandprobe/7 with a record", name)
+		}
 	}
-	// AGT-6: sandprobe/1 to sandprobe/5 never carry the record. The older form of this run reads as run exec wrote
-	// it (sandprobe/2, with its letter); the same report as a "recipe" one is refused under every older version, with
-	// the record or without it.
+	// AGT-6: sandprobe/1 to sandprobe/6 never carry the record. As sandprobe/6 the report is refused with it, and
+	// without it too, since a "recipe" report always has one.
+	six := ownRecipeRun(t)
+	six.Schema = report.SchemaNoLetter
+	if err := parse(six, nil); err == nil {
+		t.Error("sandprobe/6: accepted with the record")
+	}
+	if err := parse(six, func(_, run map[string]any) { delete(run, "recipe") }); err == nil {
+		t.Error("sandprobe/6: a recipe report accepted without the record")
+	}
+	// The older form of this run reads as run exec wrote it (sandprobe/2, with its letter); the same report as a
+	// "recipe" one is refused under every older version, with the record or without it.
 	letter := "F"
 	old := attestedRun(t, false)
 	old.Schema, old.Grade.Letter = report.SchemaFor(old.Manifest), &letter
@@ -432,6 +451,33 @@ func TestOwnRecipeRecordForged(t *testing.T) {
 		d.Schema, d.Grade.Letter, d.Run.Recipe = version, &letter, own.Run.Recipe
 		if err := parse(d, nil); err == nil {
 			t.Errorf("%s: a run exec report accepted with the record", version)
+		}
+	}
+}
+
+// CMP-1 and RCP-4: two own-recipe reports of the same run with different recipe SHA-256s, or one with the record
+// against the same run with none, are a declared_configuration change and never "no observed change": different host
+// code made and deleted the boxes. The same record on both sides is a matched pair.
+func TestCompareOwnRecipe(t *testing.T) {
+	a, same, other := ownRecipeRun(t), ownRecipeRun(t), ownRecipeRun(t)
+	other.Run.Recipe.SHA256 = strings.Repeat("fedcba9876543210", 4)
+	none := ownRecipeRun(t) // the same run as run exec wrote it: no record
+	none.Schema, none.Run.Provider, none.Run.Recipe = report.SchemaNoLetter, "exec", nil
+	bare := ownRecipeRun(t) // the record alone removed, as Compare is handed it
+	bare.Run.Recipe = nil
+	for _, d := range []report.Doc{a, same, other, none} {
+		if raw, _ := json.Marshal(d); func() error { _, err := Parse(raw); return err }() != nil {
+			t.Fatalf("a report this test compares doesn't read: %s %+v", d.Run.Provider, d.Run.Recipe)
+		}
+	}
+	if c := Compare(&a, &same); !c.NoObservedChange || len(c.ContextChanges) != 0 {
+		t.Errorf("the same record: %+v", c.ContextChanges)
+	}
+	for name, pair := range map[string][2]*report.Doc{"another SHA-256": {&a, &other}, "another SHA-256, reversed": {&other, &a},
+		"no record after": {&a, &bare}, "no record before": {&bare, &a}, "run exec after": {&a, &none}, "run exec before": {&none, &a}} {
+		c := Compare(pair[0], pair[1])
+		if c.NoObservedChange || !slices.Contains(c.ContextChanges, "declared_configuration") {
+			t.Errorf("%s: no observed change %v, %v", name, c.NoObservedChange, c.ContextChanges)
 		}
 	}
 }

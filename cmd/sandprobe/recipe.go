@@ -150,7 +150,7 @@ func recipePlan(b *host.RecipeBox, as string, c canaryChoice, attested []string,
 	if rc.Own { // RCP-4: what nobody reviewed, before anything else
 		through = "your own recipe"
 		runs = "on this machine, your recipe's sp_ functions, with your own credentials and permissions (recipe SHA-256 " + rc.SHA256 + ")"
-		deletes = "the box, through your recipe's sp_delete, which gets only the ID its create returned; then waits for its sp_gone to say the box is gone, and if it doesn't, the run exits 7 naming it"
+		deletes = "the box, through your recipe's sp_delete, which is given the ID its create returned, with the name and the target, and is required to act only on that ID (Sandprobe can't enforce what your recipe does with them); then waits for its sp_gone to say the box is gone, and if it doesn't, the run exits 7 naming it"
 		own = []string{
 			"the file " + shownPath(rc.File) + ", SHA-256 " + rc.SHA256 + ": the bytes Sandprobe read once, and the only ones it runs",
 			"it is your own recipe, not one Sandprobe ships: Sandprobe hasn't reviewed it",

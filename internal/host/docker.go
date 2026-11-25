@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -176,6 +177,12 @@ func (c *capped) Write(p []byte) (int, error) {
 		c.Buffer.Write(p[:min(len(p), room)])
 	}
 	return len(p), nil
+}
+
+// ReadFrom copies through Write, so the cap holds. Without it io.Copy, which os/exec uses for a command's output,
+// finds bytes.Buffer's own ReadFrom and reads everything, however much, into memory.
+func (c *capped) ReadFrom(r io.Reader) (int64, error) {
+	return io.Copy(struct{ io.Writer }{c}, r)
 }
 
 // DockerCanary is the canary in a local container on the fixtures' network (Tests). The host reaches its ports

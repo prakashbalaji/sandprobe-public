@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -52,6 +53,13 @@ var (
 	// RecipeGoneLimit bounds the wait for sp_gone's 0 after the delete, asked every RecipeGonePoll; tests shorten both.
 	RecipeGoneLimit = 2 * time.Minute
 	RecipeGonePoll  = 2 * time.Second
+)
+
+// recipeSaysMax bounds what the host keeps of a recipe's fd 3, and recipeSaysLinger how long a child left holding fd 3
+// can delay a call after the recipe exits (RCP-1).
+var (
+	recipeSaysMax    = 4 << 10
+	recipeSaysLinger = time.Second
 )
 
 // RecipeMax bounds a recipe's bytes (RCP-1).
@@ -161,23 +169,35 @@ func ParseRecipe(name string, text []byte) (*Recipe, error) {
 // error carrying the exit code and what the recipe said on fd 3. Its stderr goes to /dev/null: kubectl and an exec
 // plugin write there, and it can carry a credential (AGENTS rule 3). A recipe runs its child commands with fd 3
 // closed, so none of them can write a message as the recipe.
+//
+// fd 3 is a pipe the host drains while the recipe runs, keeping the first recipeSaysMax bytes and discarding the
+// rest: the text has no file and no name, and a recipe that floods it grows nothing (RCP-1).
 func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, RecipeCallLimit)
 	defer cancel()
-	says, err := os.CreateTemp("", "sandprobe-recipe-says-*")
+	listen, speak, err := os.Pipe()
 	if err != nil {
-		return nil, -1, fmt.Errorf("%s didn't run: no file for its messages: %w", fn, err)
+		return nil, -1, fmt.Errorf("%s didn't run: no pipe for its messages: %w", fn, err)
 	}
-	defer says.Close()
-	// Unlinked before the recipe starts: only the open descriptor reaches it, so no tool can reopen it by its name.
-	if err := os.Remove(says.Name()); err != nil {
-		return nil, -1, fmt.Errorf("%s didn't run: its message file couldn't be unlinked: %w", fn, err)
-	}
+	says, drained := &capped{max: recipeSaysMax}, make(chan struct{})
+	go func() {
+		io.Copy(says, listen)
+		close(drained)
+	}()
 	cmd := exec.CommandContext(ctx, "sh", "-c", string(r.Text)+"\n"+fn)
 	cmd.Env, cmd.WaitDelay = recipeEnviron(env), 5*time.Second
 	out := &capped{max: 64 << 10}
-	cmd.Stdout, cmd.ExtraFiles = out, []*os.File{says} // fd 3
+	cmd.Stdout, cmd.ExtraFiles = out, []*os.File{speak} // fd 3
 	err = cmd.Run()
+	// The recipe has exited. Once the host's own end is closed the drain ends, unless a child the recipe left behind
+	// still holds fd 3: that gets a moment and no more, and closing the reading end stops the drain either way.
+	speak.Close()
+	select {
+	case <-drained:
+	case <-time.After(recipeSaysLinger):
+	}
+	listen.Close()
+	<-drained
 	if err == nil {
 		return out.Bytes(), 0, nil
 	}
@@ -186,10 +206,8 @@ func (r *Recipe) call(ctx context.Context, fn string, env []string) ([]byte, int
 	if errors.As(err, &ee) {
 		code = ee.ExitCode()
 	}
-	said := make([]byte, 4<<10)
-	n, _ := says.ReadAt(said, 0)
-	msg := printable(said[:n])
-	if n == 0 {
+	msg := printable(says.Bytes())
+	if msg == "" {
 		msg = "no message of its own (its other output isn't shown, since it can carry a credential)"
 	}
 	return out.Bytes(), code, fmt.Errorf("%s exited %d: %s", fn, code, msg)
@@ -208,17 +226,20 @@ func recipeEnviron(env []string) []string {
 	return append(out, env...)
 }
 
-// printable keeps the last line or so of a recipe's stderr, printable only, for an error message.
+// printable keeps the last line or so of what a recipe wrote to fd 3, as printable ASCII only, for an error message
+// or a report (RCP-1): a newline or tab becomes a space and every other byte is dropped. So no control character, C1
+// control such as U+009B, Unicode format character such as U+202E, or invalid UTF-8 reaches a terminal or a report.
 func printable(b []byte) string {
-	s := strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return ' '
+	var keep strings.Builder
+	for _, c := range b {
+		switch {
+		case c == '\n' || c == '\t':
+			keep.WriteByte(' ')
+		case c >= 0x20 && c <= 0x7e:
+			keep.WriteByte(c)
 		}
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, string(b)))
+	}
+	s := strings.TrimSpace(keep.String())
 	if len(s) > 300 {
 		s = "…" + s[len(s)-300:]
 	}
@@ -382,7 +403,9 @@ func RecipeResidual(r *Recipe, target string, attested []string) string {
 		s = "This box was made for this run through your own recipe (SHA-256 " + r.SHA256 + "), which names its provider as \"" +
 			r.Provider + "\": that is the recipe's own word, and Sandprobe hasn't reviewed the recipe or that provider's " +
 			"terms (RCP-4). It was made in " + target + ", reached through the recipe's sp_shell, and deleted through its " +
-			"sp_delete, which got only the ID its create returned; that the box is gone is the recipe's sp_gone saying so."
+			"sp_delete, which was given the ID its create returned, with the name and the target, and is required to act " +
+			"only on that ID: Sandprobe can't enforce what the recipe does with them, and that the box is gone is the " +
+			"recipe's sp_gone saying so."
 	}
 	s += " The recipe ran on this machine with your own credentials and permissions. Persistence across a reset (PER-5) isn't tested: "
 	if r.Reset {

@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -107,7 +108,7 @@ func TestOwnRecipe(t *testing.T) {
 			t.Errorf("a shipped parse with no exclusions line: %v", s.Exclusions)
 		}
 		res := RecipeResidual(r, "a place", nil)
-		for _, want := range []string{r.SHA256, `names its provider as "modal"`, "hasn't reviewed the recipe or that provider's terms", "sp_gone saying so", "SEC-4, EGR-3, AMP-6, AMP-7"} {
+		for _, want := range []string{r.SHA256, `names its provider as "modal"`, "hasn't reviewed the recipe or that provider's terms", "sp_gone saying so", "with the name and the target, and is required to act only on that ID", "SEC-4, EGR-3, AMP-6, AMP-7"} {
 			if !strings.Contains(res, want) {
 				t.Errorf("%s: the residual doesn't say %q:\n%s", name, want, res)
 			}
@@ -330,8 +331,8 @@ sp_gone() { :; }
 	}
 }
 
-// AGENTS rule 3: the message file has no name while the recipe runs, so a tool with fd 3 closed can't reopen it to
-// write a message as the recipe.
+// AGENTS rule 3: the recipe's messages go through a pipe, which has no name, so a tool with fd 3 closed finds no file
+// to reopen and write a message as the recipe.
 func TestRecipeMessagesCantBeReopened(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	r, _ := fakeRecipe(t, "id", `
@@ -350,5 +351,110 @@ sp_gone() { :; }
 	}
 	if left, _ := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), "sandprobe-recipe-says-*")); len(left) != 0 {
 		t.Errorf("message files left: %v", left)
+	}
+}
+
+// neverEnds is a reader of y's with no end.
+type neverEnds struct{}
+
+func (neverEnds) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'y'
+	}
+	return len(p), nil
+}
+
+// RCP-1: fd 3 is bounded where it is written. It is a pipe, never a file, so a recipe that floods it grows nothing on
+// disk; the host drains it, keeps the first 4 KiB and discards the rest, so the flood ends at once and the error
+// carries only its start; and a child left holding fd 3 delays the call by about a second, not until it exits.
+func TestRecipeSaysIsBounded(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	r, _ := fakeRecipe(t, "id", `
+sp_create() {
+	[ -p /dev/fd/3 ] || exit 8
+	printf 'START-OF-FLOOD ' >&3
+	head -c 33554432 /dev/zero | tr '\0' 'x' >&3 || exit 9
+	echo ' END-OF-FLOOD' >&3
+	exit 1
+}
+sp_shell() { :; }
+sp_delete() { sleep 30 >/dev/null 2>&1 & echo "left a child holding fd 3" >&3; exit 1; }
+sp_gone() { :; }
+`)
+	start := time.Now()
+	_, code, err := r.call(context.Background(), "sp_create", nil)
+	if code != 1 || err == nil {
+		t.Fatalf("exit %d (8: fd 3 isn't a pipe; 9: the flood's writes failed): %v", code, err)
+	}
+	if msg := err.Error(); len(msg) > 400 || strings.Contains(msg, "END-OF-FLOOD") || !strings.Contains(msg, "xxxxxxxx") {
+		t.Errorf("the error isn't the bounded start of the flood (%d bytes): %.80s", len(msg), msg)
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Errorf("a 32 MiB flood took %v: it wasn't drained", took)
+	}
+	if left, _ := os.ReadDir(os.Getenv("TMPDIR")); len(left) != 0 {
+		t.Errorf("files left for the messages: %v", left)
+	}
+	// What the host keeps, as io.Copy feeds it (os/exec copies a command's output that way): never more than the cap.
+	c := &capped{max: recipeSaysMax}
+	if n, err := io.Copy(c, io.LimitReader(neverEnds{}, 64<<20)); err != nil || n != 64<<20 || c.Len() != recipeSaysMax || recipeSaysMax != 4<<10 {
+		t.Errorf("the capture holds %d bytes of %d, cap %d: %v", c.Len(), n, recipeSaysMax, err)
+	}
+	// RCP-1: a recipe's stdout is bounded the same way.
+	r2, _ := fakeRecipe(t, "id", "sp_create() { head -c 8388608 /dev/zero | tr '\\0' 'x'; }\nsp_shell() { :; }\nsp_delete() { :; }\nsp_gone() { :; }\n")
+	if out, _, _ := r2.call(context.Background(), "sp_create", nil); len(out) != 64<<10 {
+		t.Errorf("stdout kept %d bytes of an 8 MiB flood, cap %d", len(out), 64<<10)
+	}
+	start = time.Now()
+	_, _, err = r.call(context.Background(), "sp_delete", nil)
+	if took := time.Since(start); err == nil || !strings.Contains(err.Error(), "left a child holding fd 3") || took > 10*time.Second {
+		t.Errorf("a child holding fd 3: %v after %v", err, took)
+	}
+}
+
+// RCP-1: what a recipe writes to fd 3 is shown and recorded as printable ASCII only. A C1 control (U+009B, CSI), a
+// Unicode format character (U+202E, right-to-left override), an invalid UTF-8 sequence, ESC and a carriage return are
+// dropped. The same in sp_ready's line or a header value refuses the recipe, and nothing of it is echoed.
+func TestRecipeSaysIsASCII(t *testing.T) {
+	const hostile = `'safe \302\2331;31m \342\200\256 reversed \377\300\257 \033[2J \r text'`
+	ascii := func(s string) bool {
+		for _, c := range []byte(strings.ReplaceAll(s, "…", "")) { // the host's own mark for a cut message
+			if c < 0x20 || c > 0x7e {
+				return false
+			}
+		}
+		return true
+	}
+	r, _ := fakeRecipe(t, "id", `
+sp_create() { printf `+hostile+` >&3; exit 1; }
+sp_shell() { :; }
+sp_delete() { head -c 3000 /dev/zero | tr '\0' 'a' >&3; printf `+hostile+` >&3; exit 1; }
+sp_gone() { printf `+hostile+` >&3; return 2; }
+`)
+	for _, fn := range []string{"sp_create", "sp_delete", "sp_gone"} {
+		_, _, err := r.call(context.Background(), fn, nil)
+		if err == nil || !ascii(err.Error()) || !strings.Contains(err.Error(), "reversed") || !strings.HasSuffix(err.Error(), "text") {
+			t.Errorf("%s: %q", fn, err)
+		}
+	}
+	// The same text through Delete, whose error becomes the report's cleanup outcome.
+	b, _ := NewRecipeBox(r, "t", "")
+	b.BoxID = "box-1"
+	defer func(g, p time.Duration) { RecipeGoneLimit, RecipeGonePoll = g, p }(RecipeGoneLimit, RecipeGonePoll)
+	RecipeGoneLimit, RecipeGonePoll = 100*time.Millisecond, 20*time.Millisecond
+	if err := b.Delete(context.Background()); err == nil || !ascii(err.Error()) || !strings.Contains(err.Error(), "couldn't say") {
+		t.Errorf("delete: %q", err)
+	}
+	for name, raw := range map[string]string{"U+009B": "\xc2\x9b", "U+202E": "\xe2\x80\xae", "invalid UTF-8": "\xff\xc0\xaf"} {
+		line, _ := fakeRecipe(t, "id", "sp_create() { :; }\nsp_shell() { :; }\nsp_delete() { :; }\nsp_gone() { :; }\n")
+		line.Text = []byte(strings.Replace(string(line.Text), `echo "a fake place"`, `printf 'a fake `+raw+`place\n'`, 1))
+		if target, err := line.Ready(context.Background()); err == nil || target != "" || !ascii(err.Error()) {
+			t.Errorf("%s in sp_ready's line: %q %q", name, target, err)
+		}
+		head := strings.Replace(fakeHeader, "%s", "id", 1)
+		text := strings.Replace(head, "provider: a fake", "provider: a "+raw+"fake", 1) + "sp_ready() {\n:\n}\nsp_create() {\n:\n}\nsp_shell() {\n:\n}\nsp_delete() {\n:\n}\nsp_gone() {\n:\n}\n"
+		if _, err := ParseRecipe("x", []byte(text)); err == nil || !ascii(err.Error()) {
+			t.Errorf("%s in a header value: %q", name, err)
+		}
 	}
 }

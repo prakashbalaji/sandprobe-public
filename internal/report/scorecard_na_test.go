@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"html/template"
 	"maps"
@@ -323,7 +324,7 @@ func TestReportSchemaVersions(t *testing.T) {
 			t.Error("a report with no kind carries SkipKinds")
 		}
 	}
-	if Schema != "sandprobe/1" || !slices.Equal(Schemas, []string{"sandprobe/1", "sandprobe/2", "sandprobe/3", "sandprobe/4", "sandprobe/5", "sandprobe/6"}) {
+	if Schema != "sandprobe/1" || !slices.Equal(Schemas, []string{"sandprobe/1", "sandprobe/2", "sandprobe/3", "sandprobe/4", "sandprobe/5", "sandprobe/6", "sandprobe/7"}) {
 		t.Errorf("the versions this build reads: %v", Schemas)
 	}
 }
@@ -409,7 +410,8 @@ func TestOwnRecipePolicy(t *testing.T) {
 }
 
 // RCP-4 and AGT-6: Build writes run.recipe for a run through a person's own recipe, as exactly own and the SHA-256,
-// and no recipe key for any other run, a shipped recipe's included.
+// under sandprobe/7; and no recipe key, under sandprobe/6, for any other run, a shipped recipe's included. The page
+// re-rendered from a saved report embeds a sandprobe/7 report as sandprobe/7, and an older one as sandprobe/6.
 func TestOwnRecipeRecordWritten(t *testing.T) {
 	sha := strings.Repeat("0123456789abcdef", 4)
 	m, pd, ev := replan(t, host.Options{Mode: "exec", Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
@@ -428,8 +430,21 @@ func TestOwnRecipeRecordWritten(t *testing.T) {
 		if want := `{"own":true,"sha256":"` + sha + `"}`; own != "" && string(got) != want || own == "" && has {
 			t.Errorf("%s: run.recipe is %s", provider, got)
 		}
-		if d.Schema != SchemaNoLetter {
+		want := SchemaNoLetter
+		if own != "" {
+			want = SchemaOwnRecipe
+		}
+		if d.Schema != want {
 			t.Errorf("%s: %s", provider, d.Schema)
+		}
+		page, err := SavedHTML(d, "graphite")
+		if err != nil || !bytes.Contains(page, []byte(`"schema":"`+want+`"`)) || (own != "") != bytes.Contains(page, []byte(`"recipe":{"own":true,"sha256":"`+sha+`"}`)) {
+			t.Errorf("%s: the re-rendered page doesn't embed the report as %s: %v", provider, want, err)
+		}
+		letter := "F"
+		d.Schema, d.Grade.Letter, d.Run.Recipe = SchemaSkipKinds, &letter, nil
+		if page, err := SavedHTML(d, "graphite"); err != nil || !bytes.Contains(page, []byte(`"schema":"sandprobe/6"`)) || bytes.Contains(page, []byte(`"letter"`)) {
+			t.Errorf("%s: an older report isn't embedded as sandprobe/6 without its letter: %v", provider, err)
 		}
 	}
 }
