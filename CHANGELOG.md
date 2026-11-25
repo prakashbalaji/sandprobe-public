@@ -25,17 +25,19 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 - A recipe whose header holds a value that isn't printable ASCII, or is over 400 characters, is refused (RCP-1).
 
-- What a recipe writes to fd 3, `run kubernetes`'s included, is shown and recorded as printable ASCII only, and only
-  its first 4 KiB is kept: fd 3 is now a pipe Sandprobe drains, so a recipe that floods it grows nothing (RCP-1).
+- What a recipe writes to fd 3, `run kubernetes`'s included, is filtered to printable ASCII before it is shown or
+  recorded, and only its first 4 KiB is kept, with a mark where a message was cut. fd 3 is now a pipe Sandprobe
+  drains, so a recipe that floods it can't grow Sandprobe's memory past that 4 KiB or write anything to disk (RCP-1).
 
 - The cap on a command's captured output now holds in memory. It was applied only to writes made one at a time, so
   a recipe, a box or a provider CLI that printed without end could grow Sandprobe's memory.
 
-- Managed Daytona runs: when the optional organization network-policy read fails, the artifact now says why, from a
-  fixed list (authentication, permission, endpoint availability, rate limit, request rejection, service availability,
-  timeout, transport, or a response the pinned SDK can't read), where it said `readback_unavailable` for almost every
-  failure. No error text, response body, URL, header or credential enters the artifact, and every failure still
-  leaves the policy unknown, with no enforcement claim (EVD-14).
+- Managed Daytona runs: when the optional organization network-policy read fails in a way Sandprobe recognizes, the
+  artifact now says which, from a fixed list (authentication, permission, endpoint availability, rate limit, request
+  rejection, service availability, timeout, transport, or a response the pinned SDK can't read). Any other failure
+  still reads `readback_unavailable`, which used to cover almost all of them. No error text, response body, URL,
+  header or credential enters the artifact, and every failure still leaves the policy unknown, with no enforcement
+  claim (EVD-14).
 
 ## 0.3.3 (2026-11-24)
 
