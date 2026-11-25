@@ -64,15 +64,16 @@ sandprobe fix round-0/*.json -platform modal            # you name the platform;
 
 Then apply the top action, create a new sandbox, run again into `round-1` (with `-as agent` once the agent has its own
 user), and `sandprobe compare round-0/*.json round-1/*.json`. It prints `Score: 0/6 → 3/6` and what "Got better";
-DNS and UDP 53 under `block_network=True` show as "No longer found, but not proven", which isn't a fix. The script's `round-1` and `round-2` setups are the
-fixes below.
+DNS and UDP 53 under `block_network=True` show as "No longer found, but not proven", which isn't a fix. The script's
+`round-1` and `round-2` setups are the fixes below.
 
 If the sandbox ended at its timeout before `rm`, `rm` finds no live sandbox with the tag and refuses, touching
 nothing. Once Modal shows that sandbox finished, delete the state file yourself. Exit 7 from any command means a
 sandbox may still run: it prints the ID, and the sandbox ends at its timeout.
 
-The bridge's guards were added after the three rounds below ran, and are tested only against a fake of Modal's SDK
-(`examples/modal/bridge_test.py`), not yet on Modal itself.
+This bridge, guards included, has run the whole loop live on Modal (24 November 2026): three rounds with the
+provider declared, 0/5 → 3/5 → 5/5, and every sandbox terminated with its termination confirmed. Its failure paths,
+which a live run can't reach on demand, are tested against a fake of Modal's SDK (`examples/modal/bridge_test.py`).
 
 `run exec` keeps SEC-4, EGR-3, AMP-6 and AMP-7 off, since each would contact an endpoint Modal owns. Leave them off:
 on Modal they are outside Sandprobe's reviewed scope. Without a declared provider, Cloud access reads "Not tested",
