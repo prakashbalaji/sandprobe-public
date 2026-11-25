@@ -3,7 +3,7 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.5 (2026-11-25)
 
 - The web report has a new layout and plainer words. It opens with one sheet: what was tested (the provider, in
   plain words, and the box's name), the Linux user the probe ran as, when it ran, the probe's version and that the
@@ -21,6 +21,33 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   English. They say the same things, and no field is added, removed or renamed, so the schema stays `sandprobe/6`
   (`sandprobe/7` with a recipe). If you match on those sentences, match on `grade`, `findings` or the score instead
   (GRD-4, SBX-10).
+
+- The experimental managed-workload evaluations (Daytona and AWS Nitro) can now test persistence on storage where
+  PER-5's usual marker file ends unknown. Two opt-in markers, chosen with `--persistence-marker symlink-v1` or
+  `--persistence-marker empty-file-v1`, check only metadata after the reset: a symbolic link whose text is the public
+  run ID, never followed, or an empty file whose name carries it, never opened. A marker that is still there is a
+  finding that run-owned metadata survived; it doesn't prove file contents or the same inode survived. A missing
+  marker is still "not found", never a pass, and a wrong type, a changed target, a non-empty file or a replacement
+  stays unknown. The default is unchanged: a regular marker file, checked by inode and length. An unknown selector, or
+  one on an ephemeral profile, is refused before anything is created. `sandprobe run` doesn't use these markers
+  (EVD-15, EVD-18).
+
+- `sandprobe compare` treats two reports whose persistence markers used different mechanisms as a changed setup
+  (EVD-15).
+
+- When no persistence marker could be placed at all, a run no longer resets the box just to reach the same unknown:
+  PER-5 keeps each placement's reason instead. Where a managed Daytona reset fails, its evidence can name the stage
+  that failed, from a fixed list; no provider error text is kept (EVD-18).
+
+- Managed Daytona reports now record that their excluded checks are excluded by the provider's terms, as
+  `sandprobe run daytona` does, so Cloud access reads not applicable in both and the workload score counts the same
+  categories. No excluded check is counted as measured or as a pass, and no scoring rule changed (EVD-16, EVD-17).
+
+- Managed Daytona runs read the optional organization network setting through the run's own sandbox
+  (`GET /sandbox/{sandboxId}/organization`), after checking that sandbox is the one the run created, where they used
+  the account-level read that answered 401. The response's organization must match and its setting must be a strict
+  boolean; any failure leaves the policy unknown, with no fallback. It is a configuration read, and never proves the
+  network is enforced (EVD-19).
 
 - Managed raw-evidence artifacts now declare `sandprobe.managed-evidence/2`, separately from public
   report schemas. This versions the optional host reset-stage diagnostics. Use the matching new managed
