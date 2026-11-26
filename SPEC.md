@@ -1131,6 +1131,14 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   schema and identity failures retain EVD-14's fixed unknown labels. The host-only artifact keeps its existing
   organization-default/configuration-only scope and schema; this is neither per-connection denial proof nor
   one of the 28 standard check outcomes.
+- **EVD-21 Bounded collection-failure diagnostics.** A host collection that stops before a report may retain
+  a source-fixed failure stage and its error chain for classification. Never serialize an arbitrary error string,
+  guest output or SDK response. Stage extraction returns only a closed label or `unknown`. Managed Daytona
+  keeps a failed collection separate from the completed functional workload: a versioned
+  `sandprobe.collection-failure/1` sidecar records the collection stage and bounded failure category, with
+  `assessment_available=false`. This file is not a report, grade, negative proof or permission to retry an
+  ambiguous provider operation. Nested known SDK status/guard and timeout/transport/schema errors keep their fixed category through host
+  wrapping. No collection selection, probe, grading, provider calls or cleanup rule changes.
 - **EVD-20 Versioned managed evidence.** New managed collectors wrap raw evidence in
   `schema: sandprobe.managed-evidence/2` for `standard-evidence.json` and the Nitro bridge's collection
   response. This version explicitly includes EVD-18's optional host reset failure stage. The public OUT-1
@@ -3804,6 +3812,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-19 | `test_organization_network_policy_uses_only_bound_sandbox` and `test_organization_policy_pinned_sdk_uses_explicit_sandbox_path`: fresh identity binding, exact sandbox GET, no account API/fallback, strict response identity/boolean and bounded failures |
+| EVD-21 | `TestCollectionFailureStageIsBounded` and `TestCollectionFailureSidecarIsBounded`: survey-stage cause retention, fixed stage extraction, nested SDK status/guard classification, no raw-error serialization and no emitted assessment |
 | EVD-20 | `TestManagedEvidenceVersion`, `TestWorkloadSummaryEvidenceVersion`, `test_managed_evidence_versions`: explicit v2 writers, legacy replay, unknown/null version rejection and no unversioned reset-stage downgrade |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |
 | EVD-16 | `TestManagedDaytonaPreservesNativeExclusionKind`: native kinds frozen before probe execution, identical selected/skipped sets, Cloud access not applicable but never green, and zero measured/conclusive credit for exclusions |

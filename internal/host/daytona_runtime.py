@@ -86,6 +86,13 @@ def organization_policy_failure(error):
     if isinstance(error,(HTTPError,TransportError)):return 'transport_unavailable'
     return 'readback_unavailable'
 
+def native_sdk_failure_label(error):
+    """EVD-21: exception types only; raw SDK details never become diagnostics."""
+    category=organization_policy_failure(error)
+    if category in ('request_timeout','transport_unavailable','response_schema_invalid'):
+        return 'sdk_'+category
+    return None
+
 def organization_network_policy(client,req):
     """EVD-19: one verified sandbox-ID organization read; never a denial verdict."""
     unknown=lambda reason:{'result':'unknown','reason':reason}
@@ -282,7 +289,7 @@ def main():
         code=getattr(e,'status',None)
         suffix=' HTTP '+str(code) if isinstance(code,int) and 100<=code<=599 else ''
         labels={'runtime not ready/approved':'runtime_proxy_guard','runtime identity changed':'runtime_identity_guard','identity/policy mismatch':'identity_policy_guard','execution failed/limit':'command_failed_or_output_limit','boot changed':'boot_guard','private path invalid':'upload_path_guard'}
-        label=labels.get(str(e),'unclassified_sdk_failure') if isinstance(e,ValueError) else 'unclassified_sdk_failure'
+        label=native_sdk_failure_label(e) or (labels.get(str(e),'unclassified_sdk_failure') if isinstance(e,ValueError) else 'unclassified_sdk_failure')
         sys.stdout.write(json.dumps({'error':'sdk_failure','failure_code':label,'http_status':code if isinstance(code,int) and 100<=code<=599 else 0}));return 1
     return 0
 if __name__=='__main__':sys.exit(main())

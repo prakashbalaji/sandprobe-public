@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +140,25 @@ func TestDaytonaCommandRecordsOneCall(t *testing.T) {
 		}
 		if b.Calls[0].Error != want || (err == nil) != (fail == nil) {
 			t.Fatal("wrong call classification", b.Calls[0])
+		}
+	}
+}
+
+func TestDaytonaSDKDiagnosticFramesAreBounded(t *testing.T) {
+	for _, code := range []string{"sdk_request_timeout", "sdk_transport_unavailable", "sdk_response_schema_invalid", "NEVER_EXPORT_SECRET"} {
+		path := filepath.Join(t.TempDir(), "fixture-interpreter")
+		frame, _ := json.Marshal(map[string]any{"failure_code": code, "error": "NEVER_EXPORT_PROVIDER_RESPONSE"})
+		script := "#!/bin/sh\nprintf '%s' '" + string(frame) + "'\nexit 1\n"
+		if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+		c, _ := NewDaytonaClient("fixture-key", path)
+		_, err := c.runSDK(context.Background(), map[string]any{"op": "lookup"})
+		if err == nil || strings.Contains(err.Error(), "NEVER_EXPORT") {
+			t.Fatal("raw bridge response escaped", err)
+		}
+		if strings.HasPrefix(code, "sdk_") && !strings.Contains(err.Error(), code) {
+			t.Fatal("fixed native diagnosis lost", err)
 		}
 	}
 }

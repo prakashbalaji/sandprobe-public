@@ -329,9 +329,22 @@ func workload(ctx context.Context, o options, b workloadBox) taskResult {
 }
 
 // Categories contain only source-fixed labels; never emit SDK/guest error text.
-var safeSDKFailure = regexp.MustCompile(`^Daytona (create|lookup|exec|upload|delete|snapshot) (?:HTTP ([1-5][0-9]{2})|refused: (runtime_proxy_guard|runtime_identity_guard|identity_policy_guard|command_failed_or_output_limit|boot_guard|upload_path_guard))$`)
+var safeSDKFailure = regexp.MustCompile(`^Daytona (create|lookup|exec|upload|delete|snapshot|volume_create|volume_lookup|volume_delete) (?:HTTP ([1-5][0-9]{2})|(?:refused|failed): (sdk_request_timeout|sdk_transport_unavailable|sdk_response_schema_invalid|runtime_proxy_guard|runtime_identity_guard|identity_policy_guard|command_failed_or_output_limit|boot_guard|upload_path_guard))$`)
 
 func failureCategory(e error) string {
+	if e == nil {
+		return "none"
+	}
+	for depth := 0; e != nil && depth < 16; depth++ {
+		if category := failureCategoryOne(e); category != "managed_step_failed" {
+			return category
+		}
+		e = errors.Unwrap(e)
+	}
+	return "managed_step_failed"
+}
+
+func failureCategoryOne(e error) string {
 	if e == nil {
 		return "none"
 	}
@@ -339,9 +352,14 @@ func failureCategory(e error) string {
 		if m[2] != "" {
 			return "sdk_http_" + m[2]
 		}
+		if strings.HasPrefix(m[3], "sdk_") {
+			return m[3]
+		}
 		return "bridge_" + m[3]
 	}
 	switch e.Error() {
+	case "Daytona SDK response invalid/oversized":
+		return "sdk_response_invalid"
 	case "Daytona local SDK interpreter unavailable":
 		return "local_sdk_unavailable"
 	case "Daytona workload configuration changed":
@@ -658,15 +676,19 @@ func execute(ctx context.Context, o options) (err error) {
 	}
 	var target host.Box = b
 	if volume != nil {
+		stage = "persistent-provider-binding"
 		persistent, e = host.NewDaytonaPersistentBox(ctx, b, bin)
 		if e != nil {
 			return e
 		}
 		target = persistent
 	}
+	stage = "standard-collection"
 	r, e := host.Execute(ctx, target, public, collection)
 	if e != nil {
-		return errors.New("standard configuration collection failed")
+		// EVD-21: persist only bounded diagnostics, never the error's text.
+		saveCollectionFailure(o.folder, e)
+		return fmt.Errorf("standard configuration collection failed: %w", e)
 	}
 	if persistent != nil {
 		if e = persistent.VerifyOriginalAfterCollection(ctx); e != nil {

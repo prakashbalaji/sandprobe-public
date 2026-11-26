@@ -5,6 +5,17 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('daytona_runtime',Path(__file__).with_name('daytona_runtime.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 SID='12345678-1234-1234-1234-123456789abc'
 class Tests(unittest.TestCase):
+ def test_native_sdk_failure_diagnostics_use_exception_types(self):
+  from pydantic import BaseModel,ValidationError
+  from httpx import ReadTimeout,ConnectError
+  class Fixture(BaseModel):enabled:bool
+  try:Fixture(enabled='NEVER_EXPORT_VALUE')
+  except ValidationError as error:schema_error=error
+  for error,label in ((ReadTimeout('NEVER_EXPORT_URL'),'sdk_request_timeout'),(ConnectError('NEVER_EXPORT_HEADERS'),'sdk_transport_unavailable'),(schema_error,'sdk_response_schema_invalid')):
+   self.assertEqual(m.native_sdk_failure_label(error),label)
+   self.assertNotIn('NEVER_EXPORT',m.native_sdk_failure_label(error))
+  self.assertIsNone(m.native_sdk_failure_label(ValueError('NEVER_EXPORT_PROVIDER_SECRET')))
+
  def test_organization_network_policy_uses_only_bound_sandbox(self):
   import types,copy
   org='22345678-1234-1234-1234-123456789abc'

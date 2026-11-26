@@ -179,17 +179,17 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 	}
 	out, err := b.Probe(ctx, []string{"-survey"}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("the survey didn't run: %w", err)
+		return nil, collectionFailed("survey_execution", fmt.Errorf("the survey didn't run: %w", err))
 	}
 	r := &Run{}
 	if r.Survey, err = obs.ParseSurvey(out); err != nil {
-		return nil, fmt.Errorf("the survey: %w", err)
+		return nil, collectionFailed("survey_decoding", fmt.Errorf("the survey: %w", err))
 	}
 	var st Storage
 	rs, resettable := b.(Resettable)
 	if resettable {
 		if st, err = rs.Storage(ctx); err != nil {
-			return nil, fmt.Errorf("the box's storage: %w", err)
+			return nil, collectionFailed("storage_inspection", fmt.Errorf("the box's storage: %w", err))
 		}
 	}
 	if o.NoCanary { // HCN-5: nothing is asked of any canary; its checks end unknown
@@ -201,10 +201,10 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 	live := err == nil && status.OK && pin != "" && kerr == nil
 	if o.CanaryTCP80Protocol != "" {
 		if !live {
-			return nil, fmt.Errorf("HTTP marker canary status unavailable")
+			return nil, collectionFailed("canary_status", fmt.Errorf("HTTP marker canary status unavailable"))
 		}
 		if err := requireHTTPMarkerForPin(ctx, c, pin); err != nil {
-			return nil, err
+			return nil, collectionFailed("canary_protocol", err)
 		}
 	}
 
@@ -215,12 +215,12 @@ func Execute(ctx context.Context, b Box, c Canary, o Options) (*Run, error) {
 	}
 	if m, ok := c.(interface{ MustArm() bool }); ok && m.MustArm() && !live {
 		// HCN-3: a public canary that didn't arm the run stops it before the probe; the adapter deletes the box
-		return nil, errors.New("the public canary didn't arm this run, so the probe didn't run (HCN-3)")
+		return nil, collectionFailed("canary_arm", errors.New("the public canary didn't arm this run, so the probe didn't run (HCN-3)"))
 	}
 	r.Box, r.Volumes = b, st.Volumes
 	in, err := json.Marshal(r.Input)
 	if err != nil {
-		return nil, err
+		return nil, collectionFailed("input_encoding", err)
 	}
 
 	h := startHealth(ctx, c, healthPorts(r.Manifest), key)

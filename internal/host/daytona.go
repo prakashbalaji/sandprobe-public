@@ -76,6 +76,8 @@ func (c *DaytonaClient) runSDK(ctx context.Context, in map[string]any) ([]byte, 
 			return nil, fmt.Errorf("Daytona %s HTTP %d", in["op"], problem.Status)
 		}
 		switch problem.Code {
+		case "sdk_request_timeout", "sdk_transport_unavailable", "sdk_response_schema_invalid":
+			return nil, fmt.Errorf("Daytona %s failed: %s", in["op"], problem.Code)
 		case "runtime_proxy_guard", "runtime_identity_guard", "identity_policy_guard", "command_failed_or_output_limit", "boot_guard", "upload_path_guard":
 			return nil, fmt.Errorf("Daytona %s refused: %s", in["op"], problem.Code)
 		}
