@@ -3,13 +3,11 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
-## Unreleased
+## 0.3.8 (2026-11-25)
 
 - A guide for [Docker Sandboxes](docs/providers/docker-sandboxes.md): `run exec` through `sbx exec`, with no new code.
   It says which categories read red by Docker's design, and why Exfiltration stayed unproven through Docker's proxy
   in the one sandbox checked (`sbx` 0.54.1, the `shell` template).
-
-## Unreleased
 
 - The probe no longer gives up when the kernel leaves `NoNewPrivs` out of `/proc/self/status`, as GKE's gVisor does,
   which made every run on GKE Agent Sandbox invalid. AMP-3 is then unknown, never a pass or a finding, and AMP-2 treats
