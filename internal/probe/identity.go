@@ -55,11 +55,12 @@ func parseStatus(b []byte) (*obs.Identity, error) {
 			id.CapBnd = v
 		case "CapAmb":
 			id.CapAmb = v
-		case "NoNewPrivs":
+		case "NoNewPrivs": // absent is the kernel's silence (SBX-4); present, it must be 0 or 1
 			n, err := strconv.Atoi(v)
-			if err == nil {
-				id.NoNewPrivs = &n
+			if err != nil || (n != 0 && n != 1) {
+				return nil, errors.New("/proc/self/status reports a NoNewPrivs that isn't 0 or 1")
 			}
+			id.NoNewPrivs = &n
 		case "Seccomp":
 			id.Seccomp, _ = strconv.Atoi(v)
 		}

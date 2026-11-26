@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -495,8 +496,12 @@ func TestRunGrades(t *testing.T) {
 	for _, o := range r.Outcomes {
 		t.Logf("%-10s %-10s %-22s %s%s", o.ID, o.Result, o.Variant, o.Evidence, o.Reason)
 	}
-	t.Logf("grade %s complete=%v (uid %d, NoNewPrivs %d, setuid %d files)", r.Letter, r.Complete, d.Identity.UID,
-		*d.Identity.NoNewPrivs, len(d.Identity.SetuidScan.Files))
+	nnp := "absent"
+	if d.Identity.NoNewPrivs != nil {
+		nnp = strconv.Itoa(*d.Identity.NoNewPrivs)
+	}
+	t.Logf("grade %s complete=%v (uid %d, NoNewPrivs %s, setuid %d files)", r.Letter, r.Complete, d.Identity.UID,
+		nnp, len(d.Identity.SetuidScan.Files))
 	get := func(id string) grade.Outcome {
 		for _, o := range r.Outcomes {
 			if o.ID == id {

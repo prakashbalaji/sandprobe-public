@@ -17,6 +17,11 @@ func TestParseStatusWithoutNoNewPrivs(t *testing.T) {
 	if err != nil || id.NoNewPrivs == nil || *id.NoNewPrivs != 1 {
 		t.Fatalf("with NoNewPrivs: %+v %v", id, err)
 	}
+	for _, bad := range []string{"NoNewPrivs:\t\n", "NoNewPrivs:\tx\n", "NoNewPrivs:\t2\n", "NoNewPrivs:\t-1\n"} {
+		if _, err := parseStatus([]byte(gvisor + bad)); err == nil {
+			t.Errorf("%q read as absent or valid", bad)
+		}
+	}
 	if _, err := parseStatus([]byte("Uid:\t0\t0\t0\t0\n")); err == nil {
 		t.Fatal("a status without CapEff was accepted")
 	}
