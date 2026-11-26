@@ -2,6 +2,8 @@
 
 Sandprobe answers one question about an AI agent's sandbox: **what could a hijacked agent reach?**
 
+Website, sample report and agent guide: **[probe.agent.cloud](https://probe.agent.cloud)**
+
 A small, read-only probe runs inside the box, as the agent. In about a minute it checks four things: secrets it can
 read, ways out, persistence that survives a reset, and amplifiers such as sudo, capabilities and control sockets.
 The host then grades the box from what was proven, and writes a JSON report and a self-contained HTML page.
