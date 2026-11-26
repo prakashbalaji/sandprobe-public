@@ -3,6 +3,11 @@
 Every release lists what changed for someone using Sandprobe. Dates are in Pacific Time. Each release's files and
 their build attestations are on [GitHub Releases](https://github.com/summationai/sandprobe/releases).
 
+## Unreleased
+
+- A guide for [GKE Agent Sandbox](docs/providers/gke-agent-sandbox.md): `run exec` through `kubectl exec`, from 0.3.8.
+  It says what one sandbox made from Google's example showed, and why a NetworkPolicy's dropped traffic reads unproven.
+
 ## 0.3.8 (2026-11-25)
 
 - A guide for [Docker Sandboxes](docs/providers/docker-sandboxes.md): `run exec` through `sbx exec`, with no new code.

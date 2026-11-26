@@ -132,6 +132,7 @@ says what that check can't rule out. If the provider can't confirm a box gone, t
 | [Baseten](docs/providers/baseten.md) | `run baseten`, a native adapter | Beta |
 | [Modal](docs/providers/modal.md) | `run modal`, Modal's defaults; `run exec` through a [bridge script](examples/modal/bridge.py) for a sandbox of your own | Beta |
 | [Docker Sandboxes](docs/providers/docker-sandboxes.md) | `run exec` through `sbx exec` | Beta |
+| [GKE Agent Sandbox](docs/providers/gke-agent-sandbox.md) | `run exec` through `kubectl exec`, 0.3.8 or later | Beta |
 | [Boat](docs/providers/boat.md), [exe.dev](docs/providers/exedev.md) | `run boat`, `run exe.dev`, native adapters | Experimental: a live run needs the operator's informed authorization (Boat, PRV-11) or own clearance (exe.dev, PRV-13), never represented as provider-written permission |
 
 The status is for 0.3.0 and is being validated. [docs/providers](docs/providers/README.md) is the single source for
