@@ -158,11 +158,8 @@ func validate(m obs.Manifest, d *obs.Doc) error {
 	case d.Identity == nil:
 		return errors.New("the probe didn't report who it ran as (SBX-4)")
 	}
-	if _, err := strconv.ParseUint(d.Identity.CapEff, 16, 64); err != nil {
-		return fmt.Errorf("CapEff %q isn't a capability set", d.Identity.CapEff)
-	}
-	if n := d.Identity.NoNewPrivs; n == nil || (*n != 0 && *n != 1) {
-		return errors.New("NoNewPrivs must be reported, as 0 or 1")
+	if err := identitySound(d.Identity); err != nil {
+		return err
 	}
 	if s := d.Identity.SetuidScan; s != nil && len(s.Files) > 256 {
 		return errors.New("more than 256 setuid files")
@@ -433,6 +430,9 @@ func amp3(who *obs.Identity) (result, variant, reason, evidence string) {
 	const graded = "graded by the host from the probe's identity"
 	scan := who.SetuidScan
 	switch {
+	case who.NoNewPrivs == nil: // SBX-4: never a pass, and never a finding either, since NoNewPrivs 1 would rule it out
+		return obs.Unknown, "", "the kernel's /proc/self/status doesn't report NoNewPrivs, so whether an execve could raise " +
+			"privilege can't be told", graded
 	case *who.NoNewPrivs == 1:
 		return obs.Pass, "", "", graded + ": NoNewPrivs is 1, so no setuid file or file capability can raise privilege, whatever exists"
 	case scan == nil || !scan.Complete:
@@ -458,7 +458,11 @@ func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 	inh, inhErr := strconv.ParseUint(who.CapInh, 16, 64)
 	held := eff | prm | amb
 	ev := "the agent holds " + capSets(eff, held)
-	if more := inh &^ held; *who.NoNewPrivs == 0 && inhErr == nil && more != 0 {
+	nnpOff, nnpSaid := who.NoNewPrivs == nil || *who.NoNewPrivs == 0, "NoNewPrivs is 0" // not reported counts as maybe off (SBX-4)
+	if who.NoNewPrivs == nil {
+		nnpSaid = "the kernel doesn't report NoNewPrivs"
+	}
+	if more := inh &^ held; nnpOff && inhErr == nil && more != 0 {
 		ev += "; its inheritable set adds " + strings.Join(catalog.CapList(more), ", ") +
 			", which an execve of a file whose file capabilities name them would make permitted"
 	}
@@ -473,11 +477,11 @@ func amp2(who *obs.Identity) (result, variant, reason, evidence string) {
 		return obs.Finding, "other_caps", "", ev
 	case prmErr != nil:
 		return obs.Unknown, "", "the identity doesn't report CapPrm, so capabilities the agent could raise can't be told", ""
-	case *who.NoNewPrivs == 0 && inhErr != nil:
-		return obs.Unknown, "", "NoNewPrivs is 0 and the identity doesn't report CapInh, so capabilities an execve " +
+	case nnpOff && inhErr != nil:
+		return obs.Unknown, "", nnpSaid + " and the identity doesn't report CapInh, so capabilities an execve " +
 			"could make permitted can't be told", ""
-	case *who.NoNewPrivs == 0 && inh != 0:
-		return obs.Unknown, "", "NoNewPrivs is 0 and the agent's inheritable set holds " +
+	case nnpOff && inh != 0:
+		return obs.Unknown, "", nnpSaid + " and the agent's inheritable set holds " +
 			strings.Join(catalog.CapList(inh), ", ") + ", which an execve of a file whose file capabilities name them " +
 			"would make permitted; the probe doesn't look for such files", ""
 	}
@@ -802,4 +806,16 @@ func letter(fs []Finding) string {
 
 func targetAbsent(t obs.Target) bool {
 	return t.State == "absent" && t.Errno == "ENOENT" && t.ParentSearchable
+}
+
+// identitySound is SBX-4's check of the probe's identity: CapEff a capability set, NoNewPrivs 0 or 1 when the kernel
+// reported it, and absent when it didn't (GKE's gVisor), which the checks read as unknown.
+func identitySound(id *obs.Identity) error {
+	if _, err := strconv.ParseUint(id.CapEff, 16, 64); err != nil {
+		return fmt.Errorf("CapEff %q isn't a capability set", id.CapEff)
+	}
+	if n := id.NoNewPrivs; n != nil && *n != 0 && *n != 1 {
+		return errors.New("NoNewPrivs, when reported, must be 0 or 1")
+	}
+	return nil
 }

@@ -333,3 +333,18 @@ func TestNativeSnapshotCannotEarnConformance(t *testing.T) {
 		t.Fatal("missing explicit image coverage")
 	}
 }
+
+// SBX-4: a workload identity without NoNewPrivs is unknown, never a configuration finding or a met requirement.
+func TestWorkloadNoNewPrivsAbsent(t *testing.T) {
+	m, d, c := workloadCase()
+	d.Identity.NoNewPrivs = nil
+	r := runWorkload(m, d, c, "reported_passed")
+	if !slices.Contains(r.Unknown, "identity-no-new-privileges") || r.BenchmarkRequirementsMet || r.Complete {
+		t.Fatalf("absent NoNewPrivs: %+v", r)
+	}
+	for _, c := range r.Controls {
+		if c.ID == "identity-configuration" {
+			t.Errorf("absent NoNewPrivs read as a configuration finding: %+v", c)
+		}
+	}
+}

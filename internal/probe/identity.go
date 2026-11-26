@@ -22,6 +22,16 @@ func readIdentity() (*obs.Identity, error) {
 	if err != nil {
 		return nil, err
 	}
+	id, err := parseStatus(b)
+	if err != nil {
+		return nil, err
+	}
+	id.SetuidScan = setuidScan()
+	return id, nil
+}
+
+// parseStatus reads the identity fields of /proc/self/status (SBX-4).
+func parseStatus(b []byte) (*obs.Identity, error) {
 	id := &obs.Identity{}
 	for _, line := range strings.Split(string(b), "\n") {
 		k, v, ok := strings.Cut(line, ":")
@@ -45,19 +55,19 @@ func readIdentity() (*obs.Identity, error) {
 			id.CapBnd = v
 		case "CapAmb":
 			id.CapAmb = v
-		case "NoNewPrivs":
+		case "NoNewPrivs": // absent is the kernel's silence (SBX-4); present, it must be 0 or 1
 			n, err := strconv.Atoi(v)
-			if err == nil {
-				id.NoNewPrivs = &n
+			if err != nil || (n != 0 && n != 1) {
+				return nil, errors.New("/proc/self/status reports a NoNewPrivs that isn't 0 or 1")
 			}
+			id.NoNewPrivs = &n
 		case "Seccomp":
 			id.Seccomp, _ = strconv.Atoi(v)
 		}
 	}
-	if id.CapEff == "" || id.NoNewPrivs == nil {
-		return nil, errors.New("/proc/self/status lacks CapEff or NoNewPrivs")
+	if id.CapEff == "" { // SBX-4: a kernel may leave NoNewPrivs out (GKE's gVisor does); the grader reads that as unknown
+		return nil, errors.New("/proc/self/status lacks CapEff")
 	}
-	id.SetuidScan = setuidScan()
 	return id, nil
 }
 

@@ -9,6 +9,12 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
   It says which categories read red by Docker's design, and why Exfiltration stayed unproven through Docker's proxy
   in the one sandbox checked (`sbx` 0.54.1, the `shell` template).
 
+## Unreleased
+
+- The probe no longer gives up when the kernel leaves `NoNewPrivs` out of `/proc/self/status`, as GKE's gVisor does,
+  which made every run on GKE Agent Sandbox invalid. AMP-3 is then unknown, never a pass or a finding, and AMP-2 treats
+  it as possibly 0 (SBX-4).
+
 ## 0.3.7 (2026-11-25)
 
 - `sandprobe run modal -y` is built in. It makes one Modal Sandbox with Modal's defaults in the workspace

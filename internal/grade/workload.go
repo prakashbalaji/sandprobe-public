@@ -96,7 +96,11 @@ func WorkloadGrade(m obs.Manifest, raw []byte, evidence *obs.CanaryEvidence, wor
 			add("image-content-binding", "required", obs.Unknown, "Native snapshot identity does not verify immutable image bytes; no OCI content verification is available.")
 		}
 	}
-	identityMismatch := d.Identity.UID != uid || d.Identity.GID != gid || d.Identity.Seccomp != 2 || d.Identity.NoNewPrivs == nil || *d.Identity.NoNewPrivs != 1
+	identityMismatch := d.Identity.UID != uid || d.Identity.GID != gid || d.Identity.Seccomp != 2 ||
+		(d.Identity.NoNewPrivs != nil && *d.Identity.NoNewPrivs != 1)
+	if d.Identity.NoNewPrivs == nil { // SBX-4: the kernel didn't say, so it is neither proof nor a mismatch
+		add("identity-no-new-privileges", "required", obs.Unknown, "The kernel didn't report NoNewPrivs, so no-new-privileges can't be confirmed.")
+	}
 	identityIncomplete := false
 	for _, set := range []string{d.Identity.CapEff, d.Identity.CapInh, d.Identity.CapPrm, d.Identity.CapBnd, d.Identity.CapAmb} {
 		caps, err := strconv.ParseUint(set, 16, 64)

@@ -300,8 +300,7 @@ func TestInvalidRuns(t *testing.T) {
 		"AMP-3 finding with NoNewPrivs set": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
 			add(d, obs.Observation{ID: "AMP-3", Result: obs.Finding, Variant: "new_privs"})
 		},
-		"NoNewPrivs missing": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.NoNewPrivs = nil },
-		"NoNewPrivs 2":       func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.NoNewPrivs = ptr(2) },
+		"NoNewPrivs 2": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) { d.Identity.NoNewPrivs = ptr(2) },
 		"AMP-3 passing while the setuid scan failed": func(m *obs.Manifest, d *obs.Doc, c **obs.CanaryEvidence) {
 			d.Identity.NoNewPrivs, d.Identity.SetuidScan = ptr(0), &obs.SetuidScan{Complete: false}
 			add(d, obs.Observation{ID: "AMP-3", Result: obs.Pass})
@@ -888,6 +887,10 @@ func TestAMP2CapabilitySets(t *testing.T) {
 		{"no CapInh, NoNewPrivs 0", 1000, none, none, "", none, &zero, obs.Unknown, "", "doesn't report CapInh"},
 		{"no CapInh, NoNewPrivs 1", 1000, none, none, "", none, &one, obs.Pass, "", "no capability held"},
 		{"root", 0, none, none, none, none, &one, obs.Finding, "root", "uid 0"},
+		// SBX-4: a kernel that doesn't report NoNewPrivs (GKE's gVisor) counts as possibly 0
+		{"no NoNewPrivs, nothing held", 1000, none, none, none, none, nil, obs.Pass, "", "no capability held"},
+		{"no NoNewPrivs, inheritable", 1000, none, none, drs, none, nil, obs.Unknown, "", "doesn't report NoNewPrivs and the agent's inheritable set"},
+		{"no NoNewPrivs, no CapInh", 1000, none, none, "", none, nil, obs.Unknown, "", "doesn't report NoNewPrivs and the identity doesn't report CapInh"},
 	} {
 		id := &obs.Identity{UID: tc.uid, CapEff: tc.eff, CapPrm: tc.prm, CapInh: tc.inh, CapAmb: tc.amb, NoNewPrivs: tc.nnp}
 		res, v, why, ev := derive("AMP-2", id)
@@ -923,6 +926,9 @@ func TestAMP3NewPrivs(t *testing.T) {
 		{"an incomplete scan", 1000, none, none, &zero, &obs.SetuidScan{}, obs.Unknown, "", "setuid scan didn't complete"},
 		{"no scan", 1000, none, none, &zero, nil, obs.Unknown, "", "setuid scan didn't complete"},
 		{"setuid-root files with NoNewPrivs 1", 1000, none, docker, &one, setuid, obs.Pass, "", "NoNewPrivs is 1"},
+		// SBX-4: not reported is never a pass, nor a finding, since NoNewPrivs 1 would rule the files out
+		{"no NoNewPrivs, no setuid files", 1000, none, none, nil, clean, obs.Unknown, "", "doesn't report NoNewPrivs"},
+		{"no NoNewPrivs, setuid-root files", 1000, none, docker, nil, setuid, obs.Unknown, "", "doesn't report NoNewPrivs"},
 	} {
 		id := &obs.Identity{UID: tc.uid, CapEff: none, CapPrm: tc.prm, CapInh: none, CapBnd: tc.bnd, CapAmb: none,
 			NoNewPrivs: tc.nnp, SetuidScan: tc.scan}
@@ -930,8 +936,22 @@ func TestAMP3NewPrivs(t *testing.T) {
 		if res != tc.result || v != tc.variant || !strings.Contains(why+ev, tc.mentions) {
 			t.Errorf("%s: want %s %s mentioning %q, got %s %s %q %q", tc.name, tc.result, tc.variant, tc.mentions, res, v, why, ev)
 		}
-		if *tc.nnp == 0 && res == obs.Pass {
+		if (tc.nnp == nil || *tc.nnp == 0) && res == obs.Pass {
 			t.Errorf("%s: AMP-3 passed with NoNewPrivs 0", tc.name)
+		}
+	}
+}
+
+// SBX-4: a document without NoNewPrivs is sound, and its value, when reported, is 0 or 1.
+func TestNoNewPrivsAbsent(t *testing.T) {
+	two := 2
+	for _, tc := range []struct {
+		nnp *int
+		ok  bool
+	}{{nil, true}, {&two, false}} {
+		err := identitySound(&obs.Identity{CapEff: "0000000000000000", NoNewPrivs: tc.nnp})
+		if (err == nil) != tc.ok {
+			t.Errorf("NoNewPrivs %v: %v", tc.nnp, err)
 		}
 	}
 }
