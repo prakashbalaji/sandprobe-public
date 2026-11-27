@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -120,6 +121,10 @@ func run(ctx context.Context, in io.Reader, out io.Writer) (err error) {
 	doc := report.BuildLegacy(r, report.Meta{Version: "0.1.0", Provider: "aws-nitro", BoxName: q.Pod.Name,
 		CreatedBySandprobe: true, StartedAt: start, Duration: time.Since(start), Calls: calls, Cleanup: "pending",
 		Residual: residual + "UID-checked name addressing retains a check-to-call race. Final exact-ID cleanup is recorded separately by the managed runner. Standard checks use the shared hosted canary. " + host.PublicCanaryRetention})
+	// EVD-22: supplementary context must not discard a completed assessment.
+	if host.SaveMeasurementPrerequisites(filepath.Dir(q.CanaryState), r) != nil {
+		fmt.Fprintln(os.Stderr, "measurement prerequisites unavailable")
+	}
 	html, err := report.HTML(doc, "dark")
 	if err != nil {
 		return errors.New("standard report rendering failed")

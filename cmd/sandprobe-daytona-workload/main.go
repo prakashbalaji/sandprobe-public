@@ -721,6 +721,10 @@ func execute(ctx context.Context, o options) (err error) {
 	if e = saveBytes(o.folder, "legacy-standard-report.html", page); e != nil {
 		return e
 	}
+	// EVD-22: supplementary context must not discard a completed assessment.
+	if host.SaveMeasurementPrerequisites(o.folder, r) != nil {
+		fmt.Fprintln(os.Stderr, "measurement prerequisites unavailable")
+	}
 	bundle := report.NewManagedEvidence(d, string(r.Doc), r.Evidence, r.Input, "")
 	if e = save(o.folder, "standard-evidence.json", bundle); e != nil {
 		return e
