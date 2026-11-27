@@ -42,12 +42,23 @@ func MeasurementGapPlan(d Doc, p *obs.MeasurementPrerequisites) (GapPlan, error)
 		}
 		plan.Prerequisites = "matching_guest_reported_survey"
 	}
+
+	unknown := map[string]bool{}
+	for _, id := range d.Grade.Unknown {
+		if _, ok := catalog.Get(id); !ok || unknown[id] {
+			return GapPlan{}, bad
+		}
+		unknown[id] = true
+	}
 	seen := map[string]bool{}
 	for _, ck := range d.Checks {
 		if _, ok := catalog.Get(ck.ID); !ok || seen[ck.ID] {
 			return GapPlan{}, bad
 		}
 		seen[ck.ID] = true
+		if unknown[ck.ID] != (ck.Result == obs.Unknown) {
+			return GapPlan{}, bad
+		}
 		g := MeasurementGap{ID: ck.ID, Result: ck.Result, Requirements: []GapRequirement{}}
 		add := func(code, status string) { g.Requirements = append(g.Requirements, GapRequirement{code, status}) }
 		switch ck.Result {
@@ -116,7 +127,9 @@ func MeasurementGapPlan(d Doc, p *obs.MeasurementPrerequisites) (GapPlan, error)
 				g.Next = "Require valid signed delivery evidence or the check's defined negative proof. Connected sockets, TLS resets, unsigned HTTP errors and no receipts alone are inconclusive; preserve required workload networking."
 			}
 		case "EGR-4":
-			g.Next = "No interception was observed. This find-only result cannot prove that interception is impossible."
+			if ck.Result == obs.NotFound {
+				g.Next = "No interception was observed. This find-only result cannot prove that interception is impossible."
+			}
 		case "AMP-1":
 			g.Next = "A sudo listing can hide rules under listpw. Stronger effective-policy evidence is needed; never execute a privileged command to manufacture proof."
 		}

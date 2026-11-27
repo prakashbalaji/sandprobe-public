@@ -10,6 +10,7 @@ import (
 
 func TestGapPlan(t *testing.T) {
 	d := doc(obs.Pass, map[string]Check{"SEC-4": {Result: obs.Skipped}, "EGR-3": {Result: obs.Skipped}, "AMP-6": {Result: obs.Skipped}, "AMP-7": {Result: obs.Skipped}, "AMP-8.blk": {Result: obs.ScopedOut}, "EGR-2": {Result: obs.Unknown}, "EGR-5.80": {Result: obs.Unknown}, "EGR-1": {Result: obs.NotFound}})
+	d.Grade.Unknown = []string{"EGR-2", "EGR-5.80"}
 	for i := range d.Checks {
 		d.Checks[i].Reason = "NEVER_EXPORT_SECRET"
 		d.Checks[i].Evidence = "NEVER_EXPORT_GUEST_TEXT"
@@ -67,6 +68,11 @@ func TestGapPlan(t *testing.T) {
 	if _, err = MeasurementGapPlan(d, p); err == nil {
 		t.Fatal("accepted arbitrary enum")
 	}
+	contradicted := d
+	contradicted.Grade.Unknown = nil
+	if _, err = MeasurementGapPlan(contradicted, nil); err == nil {
+		t.Fatal("accepted contradictory unknown list")
+	}
 	bad := d
 	bad.Grade.Valid = false
 	if _, err = MeasurementGapPlan(bad, nil); err == nil {
@@ -77,5 +83,24 @@ func TestGapPlan(t *testing.T) {
 	bad.Checks[0] = bad.Checks[1]
 	if _, err = MeasurementGapPlan(bad, nil); err == nil {
 		t.Fatal("accepted duplicate")
+	}
+}
+
+func TestGapPlanDoesNotInventAnInterceptionObservation(t *testing.T) {
+	d := doc(obs.NotFound, nil)
+	d.Grade.Unknown = []string{"EGR-4"}
+	for i := range d.Checks {
+		if d.Checks[i].ID == "EGR-4" {
+			d.Checks[i].Result = obs.Unknown
+		}
+	}
+	plan, err := MeasurementGapPlan(d, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range plan.Gaps {
+		if g.ID == "EGR-4" && strings.Contains(g.Next, "No interception was observed") {
+			t.Fatal("invented a negative observation")
+		}
 	}
 }
