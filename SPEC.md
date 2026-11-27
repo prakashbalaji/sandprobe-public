@@ -1131,6 +1131,20 @@ must distinguish permitted workload capabilities from violations of the sandbox'
   schema and identity failures retain EVD-14's fixed unknown labels. The host-only artifact keeps its existing
   organization-default/configuration-only scope and schema; this is neither per-connection denial proof nor
   one of the 28 standard check outcomes.
+- **EVD-22 Measurement prerequisites and gap plans.** Managed collectors may persist a separate
+  `sandprobe.measurement-prerequisites/1` sidecar from the existing original-agent survey. It records only
+  source-fixed proxy configuration, Kubernetes-target presence and vsock-device presence labels, bound to the
+  frozen run ID, nonce, box ID and probe digest. No extra survey, provider call, address, proxy credential or
+  environment value is collected. Survey absence is an error, never a negative prerequisite result. Write it
+  privately, without following or replacing an existing destination; failure emits only a fixed diagnostic and
+  must not discard the standard assessment. It is guest-reported prerequisite context, never isolation proof.
+  Offline `gaps <report.json> [<prerequisites.json>]` emits a separate versioned gap plan from a structurally
+  valid saved report and, optionally, a strict matching sidecar. Missing sidecars mean not recorded, never absent.
+  Exclusion scope, missing features and unimplemented measurement remain independent requirements; notably
+  AMP-6 is unimplemented even with a device. Not-found and unknown results retain their proof limitations.
+  Reject invalid assessments, malformed/mismatched sidecars and unsupported enums. Emit only catalog check IDs,
+  result enums and source-fixed guidance, never arbitrary reasons, paths, addresses or SDK text. Neither saved
+  input is authenticated by offline analysis. No grades, outcomes, selection, exclusions or workload settings change.
 - **EVD-21 Bounded collection-failure diagnostics.** A host collection that stops before a report may retain
   a source-fixed failure stage and its error chain for classification. Never serialize an arbitrary error string,
   guest output or SDK response. Stage extraction returns only a closed label or `unknown`. Managed Daytona
@@ -3812,6 +3826,7 @@ Fake secrets hold only `sandprobe-fake` and nothing secret is ever planted.
 | EVD-5 | shared configuration evidence schema, exact image-identity fixtures, Nitro guard and Daytona unavailable-evidence artifact |
 | EVD-11 | pinned-SDK exact organization path and binding/error fixtures; host response sanitization and artifact shape validation tests |
 | EVD-19 | `test_organization_network_policy_uses_only_bound_sandbox` and `test_organization_policy_pinned_sdk_uses_explicit_sandbox_path`: fresh identity binding, exact sandbox GET, no account API/fallback, strict response identity/boolean and bounded failures |
+| EVD-22 | `TestMeasurementPrerequisites`, `TestGapPlan`, `TestGapPrerequisiteInput`, and `TestGapsCommand`: masked prerequisites, independent scope/implementation gates, unchanged outcomes, private exclusive writes, strict binding/schema/enum rejection and bounded offline output |
 | EVD-21 | `TestCollectionFailureStageIsBounded` and `TestCollectionFailureSidecarIsBounded`: survey-stage cause retention, fixed stage extraction, nested SDK status/guard classification, no raw-error serialization and no emitted assessment |
 | EVD-20 | `TestManagedEvidenceVersion`, `TestWorkloadSummaryEvidenceVersion`, `test_managed_evidence_versions`: explicit v2 writers, legacy replay, unknown/null version rejection and no unversioned reset-stage downgrade |
 | EVD-14 | `test_organization_policy_failure_categories_are_bounded`, `TestOrganizationPolicyFailureReasons`, and `TestDaytonaOrganizationPolicyFailureReasons`: pinned SDK exception categories, raw-data rejection and unchanged unknown/configuration-only semantics |

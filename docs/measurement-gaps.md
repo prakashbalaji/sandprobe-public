@@ -52,3 +52,27 @@ Managed raw-evidence artifacts have a separate compatibility boundary from publi
 from 0.3.4 or earlier doesn't check the version: it refuses an envelope that carries a reset stage, but its Nitro replay
 drops the `schema` field and accepts a version2 envelope with no stage as if it were unversioned. Historical unversioned envelopes are legacy version1
 and remain replayable without the new diagnostic. This does not change OUT-1 or authenticate saved evidence.
+
+## Generate a gap plan
+
+```sh
+sandprobe gaps /path/to/legacy-standard-report.json -o json
+sandprobe gaps /path/to/legacy-standard-report.json /path/to/measurement-prerequisites.json -o json
+```
+
+This is offline structural analysis, not a fresh assessment or authentication of either saved input. It lists
+scope, feature and implementation prerequisites independently, plus the proof needed for inconclusive rows.
+For example, an excluded AMP-6 still needs an implemented host-connectivity measurement even if the survey
+reports a vsock device. A scope exclusion does not establish that a proxy or Kubernetes target exists.
+
+Managed Nitro and Daytona collectors now write `measurement-prerequisites.json` from their existing original-agent
+survey. The separate private artifact contains fixed labels and run/probe bindings, without environment values,
+proxy credentials or target addresses. No extra provider requests are made. A write failure warns with a fixed
+message and leaves the standard assessment intact. The report and managed-evidence schemas are unchanged.
+Old assessments do not have this file: omit it, and the plan says **not recorded**, never absent. Do not reconstruct
+an excluded prerequisite from an empty manifest target: the host deliberately removed that target before probing.
+A mismatched, edited, partial or unsupported sidecar is refused. A structurally matching file is still unauthenticated.
+
+`gaps` adds no endpoint opt-in, network exception, device or privilege. Its exit status follows the saved assessment:
+0 for a valid complete assessment, 5 for a valid incomplete assessment, and 2 for unsupported/unsafe inputs.
+Successful generation does not mean that every check ran, or that the gaps can all be closed on the current provider.

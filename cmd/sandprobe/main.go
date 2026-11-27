@@ -171,6 +171,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		code, err = offline(o, positional, cmd == "compare")
 	case "assess":
 		code, err = assessSaved(o, positional)
+	case "gaps":
+		code, err = gaps(o, positional)
 	case "scorecard":
 		code, err = scorecard(o, r, positional)
 	case "canary":
@@ -254,6 +256,7 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
   sandprobe cleanup baseten -baseten-state <journal> -y  verify/delete a retained sandbox
   sandprobe cleanup exe.dev -exedev-state <journal> -y   reconcile a recorded VM
   sandprobe scorecard <report.json>  the six-category score of a saved report; -out <dir> re-renders its page (offline)
+  sandprobe gaps <report.json> [<prerequisites.json>]  prerequisite and proof gaps (offline)
   sandprobe profile <report.json>  five-area coverage of a saved report (offline)
   sandprobe assess <report.json> canary-egress-deny-v1  retrospective six-route assessment (offline)
   sandprobe compare <a> <b>        compare saved findings/coverage (offline)
