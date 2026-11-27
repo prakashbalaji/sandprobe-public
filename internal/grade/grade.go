@@ -96,6 +96,10 @@ func Grade(m obs.Manifest, d *obs.Doc, c *obs.CanaryEvidence) Report {
 		case ck.Canary != nil:
 			oc = canary(ck, o, m, d, c, seen)
 		case o.Result == obs.Pass || o.Result == obs.Absent:
+			if why := processRefusalCapabilityReason(ck, o, d.Identity); why != "" {
+				oc = unknown(why)
+				break
+			}
 			if why := holds(ck, o, m); why != "" {
 				oc = unknown("the proof doesn't hold: " + why)
 				break
